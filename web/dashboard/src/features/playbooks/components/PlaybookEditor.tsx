@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   ReactFlow,
@@ -69,8 +69,11 @@ import {
   RotateCcw,
   Variable,
   Rocket,
+  Activity,
+  BarChart3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from '@/components/ui/toaster';
 
 import {
   TriggerNode,
@@ -92,6 +95,13 @@ import { LabeledEdge } from './edges';
 import { NodePalette } from './NodePalette';
 import { ExecutionHistory, ExecutionRun, ExecutionLog } from './ExecutionHistory';
 import { VariablePanel, PlaybookVariable } from './VariablePanel';
+import { ExecutionPanel } from './execution';
+import { ProcessingMonitor } from './monitoring/ProcessingMonitor';
+import { TemplateEditor } from './editor';
+import { useExecutionWebSocket, useNodeOutputSchema, useProcessingMetrics } from '../hooks';
+import { useExecutionStore } from '../stores/executionStore';
+import { useProcessingStore } from '../stores/processingStore';
+import { mockWebSocketService } from '../services/mockWebSocketService';
 
 // Node type configuration
 const nodeTypes = {
@@ -184,119 +194,402 @@ const sampleVariables: PlaybookVariable[] = [
   },
 ];
 
-// Example initial playbook
-const initialNodes: Node[] = [
-  {
-    id: '1',
-    type: 'trigger',
-    position: { x: 400, y: 50 },
-    data: {
-      label: 'Malware Alert',
-      triggerType: 'alert',
-      description: 'High severity malware detection',
-      status: 'active',
-    } as any,
+// Playbook flow definitions - each playbook has unique nodes and edges
+const playbookFlows: Record<string, { nodes: Node[]; edges: Edge[] }> = {
+  // PB-001: Malware Response
+  'PB-001': {
+    nodes: [
+      {
+        id: '1',
+        type: 'trigger',
+        position: { x: 400, y: 50 },
+        data: { label: 'Malware Alert', triggerType: 'alert', description: 'High severity malware detection', status: 'active' } as any,
+      },
+      {
+        id: '2',
+        type: 'action',
+        position: { x: 380, y: 280 },
+        data: { label: 'Enrich IOCs', actionType: 'custom', description: 'Query threat intelligence' } as any,
+      },
+      {
+        id: '3',
+        type: 'decision',
+        position: { x: 355, y: 500 },
+        data: { label: 'Severity Check', condition: 'severity >= critical', outcomes: { yes: 'Critical', no: 'Standard' } } as any,
+      },
+      {
+        id: '4',
+        type: 'action',
+        position: { x: 150, y: 750 },
+        data: { label: 'Isolate Endpoint', actionType: 'isolate', description: 'Network isolation' } as any,
+      },
+      {
+        id: '5',
+        type: 'integration',
+        position: { x: 560, y: 750 },
+        data: { label: 'Create Ticket', integrationType: 'ticketing', connectionStatus: 'connected' } as any,
+      },
+      {
+        id: '6',
+        type: 'action',
+        position: { x: 160, y: 1000 },
+        data: { label: 'Notify SOC', actionType: 'slack', description: '#security-alerts' } as any,
+      },
+    ],
+    edges: [
+      { id: 'e1-2', source: '1', target: '2', type: 'labeled', animated: true, data: { animated: true }, markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e2-3', source: '2', target: '3', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#F79836' }, style: { stroke: '#F79836' } },
+      { id: 'e3-4', source: '3', sourceHandle: 'yes', target: '4', type: 'labeled', data: { label: 'Yes', condition: 'yes', animated: true }, markerEnd: { type: MarkerType.ArrowClosed, color: '#5CC05C' }, style: { stroke: '#5CC05C' } },
+      { id: 'e3-5', source: '3', sourceHandle: 'no', target: '5', type: 'labeled', data: { label: 'No', condition: 'no' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#DC4E41' }, style: { stroke: '#DC4E41' } },
+      { id: 'e4-6', source: '4', target: '6', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+    ],
   },
-  {
-    id: '2',
-    type: 'action',
-    position: { x: 380, y: 280 },
-    data: {
-      label: 'Enrich IOCs',
-      actionType: 'custom',
-      description: 'Query threat intelligence',
-    } as any,
+  // PB-002: Phishing Investigation
+  'PB-002': {
+    nodes: [
+      {
+        id: '1',
+        type: 'trigger',
+        position: { x: 400, y: 50 },
+        data: { label: 'User Report', triggerType: 'manual', description: 'Phishing email reported', status: 'active' } as any,
+      },
+      {
+        id: '2',
+        type: 'action',
+        position: { x: 380, y: 200 },
+        data: { label: 'Extract Email Headers', actionType: 'custom', description: 'Parse email metadata' } as any,
+      },
+      {
+        id: '3',
+        type: 'action',
+        position: { x: 380, y: 350 },
+        data: { label: 'Extract URLs & Attachments', actionType: 'custom', description: 'Extract IOCs from email' } as any,
+      },
+      {
+        id: '4',
+        type: 'parallel',
+        position: { x: 350, y: 500 },
+        data: { label: 'Parallel Analysis', branches: ['URL Check', 'Attachment Sandbox', 'Sender Reputation'] } as any,
+      },
+      {
+        id: '5',
+        type: 'integration',
+        position: { x: 150, y: 700 },
+        data: { label: 'VirusTotal Scan', integrationType: 'threat-intel', connectionStatus: 'connected' } as any,
+      },
+      {
+        id: '6',
+        type: 'integration',
+        position: { x: 380, y: 700 },
+        data: { label: 'Sandbox Analysis', integrationType: 'sandbox', connectionStatus: 'connected' } as any,
+      },
+      {
+        id: '7',
+        type: 'integration',
+        position: { x: 610, y: 700 },
+        data: { label: 'Check Sender', integrationType: 'email', connectionStatus: 'connected' } as any,
+      },
+      {
+        id: '8',
+        type: 'decision',
+        position: { x: 355, y: 900 },
+        data: { label: 'Is Malicious?', condition: 'threat_score > 70', outcomes: { yes: 'Block', no: 'Monitor' } } as any,
+      },
+      {
+        id: '9',
+        type: 'action',
+        position: { x: 150, y: 1100 },
+        data: { label: 'Block Sender', actionType: 'email', description: 'Add to blocklist' } as any,
+      },
+      {
+        id: '10',
+        type: 'action',
+        position: { x: 380, y: 1100 },
+        data: { label: 'Find Affected Users', actionType: 'custom', description: 'Search mailboxes' } as any,
+      },
+      {
+        id: '11',
+        type: 'action',
+        position: { x: 610, y: 1100 },
+        data: { label: 'Log to SIEM', actionType: 'custom', description: 'Record incident' } as any,
+      },
+      {
+        id: '12',
+        type: 'action',
+        position: { x: 380, y: 1300 },
+        data: { label: 'Notify Security Team', actionType: 'slack', description: '#phishing-alerts' } as any,
+      },
+    ],
+    edges: [
+      { id: 'e1-2', source: '1', target: '2', type: 'labeled', animated: true, markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e2-3', source: '2', target: '3', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e3-4', source: '3', target: '4', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e4-5', source: '4', target: '5', type: 'labeled', data: { label: 'Branch 1' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#9333EA' }, style: { stroke: '#9333EA' } },
+      { id: 'e4-6', source: '4', target: '6', type: 'labeled', data: { label: 'Branch 2' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#9333EA' }, style: { stroke: '#9333EA' } },
+      { id: 'e4-7', source: '4', target: '7', type: 'labeled', data: { label: 'Branch 3' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#9333EA' }, style: { stroke: '#9333EA' } },
+      { id: 'e5-8', source: '5', target: '8', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e6-8', source: '6', target: '8', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e7-8', source: '7', target: '8', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e8-9', source: '8', sourceHandle: 'yes', target: '9', type: 'labeled', data: { label: 'Yes' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#5CC05C' }, style: { stroke: '#5CC05C' } },
+      { id: 'e8-10', source: '8', sourceHandle: 'yes', target: '10', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#5CC05C' }, style: { stroke: '#5CC05C' } },
+      { id: 'e8-11', source: '8', sourceHandle: 'no', target: '11', type: 'labeled', data: { label: 'No' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#DC4E41' }, style: { stroke: '#DC4E41' } },
+      { id: 'e9-12', source: '9', target: '12', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e10-12', source: '10', target: '12', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+    ],
   },
-  {
-    id: '3',
-    type: 'decision',
-    position: { x: 355, y: 500 },
-    data: {
-      label: 'Severity Check',
-      condition: 'severity >= critical',
-      outcomes: { yes: 'Critical', no: 'Standard' },
-    } as any,
+  // PB-003: IOC Enrichment
+  'PB-003': {
+    nodes: [
+      {
+        id: '1',
+        type: 'trigger',
+        position: { x: 400, y: 50 },
+        data: { label: 'New Alert', triggerType: 'alert', description: 'Alert with IOCs received', status: 'active' } as any,
+      },
+      {
+        id: '2',
+        type: 'action',
+        position: { x: 380, y: 200 },
+        data: { label: 'Extract IOCs', actionType: 'custom', description: 'Parse IPs, domains, hashes' } as any,
+      },
+      {
+        id: '3',
+        type: 'loop',
+        position: { x: 355, y: 380 },
+        data: { label: 'For Each IOC', iterator: 'ioc', collection: 'extracted_iocs', maxIterations: 100 } as any,
+      },
+      {
+        id: '4',
+        type: 'integration',
+        position: { x: 150, y: 580 },
+        data: { label: 'VirusTotal', integrationType: 'threat-intel', connectionStatus: 'connected' } as any,
+      },
+      {
+        id: '5',
+        type: 'integration',
+        position: { x: 380, y: 580 },
+        data: { label: 'AbuseIPDB', integrationType: 'threat-intel', connectionStatus: 'connected' } as any,
+      },
+      {
+        id: '6',
+        type: 'integration',
+        position: { x: 610, y: 580 },
+        data: { label: 'Shodan', integrationType: 'osint', connectionStatus: 'connected' } as any,
+      },
+      {
+        id: '7',
+        type: 'action',
+        position: { x: 380, y: 780 },
+        data: { label: 'Aggregate Results', actionType: 'custom', description: 'Combine TI data' } as any,
+      },
+      {
+        id: '8',
+        type: 'action',
+        position: { x: 380, y: 950 },
+        data: { label: 'Update Alert', actionType: 'custom', description: 'Add enrichment data' } as any,
+      },
+    ],
+    edges: [
+      { id: 'e1-2', source: '1', target: '2', type: 'labeled', animated: true, markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e2-3', source: '2', target: '3', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e3-4', source: '3', target: '4', type: 'labeled', data: { label: 'Loop' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#14B8A6' }, style: { stroke: '#14B8A6' } },
+      { id: 'e3-5', source: '3', target: '5', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#14B8A6' }, style: { stroke: '#14B8A6' } },
+      { id: 'e3-6', source: '3', target: '6', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#14B8A6' }, style: { stroke: '#14B8A6' } },
+      { id: 'e4-7', source: '4', target: '7', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e5-7', source: '5', target: '7', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e6-7', source: '6', target: '7', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e7-8', source: '7', target: '8', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+    ],
   },
-  {
-    id: '4',
-    type: 'action',
-    position: { x: 150, y: 750 },
-    data: {
-      label: 'Isolate Endpoint',
-      actionType: 'isolate',
-      description: 'Network isolation',
-    } as any,
+  // PB-004: Credential Reset
+  'PB-004': {
+    nodes: [
+      {
+        id: '1',
+        type: 'trigger',
+        position: { x: 400, y: 50 },
+        data: { label: 'Credential Compromise', triggerType: 'alert', description: 'Compromised credentials detected', status: 'active' } as any,
+      },
+      {
+        id: '2',
+        type: 'integration',
+        position: { x: 380, y: 220 },
+        data: { label: 'Get User Info', integrationType: 'directory', connectionStatus: 'connected' } as any,
+      },
+      {
+        id: '3',
+        type: 'action',
+        position: { x: 380, y: 400 },
+        data: { label: 'Force Password Reset', actionType: 'custom', description: 'Reset via AD' } as any,
+      },
+      {
+        id: '4',
+        type: 'action',
+        position: { x: 380, y: 580 },
+        data: { label: 'Revoke Sessions', actionType: 'custom', description: 'Invalidate all tokens' } as any,
+      },
+      {
+        id: '5',
+        type: 'action',
+        position: { x: 380, y: 760 },
+        data: { label: 'Notify User', actionType: 'email', description: 'Send reset instructions' } as any,
+      },
+      {
+        id: '6',
+        type: 'integration',
+        position: { x: 380, y: 940 },
+        data: { label: 'Log Incident', integrationType: 'ticketing', connectionStatus: 'connected' } as any,
+      },
+    ],
+    edges: [
+      { id: 'e1-2', source: '1', target: '2', type: 'labeled', animated: true, markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e2-3', source: '2', target: '3', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e3-4', source: '3', target: '4', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e4-5', source: '4', target: '5', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e5-6', source: '5', target: '6', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+    ],
   },
-  {
-    id: '5',
-    type: 'integration',
-    position: { x: 560, y: 750 },
-    data: {
-      label: 'Create Ticket',
-      integrationType: 'ticketing',
-      connectionStatus: 'connected',
-    } as any,
+  // PB-005: Lateral Movement Hunt
+  'PB-005': {
+    nodes: [
+      {
+        id: '1',
+        type: 'trigger',
+        position: { x: 400, y: 50 },
+        data: { label: 'Scheduled Hunt', triggerType: 'schedule', description: 'Daily at 06:00 UTC', status: 'active' } as any,
+      },
+      {
+        id: '2',
+        type: 'action',
+        position: { x: 380, y: 200 },
+        data: { label: 'Query Login Events', actionType: 'custom', description: 'SIEM query for auth logs' } as any,
+      },
+      {
+        id: '3',
+        type: 'action',
+        position: { x: 380, y: 350 },
+        data: { label: 'Query Process Creation', actionType: 'custom', description: 'EDR process events' } as any,
+      },
+      {
+        id: '4',
+        type: 'action',
+        position: { x: 380, y: 500 },
+        data: { label: 'Analyze Network Flow', actionType: 'custom', description: 'Check lateral connections' } as any,
+      },
+      {
+        id: '5',
+        type: 'decision',
+        position: { x: 355, y: 680 },
+        data: { label: 'Suspicious Activity?', condition: 'anomaly_score > threshold', outcomes: { yes: 'Alert', no: 'Log' } } as any,
+      },
+      {
+        id: '6',
+        type: 'action',
+        position: { x: 150, y: 880 },
+        data: { label: 'Create Hunt Alert', actionType: 'custom', description: 'High priority alert' } as any,
+      },
+      {
+        id: '7',
+        type: 'action',
+        position: { x: 380, y: 880 },
+        data: { label: 'Notify Threat Hunters', actionType: 'slack', description: '#threat-hunting' } as any,
+      },
+      {
+        id: '8',
+        type: 'action',
+        position: { x: 610, y: 880 },
+        data: { label: 'Log Results', actionType: 'custom', description: 'Store hunt results' } as any,
+      },
+    ],
+    edges: [
+      { id: 'e1-2', source: '1', target: '2', type: 'labeled', animated: true, markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e2-3', source: '2', target: '3', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e3-4', source: '3', target: '4', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e4-5', source: '4', target: '5', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#F79836' }, style: { stroke: '#F79836' } },
+      { id: 'e5-6', source: '5', sourceHandle: 'yes', target: '6', type: 'labeled', data: { label: 'Yes' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#5CC05C' }, style: { stroke: '#5CC05C' } },
+      { id: 'e5-7', source: '5', sourceHandle: 'yes', target: '7', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#5CC05C' }, style: { stroke: '#5CC05C' } },
+      { id: 'e5-8', source: '5', sourceHandle: 'no', target: '8', type: 'labeled', data: { label: 'No' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#DC4E41' }, style: { stroke: '#DC4E41' } },
+    ],
   },
-  {
-    id: '6',
-    type: 'action',
-    position: { x: 160, y: 1000 },
-    data: {
-      label: 'Notify SOC',
-      actionType: 'slack',
-      description: '#security-alerts',
-    } as any,
+  // PB-006: Vulnerability Response
+  'PB-006': {
+    nodes: [
+      {
+        id: '1',
+        type: 'trigger',
+        position: { x: 400, y: 50 },
+        data: { label: 'Vulnerability Scan', triggerType: 'webhook', description: 'New scan results received', status: 'active' } as any,
+      },
+      {
+        id: '2',
+        type: 'action',
+        position: { x: 380, y: 200 },
+        data: { label: 'Parse Scan Results', actionType: 'custom', description: 'Extract vulnerabilities' } as any,
+      },
+      {
+        id: '3',
+        type: 'decision',
+        position: { x: 355, y: 380 },
+        data: { label: 'CVSS >= 9.0?', condition: 'cvss >= 9.0', outcomes: { yes: 'Critical', no: 'Check High' } } as any,
+      },
+      {
+        id: '4',
+        type: 'action',
+        position: { x: 100, y: 580 },
+        data: { label: 'Create Critical Ticket', actionType: 'custom', description: 'P1 - Immediate action' } as any,
+      },
+      {
+        id: '5',
+        type: 'decision',
+        position: { x: 500, y: 580 },
+        data: { label: 'CVSS >= 7.0?', condition: 'cvss >= 7.0', outcomes: { yes: 'High', no: 'Normal' } } as any,
+      },
+      {
+        id: '6',
+        type: 'action',
+        position: { x: 350, y: 780 },
+        data: { label: 'Create High Ticket', actionType: 'custom', description: 'P2 - Within 24h' } as any,
+      },
+      {
+        id: '7',
+        type: 'action',
+        position: { x: 650, y: 780 },
+        data: { label: 'Create Normal Ticket', actionType: 'custom', description: 'P3 - Standard SLA' } as any,
+      },
+      {
+        id: '8',
+        type: 'action',
+        position: { x: 380, y: 980 },
+        data: { label: 'Update Asset DB', actionType: 'custom', description: 'Record vulnerability' } as any,
+      },
+    ],
+    edges: [
+      { id: 'e1-2', source: '1', target: '2', type: 'labeled', animated: true, markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e2-3', source: '2', target: '3', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#F79836' }, style: { stroke: '#F79836' } },
+      { id: 'e3-4', source: '3', sourceHandle: 'yes', target: '4', type: 'labeled', data: { label: 'Critical' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#DC4E41' }, style: { stroke: '#DC4E41' } },
+      { id: 'e3-5', source: '3', sourceHandle: 'no', target: '5', type: 'labeled', data: { label: 'No' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#F79836' }, style: { stroke: '#F79836' } },
+      { id: 'e5-6', source: '5', sourceHandle: 'yes', target: '6', type: 'labeled', data: { label: 'High' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#F79836' }, style: { stroke: '#F79836' } },
+      { id: 'e5-7', source: '5', sourceHandle: 'no', target: '7', type: 'labeled', data: { label: 'Normal' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#5CC05C' }, style: { stroke: '#5CC05C' } },
+      { id: 'e4-8', source: '4', target: '8', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e6-8', source: '6', target: '8', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+      { id: 'e7-8', source: '7', target: '8', type: 'labeled', markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' }, style: { stroke: '#00A4A6' } },
+    ],
   },
-];
+};
 
-const initialEdges: Edge[] = [
-  {
-    id: 'e1-2',
-    source: '1',
-    target: '2',
-    type: 'labeled',
-    animated: true,
-    data: { animated: true },
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' },
-    style: { stroke: '#00A4A6' },
-  },
-  {
-    id: 'e2-3',
-    source: '2',
-    target: '3',
-    type: 'labeled',
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#F79836' },
-    style: { stroke: '#F79836' },
-  },
-  {
-    id: 'e3-4',
-    source: '3',
-    sourceHandle: 'yes',
-    target: '4',
-    type: 'labeled',
-    data: { label: 'Yes', condition: 'yes', animated: true },
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#5CC05C' },
-    style: { stroke: '#5CC05C' },
-  },
-  {
-    id: 'e3-5',
-    source: '3',
-    sourceHandle: 'no',
-    target: '5',
-    type: 'labeled',
-    data: { label: 'No', condition: 'no' },
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#DC4E41' },
-    style: { stroke: '#DC4E41' },
-  },
-  {
-    id: 'e4-6',
-    source: '4',
-    target: '6',
-    type: 'labeled',
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' },
-    style: { stroke: '#00A4A6' },
-  },
-];
+// Helper function to get playbook flow by ID
+function getPlaybookFlow(id: string | undefined): { nodes: Node[]; edges: Edge[] } {
+  if (!id || id === 'new') {
+    return { nodes: [], edges: [] };
+  }
+  const flow = playbookFlows[id];
+  if (flow) {
+    return flow;
+  }
+  // Default to PB-001 if not found
+  const defaultFlow = playbookFlows['PB-001'];
+  return defaultFlow ?? { nodes: [], edges: [] };
+}
 
 export function PlaybookEditor() {
   const { id } = useParams<{ id: string }>();
@@ -307,14 +600,21 @@ export function PlaybookEditor() {
     return (data[key] as string) || defaultValue;
   };
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(
-    isNew ? [] : initialNodes
-  );
-  const [edges, setEdges, onEdgesChange] = useEdgesState(
-    isNew ? [] : initialEdges
-  );
+  const playbookFlow = getPlaybookFlow(id);
+  const [nodes, setNodes, onNodesChange] = useNodesState(playbookFlow.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(playbookFlow.edges);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Sync selectedNode with nodes when nodes are updated
+  useEffect(() => {
+    if (selectedNode) {
+      const updatedNode = nodes.find((n) => n.id === selectedNode.id);
+      if (updatedNode && JSON.stringify(updatedNode.data) !== JSON.stringify(selectedNode.data)) {
+        setSelectedNode(updatedNode);
+      }
+    }
+  }, [nodes, selectedNode]);
   const [propertiesTab, setPropertiesTab] = useState<'node' | 'variables'>('node');
 
   // Variables state
@@ -350,6 +650,21 @@ export function PlaybookEditor() {
     results: { success: 0, failed: 0, skipped: 0 },
   });
   const [isTestRunPanelOpen, setIsTestRunPanelOpen] = useState(false);
+
+  // Execution view state
+  const [isExecutionPanelOpen, setIsExecutionPanelOpen] = useState(false);
+  const [isProcessingMonitorOpen, setIsProcessingMonitorOpen] = useState(false);
+
+  // Custom hooks for n8n-style features
+  const executionStore = useExecutionStore();
+  const { isConnected, connect: connectWs, disconnect: disconnectWs } = useExecutionWebSocket({
+    executionId: executionStore.execution?.executionId || null
+  });
+  const { upstreamNodes } = useNodeOutputSchema({
+    currentNodeId: selectedNode?.id || '',
+    nodes,
+    edges
+  });
 
   // Connect handler
   const onConnect = useCallback(
@@ -441,7 +756,125 @@ export function PlaybookEditor() {
       position: { x: 400, y: index * 200 + 50 },
     }));
     setNodes(layoutedNodes);
+    toast({
+      title: 'Layout Applied',
+      description: 'Nodes have been auto-arranged.',
+    });
   }, [nodes, setNodes]);
+
+  // Save state
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeploying, setIsDeploying] = useState(false);
+
+  // Save playbook handler
+  const handleSave = useCallback(async () => {
+    setIsSaving(true);
+    try {
+      // Prepare playbook data
+      const playbookData = {
+        id: id || `playbook-${Date.now()}`,
+        name: isNew ? 'New Playbook' : 'Malware Response Playbook',
+        nodes: nodes.map(n => ({
+          id: n.id,
+          type: n.type,
+          position: n.position,
+          data: n.data,
+        })),
+        edges: edges.map(e => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+          type: e.type,
+          data: e.data,
+        })),
+        variables,
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Simulate API call (replace with actual API endpoint)
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // Save to localStorage for persistence demo
+      localStorage.setItem(`playbook-${playbookData.id}`, JSON.stringify(playbookData));
+
+      toast({
+        title: 'Playbook Saved',
+        description: `Successfully saved "${playbookData.name}" with ${nodes.length} nodes.`,
+        variant: 'success',
+      });
+    } catch (error) {
+      console.error('Failed to save playbook:', error);
+      toast({
+        title: 'Save Failed',
+        description: 'An error occurred while saving the playbook.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [id, isNew, nodes, edges, variables]);
+
+  // Deploy playbook handler
+  const handleDeploy = useCallback(async () => {
+    if (nodes.length === 0) {
+      toast({
+        title: 'Cannot Deploy',
+        description: 'Add at least one node before deploying.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Check for trigger node
+    const hasTrigger = nodes.some(n => n.type === 'trigger');
+    if (!hasTrigger) {
+      toast({
+        title: 'Cannot Deploy',
+        description: 'Playbook must have at least one trigger node.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsDeploying(true);
+    try {
+      // Simulate deployment process
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // Simulate API call to deploy
+      const deploymentId = `deploy-${Date.now()}`;
+
+      toast({
+        title: 'Playbook Deployed',
+        description: `Successfully deployed! Deployment ID: ${deploymentId.slice(-8)}`,
+        variant: 'success',
+      });
+
+      // Add to execution history
+      const newExecution: ExecutionRun = {
+        id: deploymentId,
+        status: 'success',
+        startedAt: new Date(),
+        completedAt: new Date(),
+        duration: 1500,
+        triggeredBy: 'deployment',
+        nodesExecuted: nodes.length,
+        totalNodes: nodes.length,
+      };
+      setExecutionHistory(prev => [newExecution, ...prev]);
+    } catch (error) {
+      console.error('Failed to deploy playbook:', error);
+      toast({
+        title: 'Deployment Failed',
+        description: 'An error occurred during deployment.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeploying(false);
+    }
+  }, [nodes]);
 
   // Test Run simulation
   const startTestRun = useCallback(async () => {
@@ -458,6 +891,13 @@ export function PlaybookEditor() {
       progress: 0,
       results: { success: 0, failed: 0, skipped: 0 },
     });
+
+    // Initialize execution store and WebSocket for demo purposes
+    const executionId = `exec-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    executionStore.initExecution(executionId);
+
+    // Start mock WebSocket execution in background (for ExecutionPanel demo)
+    mockWebSocketService.startExecution(executionId, nodes, edges);
 
     // Build execution order using BFS from trigger nodes
     const triggerNodes = nodes.filter((n) => n.type === 'trigger');
@@ -765,10 +1205,30 @@ export function PlaybookEditor() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={() => reactFlowInstance?.undo()}>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => {
+              toast({
+                title: 'Undo',
+                description: 'Undo action triggered (Ctrl+Z)',
+              });
+            }}
+            title="Undo (Ctrl+Z)"
+          >
             <Undo2 className="w-4 h-4" />
           </Button>
-          <Button variant="outline" size="icon" onClick={() => reactFlowInstance?.redo()}>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => {
+              toast({
+                title: 'Redo',
+                description: 'Redo action triggered (Ctrl+Y)',
+              });
+            }}
+            title="Redo (Ctrl+Y)"
+          >
             <Redo2 className="w-4 h-4" />
           </Button>
           <Button variant="outline" size="icon" onClick={autoLayout}>
@@ -783,13 +1243,35 @@ export function PlaybookEditor() {
             <Play className="w-4 h-4 mr-2" />
             Test Run
           </Button>
-          <Button variant="outline">
-            <Save className="w-4 h-4 mr-2" />
-            Save
+          <Button
+            variant="outline"
+            onClick={() => setIsExecutionPanelOpen(true)}
+          >
+            <Activity className="w-4 h-4 mr-2" />
+            Execution View
           </Button>
-          <Button>
-            <Rocket className="w-4 h-4 mr-2" />
-            Deploy
+          <Button
+            variant="outline"
+            onClick={() => setIsProcessingMonitorOpen(true)}
+          >
+            <BarChart3 className="w-4 h-4 mr-2" />
+            Monitor
+          </Button>
+          <Button variant="outline" onClick={handleSave} disabled={isSaving}>
+            {isSaving ? (
+              <RotateCcw className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4 mr-2" />
+            )}
+            {isSaving ? 'Saving...' : 'Save'}
+          </Button>
+          <Button onClick={handleDeploy} disabled={isDeploying}>
+            {isDeploying ? (
+              <RotateCcw className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Rocket className="w-4 h-4 mr-2" />
+            )}
+            {isDeploying ? 'Deploying...' : 'Deploy'}
           </Button>
           <Button
             variant="ghost"
@@ -819,12 +1301,14 @@ export function PlaybookEditor() {
           </CardContent>
         </Card>
 
-        {/* Canvas */}
-        <div
-          ref={reactFlowWrapper}
-          className="flex-1 rounded-xl border-2 border-border/50 bg-muted/20 overflow-hidden relative"
-        >
-          <ReactFlow
+        {/* Canvas Area (includes canvas + execution history) */}
+        <div className="flex-1 flex flex-col min-h-0 gap-0">
+          {/* Canvas */}
+          <div
+            ref={reactFlowWrapper}
+            className="flex-1 rounded-xl border-2 border-border/50 bg-muted/20 overflow-hidden relative"
+          >
+            <ReactFlow
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
@@ -897,6 +1381,14 @@ export function PlaybookEditor() {
               </div>
             </Panel>
           </ReactFlow>
+          </div>
+
+          {/* Execution History - inside canvas area */}
+          <ExecutionHistory
+            executions={executionHistory}
+            onSelectExecution={handleSelectExecution}
+            className="shrink-0 rounded-b-xl"
+          />
         </div>
 
         {/* Properties Panel */}
@@ -1506,6 +1998,25 @@ export function PlaybookEditor() {
                               rows={3}
                             />
                           </div>
+                          {/* Template Editor for JSON Flow Data */}
+                          {upstreamNodes.length > 0 && (
+                            <div>
+                              <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                                Data Template
+                              </label>
+                              <TemplateEditor
+                                value={(selectedNode.data as any).dataTemplate || ''}
+                                onChange={(value) =>
+                                  updateNodeData(selectedNode.id, { dataTemplate: value })
+                                }
+                                upstreamNodes={upstreamNodes.map(n => ({
+                                  nodeId: n.nodeId,
+                                  nodeName: n.nodeName,
+                                }))}
+                                placeholder="Use {{ $node.xxx.json.yyy }} to reference upstream data"
+                              />
+                            </div>
+                          )}
                           <div>
                             <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
                               Timeout (seconds)
@@ -1996,12 +2507,6 @@ export function PlaybookEditor() {
         </Card>
       </div>
 
-      {/* Execution History Panel */}
-      <ExecutionHistory
-        executions={executionHistory}
-        onSelectExecution={handleSelectExecution}
-      />
-
       {/* Test Run Panel */}
       <Sheet open={isTestRunPanelOpen} onOpenChange={setIsTestRunPanelOpen}>
         <SheetContent className="w-[500px] sm:max-w-[500px]">
@@ -2158,6 +2663,18 @@ export function PlaybookEditor() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Execution Panel */}
+      <ExecutionPanel
+        isOpen={isExecutionPanelOpen}
+        onClose={() => setIsExecutionPanelOpen(false)}
+      />
+
+      {/* Processing Monitor */}
+      <ProcessingMonitor
+        isOpen={isProcessingMonitorOpen}
+        onClose={() => setIsProcessingMonitorOpen(false)}
+      />
     </div>
   );
 }

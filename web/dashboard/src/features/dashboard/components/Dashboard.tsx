@@ -3,6 +3,7 @@ import { StatsCard } from './StatsCard';
 import { AlertTrend } from './AlertTrend';
 import { TopAlerts } from './TopAlerts';
 import { RecentCases } from './RecentCases';
+import { UEBAWidget } from './UEBAWidget';
 import { useDashboardData } from '../hooks/useDashboardData';
 
 // 3D Components
@@ -21,6 +22,7 @@ import {
   Layers,
   Eye,
   EyeOff,
+  Brain,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -235,6 +237,29 @@ export function Dashboard() {
               height={280}
             />
           )}
+        </div>
+      </div>
+
+      {/* UEBA Analytics Section */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Brain className="w-5 h-5 text-primary" />
+          <h2 className="text-lg font-semibold">UEBA Analytics</h2>
+          <Badge variant="secondary" className="text-xs">
+            ML-Powered
+          </Badge>
+          <div className="flex-1 h-px bg-border ml-4" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <UEBAWidget />
+          {/* Future expansion space */}
+          <div className="metric-card flex items-center justify-center text-muted-foreground">
+            <div className="text-center">
+              <Brain className="w-12 h-12 mx-auto mb-2 opacity-50" />
+              <p>Entity Risk Analysis</p>
+              <p className="text-xs">Coming Soon</p>
+            </div>
+          </div>
         </div>
       </div>
 
