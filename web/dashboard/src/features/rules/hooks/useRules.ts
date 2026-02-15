@@ -694,13 +694,25 @@ export function useRules() {
     }
   }, [selectedRule]);
 
-  const createRule = useCallback((rule: Omit<SigmaRule, 'id' | 'createdAt' | 'updatedAt' | 'version'>) => {
+  const createRule = useCallback((ruleData: Partial<SigmaRule>) => {
     const newRule: SigmaRule = {
-      ...rule,
       id: `rule-${Date.now()}`,
+      title: ruleData.title || 'Untitled Rule',
+      description: ruleData.description || '',
+      status: ruleData.status || 'draft',
+      severity: ruleData.severity || 'medium',
+      author: ruleData.author || 'SOC Team',
+      references: ruleData.references || [],
+      tags: ruleData.tags || [],
+      logsources: ruleData.logsources || {},
+      rawYaml: ruleData.rawYaml || '',
+      attack: ruleData.attack || { tactics: [], techniques: [] },
+      enabled: ruleData.enabled ?? false,
+      lastTriggered: ruleData.lastTriggered,
+      triggerCount: ruleData.triggerCount || 0,
+      version: 1,
       createdAt: new Date(),
       updatedAt: new Date(),
-      version: 1,
     };
     setRules((prev) => [newRule, ...prev]);
     return newRule;

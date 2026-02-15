@@ -18,6 +18,7 @@ import { RuleDetail } from './RuleDetail';
 import { AttackMatrix } from './AttackMatrix';
 import { RuleTestPanel } from './RuleTestPanel';
 import { RuleImport } from './RuleImport';
+import { RuleCreateDialog } from './RuleCreateDialog';
 import { useRules, useAttackMatrix } from '../hooks/useRules';
 import type { SigmaRule } from '../types';
 
@@ -31,6 +32,7 @@ export function RulesPage() {
     updateRule,
     toggleRuleEnabled,
     deleteRule,
+    createRule,
     testRule,
   } = useRules();
 
@@ -43,6 +45,7 @@ export function RulesPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'matrix'>('list');
   const [showDetailSheet, setShowDetailSheet] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   // Handle rule selection
   const handleSelectRule = useCallback((rule: SigmaRule) => {
@@ -69,6 +72,13 @@ export function RulesPage() {
     console.log('Importing rules:', rules);
     // Would create new rules here
   }, []);
+
+  // Handle create
+  const handleCreate = useCallback((ruleData: Partial<SigmaRule>) => {
+    const newRule = createRule(ruleData);
+    setSelectedRule(newRule);
+    setShowCreateDialog(false);
+  }, [createRule, setSelectedRule]);
 
   return (
     <div className="h-[calc(100vh-140px)] flex flex-col animate-fade-in">
@@ -114,6 +124,7 @@ export function RulesPage() {
               onToggleEnabled={toggleRuleEnabled}
               filters={filters}
               onFiltersChange={setFilters}
+              onCreateRule={() => setShowCreateDialog(true)}
             />
           </ResizablePanel>
 
@@ -153,6 +164,13 @@ export function RulesPage() {
         open={showImportDialog}
         onOpenChange={setShowImportDialog}
         onImport={handleImport}
+      />
+
+      {/* Create Dialog */}
+      <RuleCreateDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        onCreate={handleCreate}
       />
     </div>
   );
