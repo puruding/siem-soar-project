@@ -1,0 +1,292 @@
+# Warning Alert Rules
+# These alerts require attention but not immediate action
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: siem-soar-warning-alerts
+  namespace: siem-soar
+  labels:
+    app: siem-soar
+    severity: warning
+spec:
+  groups:
+    - name: warning.performance
+      interval: 1m
+      rules:
+        # Elevated API Latency
+        - alert: APILatencyElevated
+          expr: |
+            histogram_quantile(0.99,
+              rate(http_request_duration_seconds_bucket[5m])
+            ) > 2.0
+          for: 15m
+          labels:
+            severity: warning
+            component: api
+            team: backend
+          annotations:
+            summary: "Elevated API latency"
+            description: "API p99 latency is {{ $value }}s (threshold: 2s)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/elevated-latency"
+
+        # Slow Database Queries
+        - alert: SlowDatabaseQueries
+          expr: |
+            histogram_quantile(0.95,
+              rate(postgres_query_duration_seconds_bucket[5m])
+            ) > 1.0
+          for: 10m
+          labels:
+            severity: warning
+            component: database
+            team: data
+          annotations:
+            summary: "Slow database queries detected"
+            description: "p95 query time is {{ $value }}s (threshold: 1s)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/slow-queries"
+
+        # High CPU Usage
+        - alert: HighCPUUsage
+          expr: |
+            rate(container_cpu_usage_seconds_total[5m]) > 0.8
+          for: 15m
+          labels:
+            severity: warning
+            component: resources
+            team: platform
+          annotations:
+            summary: "High CPU usage on {{ $labels.pod }}"
+            description: "CPU usage is {{ $value | humanizePercentage }}"
+            runbook_url: "https://docs.siem-soar.io/runbooks/high-cpu"
+
+    - name: warning.capacity
+      interval: 1m
+      rules:
+        # Approaching Memory Limit
+        - alert: ApproachingMemoryLimit
+          expr: |
+            container_memory_usage_bytes
+            /
+            container_spec_memory_limit_bytes
+            > 0.85
+          for: 10m
+          labels:
+            severity: warning
+            component: resources
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.pod }} approaching memory limit"
+            description: "Memory usage is {{ $value | humanizePercentage }} of limit"
+            runbook_url: "https://docs.siem-soar.io/runbooks/memory-pressure"
+
+        # Disk Space Warning
+        - alert: DiskSpaceWarning
+          expr: |
+            (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.15
+          for: 10m
+          labels:
+            severity: warning
+            component: storage
+            team: platform
+          annotations:
+            summary: "Low disk space on {{ $labels.instance }}"
+            description: "Only {{ $value | humanizePercentage }} disk space remaining"
+            runbook_url: "https://docs.siem-soar.io/runbooks/disk-space"
+
+        # Kafka Storage Warning
+        - alert: KafkaStorageWarning
+          expr: kafka_log_size_bytes > 400000000000  # 400GB
+          for: 30m
+          labels:
+            severity: warning
+            component: kafka
+            team: data-pipeline
+          annotations:
+            summary: "Kafka storage usage high"
+            description: "Kafka is using {{ $value | humanize1024 }}B (threshold: 400GB)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/kafka-storage"
+
+        # Database Connections Warning
+        - alert: DatabaseConnectionsWarning
+          expr: |
+            postgres_active_connections / postgres_max_connections > 0.8
+          for: 10m
+          labels:
+            severity: warning
+            component: database
+            team: data
+          annotations:
+            summary: "High database connection usage"
+            description: "Using {{ $value | humanizePercentage }} of max connections"
+            runbook_url: "https://docs.siem-soar.io/runbooks/connection-pool"
+
+    - name: warning.reliability
+      interval: 1m
+      rules:
+        # Pod Restarts
+        - alert: PodRestarting
+          expr: |
+            increase(kube_pod_container_status_restarts_total[1h]) > 3
+          for: 5m
+          labels:
+            severity: warning
+            component: kubernetes
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.pod }} is restarting"
+            description: "Pod has restarted {{ $value }} times in the last hour"
+            runbook_url: "https://docs.siem-soar.io/runbooks/pod-restarts"
+
+        # Elevated Error Rate
+        - alert: ElevatedErrorRate
+          expr: |
+            sum(rate(http_requests_total{status=~"5.."}[5m])) by (job)
+            /
+            sum(rate(http_requests_total[5m])) by (job)
+            > 0.01
+          for: 10m
+          labels:
+            severity: warning
+            component: api
+            team: backend
+          annotations:
+            summary: "Elevated error rate in {{ $labels.job }}"
+            description: "Error rate is {{ $value | humanizePercentage }} (threshold: 1%)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/error-rate"
+
+        # Kafka Consumer Lag Warning
+        - alert: KafkaConsumerLagWarning
+          expr: kafka_consumer_lag > 50000
+          for: 20m
+          labels:
+            severity: warning
+            component: kafka
+            team: data-pipeline
+          annotations:
+            summary: "Kafka consumer lag elevated"
+            description: "Consumer {{ $labels.consumer_group }} lag is {{ $value }} messages"
+            runbook_url: "https://docs.siem-soar.io/runbooks/kafka-lag"
+
+    - name: warning.security
+      interval: 1m
+      rules:
+        # Elevated Failed Login Rate
+        - alert: ElevatedFailedLogins
+          expr: |
+            sum(increase(auth_failed_login_total[10m])) by (username) > 5
+          for: 5m
+          labels:
+            severity: warning
+            component: security
+            team: security
+          annotations:
+            summary: "Elevated failed login rate"
+            description: "User {{ $labels.username }} has {{ $value }} failed logins"
+            runbook_url: "https://docs.siem-soar.io/runbooks/failed-logins"
+
+        # Certificate Expiring Soon
+        - alert: CertificateExpiringSoon
+          expr: |
+            (cert_exporter_not_after - time()) / 86400 < 30
+          for: 1h
+          labels:
+            severity: warning
+            component: security
+            team: platform
+          annotations:
+            summary: "TLS certificate expiring soon"
+            description: "Certificate {{ $labels.cn }} expires in {{ $value }} days"
+            runbook_url: "https://docs.siem-soar.io/runbooks/cert-renewal"
+
+        # Unusual API Access Pattern
+        - alert: UnusualAPIAccessPattern
+          expr: |
+            rate(http_requests_total[5m]) > 2 * avg_over_time(rate(http_requests_total[5m])[1h:5m])
+          for: 10m
+          labels:
+            severity: warning
+            component: security
+            team: security
+          annotations:
+            summary: "Unusual API access pattern"
+            description: "Request rate is {{ $value }}req/s (2x average)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/unusual-traffic"
+
+    - name: warning.data
+      interval: 1m
+      rules:
+        # Event Processing Lag
+        - alert: EventProcessingLag
+          expr: |
+            events_queue_size > 10000
+          for: 15m
+          labels:
+            severity: warning
+            component: pipeline
+            team: data-pipeline
+          annotations:
+            summary: "Event processing lag"
+            description: "{{ $value }} events queued for processing"
+            runbook_url: "https://docs.siem-soar.io/runbooks/processing-lag"
+
+        # Replication Lag Warning
+        - alert: ReplicationLagWarning
+          expr: |
+            postgres_replication_lag_seconds > 60
+            or
+            clickhouse_replication_lag_seconds > 120
+          for: 10m
+          labels:
+            severity: warning
+            component: database
+            team: data
+          annotations:
+            summary: "Elevated replication lag"
+            description: "{{ $labels.database }} replication lag is {{ $value }}s"
+            runbook_url: "https://docs.siem-soar.io/runbooks/replication-lag"
+
+        # Alert Rule Processing Delay
+        - alert: AlertRuleProcessingDelay
+          expr: |
+            alert_rule_processing_duration_seconds > 30
+          for: 10m
+          labels:
+            severity: warning
+            component: alerting
+            team: security
+          annotations:
+            summary: "Alert rule processing delayed"
+            description: "Alert rules taking {{ $value }}s to process"
+            runbook_url: "https://docs.siem-soar.io/runbooks/rule-delay"
+
+    - name: warning.backup
+      interval: 5m
+      rules:
+        # Backup Failed
+        - alert: BackupFailed
+          expr: |
+            time() - backup_last_success_timestamp_seconds > 86400  # 24 hours
+          for: 1h
+          labels:
+            severity: warning
+            component: backup
+            team: platform
+          annotations:
+            summary: "Backup has failed"
+            description: "No successful backup for {{ $labels.job }} in 24 hours"
+            runbook_url: "https://docs.siem-soar.io/runbooks/backup-failed"
+
+        # Backup Size Anomaly
+        - alert: BackupSizeAnomaly
+          expr: |
+            backup_size_bytes < 0.5 * avg_over_time(backup_size_bytes[7d])
+          for: 1h
+          labels:
+            severity: warning
+            component: backup
+            team: platform
+          annotations:
+            summary: "Backup size anomaly"
+            description: "Backup size is {{ $value | humanize1024 }}B (50% below average)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/backup-anomaly"

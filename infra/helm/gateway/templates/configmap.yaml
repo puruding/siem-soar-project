@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gateway.fullname" . }}-config
+  labels:
+    {{- include "gateway.labels" . | nindent 4 }}
+data:
+  # Service discovery
+  DETECTION_SERVICE: {{ .Values.config.services.detection | quote }}
+  SOAR_SERVICE: {{ .Values.config.services.soar | quote }}
+  TI_SERVICE: {{ .Values.config.services.ti | quote }}
+  QUERY_SERVICE: {{ .Values.config.services.query | quote }}
+  CASE_SERVICE: {{ .Values.config.services.case | quote }}
+
+  # Rate limiting
+  RATE_LIMIT_ENABLED: {{ .Values.config.rateLimit.enabled | quote }}
+  RATE_LIMIT_RPS: {{ .Values.config.rateLimit.requestsPerSecond | quote }}
+  RATE_LIMIT_BURST: {{ .Values.config.rateLimit.burst | quote }}
+
+  # CORS
+  CORS_ENABLED: {{ .Values.config.cors.enabled | quote }}
+  CORS_ALLOWED_ORIGINS: {{ .Values.config.cors.allowedOrigins | join "," | quote }}
+
+  # JWT
+  JWT_ISSUER: {{ .Values.config.jwt.issuer | quote }}
+  JWT_AUDIENCE: {{ .Values.config.jwt.audience | quote }}

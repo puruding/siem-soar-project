@@ -1,0 +1,17 @@
+name: pci_incident
+version: "1.0"
+description: Handle PCI-DSS incident response
+category: compliance
+severity: high
+steps:
+  - id: assess_cardholder_data_impact
+    action: compliance.assess_pci_impact
+  - id: notify_payment_brands
+    condition: "input.cardholder_data_compromised"
+    action: compliance.notify_payment_brands
+  - id: notify_acquiring_bank
+    action: compliance.notify_bank
+  - id: conduct_forensic_investigation
+    action: forensics.pci_investigation
+  - id: submit_incident_report
+    action: compliance.submit_pci_report

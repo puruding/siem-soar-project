@@ -1,0 +1,16 @@
+name: threat_brief
+version: "1.0"
+description: Daily threat intelligence briefing
+category: notification
+trigger:
+  type: schedule
+  cron: "0 8 * * *"
+steps:
+  - id: fetch_threat_intel
+    action: ti.get_latest_threats
+  - id: correlate_with_environment
+    action: ti.correlate
+  - id: generate_brief
+    action: report.generate
+  - id: send_brief
+    action: email.send

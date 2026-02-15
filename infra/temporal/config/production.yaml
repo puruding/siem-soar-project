@@ -1,0 +1,201 @@
+# Temporal Dynamic Configuration for Production Environment
+# This file controls runtime behavior of the Temporal server
+
+# Frontend service settings - higher limits for production
+frontend.visibilityMaxPageSize:
+  - value: 1000
+    constraints: {}
+
+frontend.rps:
+  - value: 10000
+    constraints: {}
+
+frontend.globalRPS:
+  - value: 10000
+    constraints: {}
+
+# History service settings - optimized for production
+history.longPollExpirationInterval:
+  - value: "30s"
+    constraints: {}
+
+history.eventsCacheMaxSize:
+  - value: 2048000
+    constraints: {}
+
+history.numArchiveSystemWorkflows:
+  - value: 10000
+    constraints: {}
+
+history.deleteDurationAfterClose:
+  - value: "168h"  # 7 days retention
+    constraints: {}
+
+# Workflow execution settings
+limit.maxIDLength:
+  - value: 1000
+    constraints: {}
+
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: false
+    constraints: {}
+
+# Worker settings
+worker.enableScheduler:
+  - value: true
+    constraints: {}
+
+worker.enableBatcher:
+  - value: true
+    constraints: {}
+
+# Namespace settings
+system.adminOperationToken:
+  - value: "${TEMPORAL_ADMIN_TOKEN}"
+    constraints: {}
+
+# Enable Elasticsearch for advanced visibility
+system.enableAdvancedVisibility:
+  - value: true
+    constraints: {}
+
+# Archival settings - enabled for production compliance
+history.enableArchival:
+  - value: true
+    constraints: {}
+
+visibility.enableArchival:
+  - value: true
+    constraints: {}
+
+# Archival URIs (configure based on storage backend)
+history.archivalURI:
+  - value: "s3://temporal-archival-prod/history"
+    constraints: {}
+
+visibility.archivalURI:
+  - value: "s3://temporal-archival-prod/visibility"
+    constraints: {}
+
+# Rate limiting - production capacity
+frontend.namespaceRPS:
+  - value: 2000
+    constraints: {}
+
+frontend.persistenceMaxQPS:
+  - value: 10000
+    constraints: {}
+
+frontend.persistenceGlobalMaxQPS:
+  - value: 10000
+    constraints: {}
+
+# Signal and query handling
+frontend.MaximumSignalsPerExecution:
+  - value: 100000
+    constraints: {}
+
+# Activity settings
+limit.workflowActivityExecutionHeartbeatTimeout:
+  - value: "120s"
+    constraints: {}
+
+# Task queue settings - higher partitions for production scale
+matching.numTaskqueueReadPartitions:
+  - value: 16
+    constraints: {}
+
+matching.numTaskqueueWritePartitions:
+  - value: 16
+    constraints: {}
+
+# Production settings - disable eager execution for stability
+system.enableActivityEagerExecution:
+  - value: false
+    constraints: {}
+
+system.enableWorkflowShadowing:
+  - value: false
+    constraints: {}
+
+# Production limits
+frontend.adminMatchingNamespaceRps:
+  - value: 100
+    constraints: {}
+
+# Workflow execution time limits
+limit.workflowRunTimeout:
+  - value: "72h"  # 3 days
+    constraints: {}
+
+limit.workflowExecutionTimeout:
+  - value: "720h"  # 30 days
+    constraints: {}
+
+# Task timeout defaults
+limit.workflowTaskTimeout:
+  - value: "30s"
+    constraints: {}
+
+limit.defaultActivityStartToCloseTimeout:
+  - value: "300s"
+    constraints: {}
+
+# Replication and cluster settings (for multi-cluster setups)
+system.enableGlobalNamespace:
+  - value: true
+    constraints: {}
+
+# Data integrity settings
+history.eventsBlobSizeWarningLimit:
+  - value: 262144  # 256KB
+    constraints: {}
+
+history.eventsBlobSizeLimit:
+  - value: 2097152  # 2MB
+    constraints: {}
+
+# Visibility settings for Elasticsearch
+system.visibilityDisableOrderByClause:
+  - value: false
+    constraints: {}
+
+# Persistence settings
+system.historyCountLimitWarn:
+  - value: 10000
+    constraints: {}
+
+system.historyCountLimitError:
+  - value: 50000
+    constraints: {}
+
+# Search attribute limits
+limit.numPendingChildExecutions:
+  - value: 50000
+    constraints: {}
+
+limit.numPendingActivities:
+  - value: 50000
+    constraints: {}
+
+limit.numPendingSignals:
+  - value: 50000
+    constraints: {}
+
+# TLS settings (paths to be configured via environment)
+frontend.tls.certPath:
+  - value: "${TEMPORAL_TLS_CERT_PATH}"
+    constraints: {}
+
+frontend.tls.keyPath:
+  - value: "${TEMPORAL_TLS_KEY_PATH}"
+    constraints: {}
+
+frontend.tls.caPath:
+  - value: "${TEMPORAL_TLS_CA_PATH}"
+    constraints: {}
+
+# mTLS client authentication
+frontend.tls.requireClientAuth:
+  - value: true
+    constraints: {}

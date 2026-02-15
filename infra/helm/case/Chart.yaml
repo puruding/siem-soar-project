@@ -1,0 +1,7 @@
+apiVersion: v2
+name: case
+description: SIEM-SOAR Case Management Service
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords: [case-management, incident, timeline]

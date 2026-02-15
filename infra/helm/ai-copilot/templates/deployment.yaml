@@ -1,0 +1,158 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-ai-copilot
+  labels:
+    app.kubernetes.io/name: ai-copilot
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: llm-service
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-copilot
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ai-copilot
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: ai-copilot
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.httpPort }}
+            - name: grpc
+              containerPort: {{ .Values.config.grpcPort }}
+            - name: metrics
+              containerPort: {{ .Values.config.metricsPort }}
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: HTTP_PORT
+              value: {{ .Values.config.httpPort | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.config.grpcPort | quote }}
+            # vLLM settings
+            - name: VLLM_MODEL_PATH
+              value: {{ .Values.config.vllm.modelPath | quote }}
+            - name: VLLM_TENSOR_PARALLEL_SIZE
+              value: {{ .Values.config.vllm.tensorParallelSize | quote }}
+            - name: VLLM_MAX_MODEL_LEN
+              value: {{ .Values.config.vllm.maxModelLen | quote }}
+            - name: VLLM_GPU_MEMORY_UTILIZATION
+              value: {{ .Values.config.vllm.gpuMemoryUtilization | quote }}
+            - name: VLLM_QUANTIZATION
+              value: {{ .Values.config.vllm.quantization | quote }}
+            # LangChain settings
+            - name: LANGCHAIN_RAG_ENABLED
+              value: {{ .Values.config.langchain.ragEnabled | quote }}
+            - name: REDIS_HOST
+              value: {{ .Values.global.redis.host | quote }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.redis.existingSecret }}
+                  key: {{ .Values.global.redis.secretKey }}
+            # ClickHouse for NL2SQL
+            - name: CLICKHOUSE_HOST
+              value: {{ .Values.global.clickhouse.host | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.clickhouse.existingSecret }}
+                  key: {{ .Values.global.clickhouse.secretKey }}
+            # NVIDIA GPU settings
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0,1"
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: models
+              mountPath: /models
+            - name: shm
+              mountPath: /dev/shm
+            - name: config
+              mountPath: /etc/copilot
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 180  # LLM takes time to load
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: models
+          {{- if .Values.modelVolume.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-ai-copilot-models
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-ai-copilot-config
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-ai-copilot
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.httpPort }}
+      targetPort: http
+      name: http
+    - port: {{ .Values.service.grpcPort }}
+      targetPort: grpc
+      name: grpc
+    - port: {{ .Values.service.metricsPort }}
+      targetPort: metrics
+      name: metrics
+  selector:
+    app.kubernetes.io/name: ai-copilot
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- if .Values.modelVolume.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-ai-copilot-models
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.modelVolume.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.modelVolume.size }}
+{{- end }}

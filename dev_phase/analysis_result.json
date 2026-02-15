@@ -1,0 +1,213 @@
+{
+  "project_name": "siem-soar-platform",
+  "generated_at": "2026-02-03",
+  "strategy_dir": "./siem-soar-strategy",
+  "total_duration": "18개월",
+
+  "tech_stack": {
+    "language": ["go", "python", "rust", "typescript"],
+    "backend_framework": {
+      "go": "echo/fiber",
+      "python": "fastapi"
+    },
+    "frontend_framework": "react",
+    "database": {
+      "olap": "clickhouse",
+      "oltp": "postgresql",
+      "cache": "redis",
+      "graph": null,
+      "vector": null
+    },
+    "ai_ml": {
+      "llm": ["openai", "mistral", "llama", "solar"],
+      "ml_framework": "pytorch",
+      "agent_framework": "langchain",
+      "serving": "vllm"
+    },
+    "streaming": ["kafka", "vector"],
+    "cloud": "hybrid",
+    "container": "docker",
+    "orchestration": "kubernetes",
+    "workflow": "temporal"
+  },
+
+  "architecture": {
+    "style": "msa",
+    "layers": [
+      "presentation",
+      "api_gateway",
+      "application",
+      "data_pipeline",
+      "storage",
+      "integration"
+    ],
+    "services": [
+      "detection_engine",
+      "ai_ml_engine",
+      "soar_engine",
+      "ti_engine",
+      "query_service",
+      "case_manager",
+      "report_service",
+      "data_pipeline",
+      "api_gateway"
+    ],
+    "external_integrations": [
+      "splunk",
+      "elasticsearch",
+      "sentinel",
+      "misp",
+      "kisa_ti",
+      "edr_xdr"
+    ]
+  },
+
+  "features": {
+    "must_have": [
+      "F1.1_security_data_pipeline",
+      "F1.2_clickhouse_storage",
+      "F2.1_sigma_detection",
+      "F3.1_ai_alert_triage",
+      "F4.1_playbook_management",
+      "F4.3_case_management",
+      "F5_threat_intelligence",
+      "F6_multi_siem_integration",
+      "F7.1_soc_dashboard"
+    ],
+    "should_have": [
+      "F1_context_enrichment",
+      "F2.1_attack_mapping",
+      "F3.2_llm_copilot",
+      "F4.2_advanced_automation",
+      "F5_misp_integration",
+      "F7.2_compliance_reporting"
+    ],
+    "could_have": [
+      "F2.2_ueba",
+      "F3.3_agentic_ai",
+      "F5_ai_ti_scoring",
+      "F7.2_ai_report_generation"
+    ]
+  },
+
+  "data": {
+    "entities": [
+      "events",
+      "alerts",
+      "cases",
+      "playbooks",
+      "rules",
+      "tenants",
+      "users",
+      "threat_indicators"
+    ],
+    "has_graph_model": false,
+    "has_vector_store": false
+  },
+
+  "phases": {
+    "total_count": 13,
+    "list": [
+      {
+        "id": "setup",
+        "name": "Project Setup",
+        "duration_weeks": 2,
+        "strategy_phase": 1,
+        "dependencies": []
+      },
+      {
+        "id": "infra",
+        "name": "Infrastructure",
+        "duration_weeks": 4,
+        "strategy_phase": 1,
+        "dependencies": ["setup"]
+      },
+      {
+        "id": "data",
+        "name": "Data Layer",
+        "duration_weeks": 4,
+        "strategy_phase": 1,
+        "dependencies": ["setup"]
+      },
+      {
+        "id": "pipeline",
+        "name": "Data Pipeline",
+        "duration_weeks": 4,
+        "strategy_phase": 1,
+        "dependencies": ["data"]
+      },
+      {
+        "id": "backend-core",
+        "name": "Core Services",
+        "duration_weeks": 6,
+        "strategy_phase": 1,
+        "dependencies": ["pipeline"]
+      },
+      {
+        "id": "integration",
+        "name": "Multi-SIEM Integration",
+        "duration_weeks": 4,
+        "strategy_phase": 1,
+        "dependencies": ["pipeline"]
+      },
+      {
+        "id": "ai-basic",
+        "name": "AI Alert Triage",
+        "duration_weeks": 4,
+        "strategy_phase": 1,
+        "dependencies": ["backend-core", "integration"]
+      },
+      {
+        "id": "soar",
+        "name": "SOAR Engine",
+        "duration_weeks": 4,
+        "strategy_phase": 2,
+        "dependencies": ["ai-basic"]
+      },
+      {
+        "id": "frontend",
+        "name": "SOC Dashboard",
+        "duration_weeks": 6,
+        "strategy_phase": 2,
+        "dependencies": ["ai-basic"]
+      },
+      {
+        "id": "ai-advanced",
+        "name": "LLM Copilot",
+        "duration_weeks": 8,
+        "strategy_phase": 2,
+        "dependencies": ["soar", "frontend"]
+      },
+      {
+        "id": "ai-agentic",
+        "name": "Agentic AI",
+        "duration_weeks": 8,
+        "strategy_phase": 3,
+        "dependencies": ["ai-advanced"]
+      },
+      {
+        "id": "test-qa",
+        "name": "Test & QA",
+        "duration_weeks": 4,
+        "strategy_phase": 3,
+        "dependencies": ["ai-agentic"]
+      },
+      {
+        "id": "deploy",
+        "name": "Deploy & GA",
+        "duration_weeks": 2,
+        "strategy_phase": 3,
+        "dependencies": ["test-qa"]
+      }
+    ]
+  },
+
+  "decisions": {
+    "frontend_included": true,
+    "ai_included": true,
+    "graph_included": false,
+    "vector_included": false,
+    "integration_included": true,
+    "architecture_pattern": "msa"
+  }
+}

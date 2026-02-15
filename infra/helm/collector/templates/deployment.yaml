@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-collector
+  labels:
+    app.kubernetes.io/name: collector
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: collector
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: collector
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: collector
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          ports:
+            - name: syslog-udp
+              containerPort: 514
+              protocol: UDP
+            - name: syslog-tcp
+              containerPort: 514
+              protocol: TCP
+            - name: syslog-tls
+              containerPort: 6514
+              protocol: TCP
+            - name: http
+              containerPort: {{ .Values.config.http.port }}
+            - name: metrics
+              containerPort: {{ .Values.config.metricsPort }}
+          env:
+            - name: KAFKA_BROKERS
+              value: {{ .Values.global.kafka.brokers | quote }}
+            - name: SYSLOG_BUFFER_SIZE
+              value: {{ .Values.config.syslog.bufferSize | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-collector
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.syslogPort }}
+      targetPort: syslog-udp
+      protocol: UDP
+      name: syslog-udp
+    - port: {{ .Values.service.syslogPort }}
+      targetPort: syslog-tcp
+      protocol: TCP
+      name: syslog-tcp
+    - port: {{ .Values.service.syslogTLSPort }}
+      targetPort: syslog-tls
+      protocol: TCP
+      name: syslog-tls
+    - port: {{ .Values.service.httpPort }}
+      targetPort: http
+      name: http
+  selector:
+    app.kubernetes.io/name: collector
+    app.kubernetes.io/instance: {{ .Release.Name }}

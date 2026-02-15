@@ -1,0 +1,319 @@
+{
+  "events": [
+    {
+      "event_id": "evt-001-auth-failure",
+      "timestamp": "2024-01-15T10:30:15.123Z",
+      "event_type": "authentication",
+      "event_subtype": "failure",
+      "severity": "medium",
+      "source": {
+        "ip": "203.0.113.50",
+        "port": 54321,
+        "hostname": "unknown",
+        "geo": {
+          "country": "Unknown",
+          "city": "Unknown",
+          "latitude": 0,
+          "longitude": 0
+        }
+      },
+      "destination": {
+        "ip": "10.0.0.100",
+        "port": 22,
+        "hostname": "prod-server-01"
+      },
+      "user": {
+        "name": "root",
+        "domain": "local"
+      },
+      "service": "sshd",
+      "outcome": "failure",
+      "message": "Failed password for root from 203.0.113.50 port 54321 ssh2",
+      "raw_log": "Jan 15 10:30:15 prod-server-01 sshd[12345]: Failed password for root from 203.0.113.50 port 54321 ssh2",
+      "metadata": {
+        "collector_id": "collector-01",
+        "original_source": "syslog",
+        "log_type": "auth",
+        "facility": "authpriv"
+      }
+    },
+    {
+      "event_id": "evt-002-auth-success",
+      "timestamp": "2024-01-15T10:31:00.456Z",
+      "event_type": "authentication",
+      "event_subtype": "success",
+      "severity": "info",
+      "source": {
+        "ip": "192.168.1.100",
+        "port": 49152,
+        "hostname": "admin-workstation"
+      },
+      "destination": {
+        "ip": "10.0.0.100",
+        "port": 22,
+        "hostname": "prod-server-01"
+      },
+      "user": {
+        "name": "admin",
+        "domain": "CORP"
+      },
+      "service": "sshd",
+      "outcome": "success",
+      "message": "Accepted publickey for admin from 192.168.1.100 port 49152 ssh2",
+      "metadata": {
+        "collector_id": "collector-01",
+        "original_source": "syslog",
+        "auth_method": "publickey"
+      }
+    },
+    {
+      "event_id": "evt-003-process-create",
+      "timestamp": "2024-01-15T11:15:30.789Z",
+      "event_type": "process",
+      "event_subtype": "create",
+      "severity": "high",
+      "hostname": "WORKSTATION-042",
+      "process": {
+        "name": "invoice.exe",
+        "pid": 4567,
+        "path": "C:\\Users\\john.doe\\Downloads\\invoice.exe",
+        "command_line": "\"C:\\Users\\john.doe\\Downloads\\invoice.exe\"",
+        "hash": {
+          "md5": "abc123def456",
+          "sha256": "7d8a4c5b2e1f3a6b9c0d8e7f4a5b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b"
+        },
+        "user": "CORP\\john.doe",
+        "parent": {
+          "name": "explorer.exe",
+          "pid": 1234,
+          "path": "C:\\Windows\\explorer.exe"
+        }
+      },
+      "message": "New process created: invoice.exe",
+      "metadata": {
+        "collector_id": "edr-agent-042",
+        "original_source": "sysmon",
+        "event_id": 1
+      }
+    },
+    {
+      "event_id": "evt-004-network-connection",
+      "timestamp": "2024-01-15T11:16:00.123Z",
+      "event_type": "network",
+      "event_subtype": "connection",
+      "severity": "high",
+      "hostname": "WORKSTATION-042",
+      "source": {
+        "ip": "10.0.2.42",
+        "port": 49200
+      },
+      "destination": {
+        "ip": "198.51.100.50",
+        "port": 443,
+        "hostname": "malicious.example.com"
+      },
+      "protocol": "TCP",
+      "process": {
+        "name": "invoice.exe",
+        "pid": 4567
+      },
+      "bytes_sent": 1024,
+      "bytes_received": 2048,
+      "message": "Outbound connection to suspicious IP",
+      "metadata": {
+        "collector_id": "edr-agent-042",
+        "original_source": "sysmon",
+        "event_id": 3
+      }
+    },
+    {
+      "event_id": "evt-005-file-create",
+      "timestamp": "2024-01-15T11:16:30.456Z",
+      "event_type": "file",
+      "event_subtype": "create",
+      "severity": "medium",
+      "hostname": "WORKSTATION-042",
+      "file": {
+        "path": "C:\\Users\\john.doe\\AppData\\Local\\Temp\\payload.dll",
+        "name": "payload.dll",
+        "hash": {
+          "sha256": "abc123..."
+        },
+        "size": 102400
+      },
+      "process": {
+        "name": "invoice.exe",
+        "pid": 4567
+      },
+      "message": "File created by suspicious process",
+      "metadata": {
+        "collector_id": "edr-agent-042",
+        "original_source": "sysmon",
+        "event_id": 11
+      }
+    },
+    {
+      "event_id": "evt-006-dns-query",
+      "timestamp": "2024-01-15T13:30:00.789Z",
+      "event_type": "dns",
+      "event_subtype": "query",
+      "severity": "medium",
+      "source": {
+        "ip": "10.0.2.100",
+        "hostname": "WORKSTATION-077"
+      },
+      "dns": {
+        "query": "aGVsbG8gd29ybGQ.data.malicious-tunnel.com",
+        "query_type": "TXT",
+        "response_code": "NOERROR",
+        "answers": [
+          {
+            "type": "TXT",
+            "data": "base64encodedresponse=="
+          }
+        ]
+      },
+      "message": "Suspicious DNS query with high entropy",
+      "metadata": {
+        "collector_id": "dns-monitor-01",
+        "original_source": "dns_logs"
+      }
+    },
+    {
+      "event_id": "evt-007-firewall-allow",
+      "timestamp": "2024-01-15T09:45:00.123Z",
+      "event_type": "firewall",
+      "event_subtype": "allow",
+      "severity": "info",
+      "source": {
+        "ip": "10.0.1.50",
+        "port": 5432
+      },
+      "destination": {
+        "ip": "198.51.100.100",
+        "port": 443
+      },
+      "protocol": "TCP",
+      "rule": {
+        "id": "rule-outbound-https",
+        "name": "Allow Outbound HTTPS",
+        "action": "allow"
+      },
+      "bytes_transferred": 5368709120,
+      "message": "Large outbound transfer allowed",
+      "metadata": {
+        "collector_id": "firewall-01",
+        "original_source": "firewall_logs"
+      }
+    },
+    {
+      "event_id": "evt-008-web-request",
+      "timestamp": "2024-01-15T16:00:00.456Z",
+      "event_type": "web",
+      "event_subtype": "request",
+      "severity": "high",
+      "source": {
+        "ip": "203.0.113.200"
+      },
+      "destination": {
+        "ip": "10.0.3.50",
+        "port": 443,
+        "hostname": "customer-portal.example.com"
+      },
+      "http": {
+        "method": "GET",
+        "url": "/api/users?id=1' OR '1'='1",
+        "status_code": 403,
+        "user_agent": "Mozilla/5.0 (compatible; SQLi-Scanner/1.0)",
+        "request_headers": {
+          "Host": "customer-portal.example.com",
+          "Accept": "*/*"
+        }
+      },
+      "waf": {
+        "action": "block",
+        "rule_id": "SQLI-001",
+        "category": "SQL Injection"
+      },
+      "message": "SQL injection attempt blocked by WAF",
+      "metadata": {
+        "collector_id": "waf-01",
+        "original_source": "waf_logs"
+      }
+    },
+    {
+      "event_id": "evt-009-email-received",
+      "timestamp": "2024-01-15T08:30:00.789Z",
+      "event_type": "email",
+      "event_subtype": "received",
+      "severity": "medium",
+      "email": {
+        "message_id": "msg-123456",
+        "from": "it-support@examp1e.com",
+        "to": ["jane.smith@example.com"],
+        "subject": "Urgent: Password Reset Required",
+        "has_attachment": false,
+        "has_link": true,
+        "links": [
+          {
+            "url": "https://fake-login.malicious.com/reset",
+            "display_text": "Reset Password Now"
+          }
+        ]
+      },
+      "spam_score": 8.5,
+      "phishing_score": 0.95,
+      "message": "Suspected phishing email received",
+      "metadata": {
+        "collector_id": "email-security-01",
+        "original_source": "email_gateway"
+      }
+    },
+    {
+      "event_id": "evt-010-rdp-connection",
+      "timestamp": "2024-01-15T14:00:00.123Z",
+      "event_type": "authentication",
+      "event_subtype": "rdp_login",
+      "severity": "high",
+      "source": {
+        "ip": "10.0.2.50",
+        "hostname": "WORKSTATION-042"
+      },
+      "destination": {
+        "ip": "10.0.1.100",
+        "port": 3389,
+        "hostname": "DC-01"
+      },
+      "user": {
+        "name": "svc_backup",
+        "domain": "CORP"
+      },
+      "outcome": "success",
+      "session": {
+        "id": "rdp-session-12345",
+        "type": "interactive"
+      },
+      "message": "Service account RDP login to domain controller",
+      "metadata": {
+        "collector_id": "dc-agent-01",
+        "original_source": "windows_security",
+        "event_id": 4624
+      }
+    }
+  ],
+  "metadata": {
+    "generated_at": "2024-01-15T18:00:00Z",
+    "version": "1.0",
+    "total_events": 10,
+    "event_types": [
+      "authentication",
+      "process",
+      "network",
+      "file",
+      "dns",
+      "firewall",
+      "web",
+      "email"
+    ]
+  }
+}

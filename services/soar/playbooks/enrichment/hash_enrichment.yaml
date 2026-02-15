@@ -1,0 +1,377 @@
+# File Hash Enrichment Playbook
+# Enriches file hashes with threat intelligence and sandbox analysis
+
+id: hash_enrichment
+name: File Hash Enrichment
+display_name: File Hash Enrichment
+description: |
+  Enriches file hashes (MD5, SHA1, SHA256) with comprehensive data:
+  - Multi-source threat intelligence lookups
+  - Sandbox analysis results
+  - File metadata and classification
+  - Historical detections
+
+version: 1
+category: enrichment
+author: SIEM-SOAR Platform
+tags:
+  - enrichment
+  - hash
+  - malware
+  - threat_intel
+enabled: true
+
+trigger:
+  type: alert
+  conditions:
+    - field: entity_type
+      operator: in
+      value: [hash, file_hash, md5, sha1, sha256]
+
+inputs:
+  - name: hash
+    type: string
+    required: true
+    description: File hash to enrich (MD5, SHA1, or SHA256)
+  - name: hash_type
+    type: string
+    required: false
+    description: Hash type (auto-detected if not provided)
+  - name: submit_to_sandbox
+    type: bool
+    required: false
+    default: false
+    description: Submit to sandbox if not found
+
+outputs:
+  - name: enrichment_results
+    type: object
+    source: steps.aggregate_results.output.results
+  - name: risk_score
+    type: int
+    source: steps.calculate_risk.output.score
+  - name: verdict
+    type: string
+    source: steps.calculate_risk.output.verdict
+
+steps:
+  - id: detect_hash_type
+    name: Detect Hash Type
+    type: script
+    script:
+      language: python
+      code: |
+        import re
+
+        hash_value = inputs['hash'].strip().lower()
+        provided_type = inputs.get('hash_type', '').lower()
+
+        if provided_type:
+            hash_type = provided_type
+        elif len(hash_value) == 32 and re.match(r'^[a-f0-9]+$', hash_value):
+            hash_type = 'md5'
+        elif len(hash_value) == 40 and re.match(r'^[a-f0-9]+$', hash_value):
+            hash_type = 'sha1'
+        elif len(hash_value) == 64 and re.match(r'^[a-f0-9]+$', hash_value):
+            hash_type = 'sha256'
+        else:
+            raise Exception(f"Invalid hash format: {hash_value}")
+
+        return {
+            'hash': hash_value,
+            'hash_type': hash_type,
+            'valid': True
+        }
+      inputs:
+        hash: $inputs.hash
+        hash_type: $inputs.hash_type
+
+  - id: parallel_lookups
+    name: Parallel Threat Intel Lookups
+    type: parallel
+    parallel:
+      branches:
+        - id: virustotal
+          name: VirusTotal Lookup
+          steps:
+            - id: vt_query
+              name: Query VirusTotal
+              type: action
+              action:
+                connector: threat_intel
+                action: lookup_hash
+                parameters:
+                  hash: $steps.detect_hash_type.output.hash
+                  source: virustotal
+              continue_on_error: true
+
+        - id: malwarebazaar
+          name: MalwareBazaar Lookup
+          steps:
+            - id: mb_query
+              name: Query MalwareBazaar
+              type: action
+              action:
+                connector: threat_intel
+                action: lookup_hash
+                parameters:
+                  hash: $steps.detect_hash_type.output.hash
+                  source: malwarebazaar
+              continue_on_error: true
+
+        - id: hybridanalysis
+          name: Hybrid Analysis Lookup
+          steps:
+            - id: ha_query
+              name: Query Hybrid Analysis
+              type: action
+              action:
+                connector: threat_intel
+                action: lookup_hash
+                parameters:
+                  hash: $steps.detect_hash_type.output.hash
+                  source: hybridanalysis
+              continue_on_error: true
+
+        - id: otx
+          name: OTX AlienVault Lookup
+          steps:
+            - id: otx_query
+              name: Query OTX
+              type: action
+              action:
+                connector: threat_intel
+                action: lookup_hash
+                parameters:
+                  hash: $steps.detect_hash_type.output.hash
+                  source: otx
+              continue_on_error: true
+
+        - id: internal_lookup
+          name: Internal IOC Database
+          steps:
+            - id: ioc_query
+              name: Query Internal IOC DB
+              type: action
+              action:
+                connector: ioc_database
+                action: lookup
+                parameters:
+                  type: hash
+                  value: $steps.detect_hash_type.output.hash
+              continue_on_error: true
+
+      fail_fast: false
+      max_concurrent: 5
+
+  - id: aggregate_results
+    name: Aggregate Hash Enrichment
+    type: script
+    script:
+      language: python
+      code: |
+        from datetime import datetime
+
+        results = {
+            'hash': inputs['hash_info']['hash'],
+            'hash_type': inputs['hash_info']['hash_type'],
+            'enrichment_timestamp': str(datetime.now()),
+            'sources_checked': [],
+            'file_info': {},
+            'detections': {},
+            'sandbox_results': [],
+            'tags': set(),
+            'malware_families': set()
+        }
+
+        # VirusTotal
+        if vt := inputs.get('vt_query'):
+            results['sources_checked'].append('virustotal')
+            results['detections']['virustotal'] = {
+                'detected': vt.get('positives', 0),
+                'total': vt.get('total', 0),
+                'detection_rate': f"{vt.get('positives', 0)}/{vt.get('total', 0)}",
+                'scan_date': vt.get('scan_date')
+            }
+            if vt.get('file_info'):
+                results['file_info'].update({
+                    'file_name': vt['file_info'].get('name'),
+                    'file_type': vt['file_info'].get('type'),
+                    'file_size': vt['file_info'].get('size')
+                })
+            for tag in vt.get('tags', []):
+                results['tags'].add(tag)
+            for family in vt.get('malware_families', []):
+                results['malware_families'].add(family)
+
+        # MalwareBazaar
+        if mb := inputs.get('mb_query'):
+            results['sources_checked'].append('malwarebazaar')
+            if mb.get('found'):
+                results['detections']['malwarebazaar'] = {
+                    'signature': mb.get('signature'),
+                    'file_type': mb.get('file_type'),
+                    'first_seen': mb.get('first_seen'),
+                    'delivery_method': mb.get('delivery_method')
+                }
+                for tag in mb.get('tags', []):
+                    results['tags'].add(tag)
+                if family := mb.get('signature'):
+                    results['malware_families'].add(family)
+
+        # Hybrid Analysis
+        if ha := inputs.get('ha_query'):
+            results['sources_checked'].append('hybridanalysis')
+            if ha.get('found'):
+                results['detections']['hybridanalysis'] = {
+                    'verdict': ha.get('verdict'),
+                    'threat_score': ha.get('threat_score'),
+                    'av_detect': ha.get('av_detect')
+                }
+                results['sandbox_results'].append({
+                    'source': 'hybridanalysis',
+                    'verdict': ha.get('verdict'),
+                    'threat_score': ha.get('threat_score'),
+                    'behaviors': ha.get('behaviors', [])
+                })
+
+        # OTX
+        if otx := inputs.get('otx_query'):
+            results['sources_checked'].append('otx')
+            if otx.get('pulse_count', 0) > 0:
+                results['detections']['otx'] = {
+                    'pulse_count': otx.get('pulse_count'),
+                    'pulses': otx.get('pulses', [])[:5]
+                }
+
+        # Internal IOC
+        if ioc := inputs.get('ioc_query'):
+            results['sources_checked'].append('internal_ioc')
+            if ioc.get('found'):
+                results['detections']['internal'] = {
+                    'classification': ioc.get('classification'),
+                    'confidence': ioc.get('confidence'),
+                    'added_date': ioc.get('added_date'),
+                    'source': ioc.get('source')
+                }
+
+        # Convert sets to lists
+        results['tags'] = list(results['tags'])
+        results['malware_families'] = list(results['malware_families'])
+
+        return {'results': results}
+      inputs:
+        hash_info: $steps.detect_hash_type.output
+        vt_query: $steps.parallel_lookups.virustotal.vt_query.output
+        mb_query: $steps.parallel_lookups.malwarebazaar.mb_query.output
+        ha_query: $steps.parallel_lookups.hybridanalysis.ha_query.output
+        otx_query: $steps.parallel_lookups.otx.otx_query.output
+        ioc_query: $steps.parallel_lookups.internal_lookup.ioc_query.output
+
+  - id: calculate_risk
+    name: Calculate Hash Risk Score
+    type: script
+    script:
+      language: python
+      code: |
+        results = inputs['results']
+        score = 0
+        factors = []
+
+        detections = results.get('detections', {})
+
+        # VirusTotal scoring
+        vt = detections.get('virustotal', {})
+        if vt:
+            detected = vt.get('detected', 0)
+            total = vt.get('total', 0)
+            if total > 0:
+                detection_rate = detected / total
+                if detection_rate > 0.5:
+                    score += 50
+                    factors.append(f"VT: {detected}/{total} detections ({detection_rate*100:.0f}%)")
+                elif detection_rate > 0.2:
+                    score += 30
+                    factors.append(f"VT: {detected}/{total} detections")
+                elif detected > 0:
+                    score += 15
+                    factors.append(f"VT: {detected} detections")
+
+        # MalwareBazaar
+        mb = detections.get('malwarebazaar', {})
+        if mb.get('signature'):
+            score += 25
+            factors.append(f"MalwareBazaar: {mb.get('signature')}")
+
+        # Hybrid Analysis
+        ha = detections.get('hybridanalysis', {})
+        if ha.get('verdict') == 'malicious':
+            score += 25
+            factors.append("Hybrid Analysis: malicious verdict")
+        elif ha.get('threat_score', 0) > 50:
+            score += 15
+            factors.append(f"Hybrid Analysis: threat score {ha.get('threat_score')}")
+
+        # OTX pulses
+        otx = detections.get('otx', {})
+        if otx.get('pulse_count', 0) > 0:
+            score += min(otx.get('pulse_count', 0) * 5, 20)
+            factors.append(f"OTX: {otx.get('pulse_count')} pulses")
+
+        # Internal IOC
+        internal = detections.get('internal', {})
+        if internal.get('classification') == 'malicious':
+            score += 30
+            factors.append("Internal IOC: classified malicious")
+
+        # Malware family identified
+        if results.get('malware_families'):
+            score += 10
+            factors.append(f"Malware families: {', '.join(results['malware_families'][:3])}")
+
+        score = min(score, 100)
+
+        if score >= 70:
+            verdict = 'malicious'
+        elif score >= 40:
+            verdict = 'suspicious'
+        elif score > 0:
+            verdict = 'potentially_unwanted'
+        else:
+            verdict = 'clean'
+
+        return {
+            'score': score,
+            'verdict': verdict,
+            'risk_level': 'critical' if score >= 80 else 'high' if score >= 60 else 'medium' if score >= 40 else 'low',
+            'risk_factors': factors,
+            'sources_with_detections': len([d for d in detections.values() if d])
+        }
+      inputs:
+        results: $steps.aggregate_results.output.results
+
+  - id: update_case
+    name: Update Case with Enrichment
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.case_id
+          operator: exists
+      then:
+        - id: add_enrichment
+          name: Add Hash Enrichment to Case
+          type: action
+          action:
+            connector: case_management
+            action: add_evidence
+            parameters:
+              case_id: $inputs.case_id
+              evidence_type: enrichment
+              name: "Hash Enrichment - ${inputs.hash}"
+              data: $steps.aggregate_results.output.results
+              tags: [hash_enrichment, malware_analysis]
+
+timeout: 5m
+retry_policy:
+  max_attempts: 2
+  initial_interval: 10s

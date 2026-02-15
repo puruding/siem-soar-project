@@ -1,0 +1,119 @@
+[project]
+name = "siem-soar-ai"
+version = "0.1.0"
+description = "AI/ML services for SIEM-SOAR platform"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = {text = "Proprietary"}
+authors = [
+    {name = "SIEM-SOAR Team", email = "team@siem-soar.io"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "torch>=2.2.0",
+    "transformers>=4.37.0",
+    "langchain>=0.1.0",
+    "langchain-core>=0.1.0",
+    "langchain-community>=0.0.10",
+    "langgraph>=0.0.20",
+    "openai>=1.10.0",
+    "anthropic>=0.18.0",
+    # "vllm>=0.3.0",
+    "sentence-transformers>=2.3.0",
+    "faiss-cpu>=1.7.4",
+    "chromadb>=0.4.22",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "scikit-learn>=1.4.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.1.0",
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "httpx>=0.26.0",
+    "redis>=5.0.0",
+    "kafka-python>=2.0.2",
+    "clickhouse-connect>=0.7.0",
+    "sqlalchemy>=2.0.25",
+    "psycopg[binary]>=3.1.0",
+    "structlog>=24.1.0",
+    "tenacity>=8.2.0",
+    "pyyaml>=6.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.2.0",
+    "mypy>=1.8.0",
+    "black>=24.1.0",
+    "isort>=5.13.0",
+    "pre-commit>=3.6.0",
+    "ipython>=8.21.0",
+    "jupyter>=1.0.0",
+]
+gpu = [
+    "torch[cuda]>=2.2.0",
+    # "faiss-gpu>=1.7.4",
+]
+
+[project.scripts]
+ai-triage = "services.triage.main:main"
+ai-copilot = "services.copilot.main:main"
+ai-agentic = "services.agentic.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["models", "services", "common", "data", "training", "feedback", "integration"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.isort]
+known-first-party = ["models", "services", "common"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --cov=. --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["models", "services", "common"]
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]

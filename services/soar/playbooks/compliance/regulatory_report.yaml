@@ -1,0 +1,17 @@
+name: regulatory_report
+version: "1.0"
+description: Generate regulatory compliance reports
+category: compliance
+severity: medium
+steps:
+  - id: collect_incident_data
+    action: siem.aggregate_incidents
+  - id: categorize_by_regulation
+    action: compliance.categorize_incidents
+  - id: calculate_metrics
+    action: metrics.calculate_compliance
+  - id: generate_report
+    action: report.generate
+    template: regulatory_compliance
+  - id: submit_to_regulator
+    action: compliance.submit_report

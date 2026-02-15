@@ -1,0 +1,14 @@
+name: compliance_alert
+version: "1.0"
+description: Alert compliance team on security violations
+category: notification
+severity: high
+steps:
+  - id: categorize_violation
+    action: script
+  - id: notify_compliance
+    action: email.send
+    params:
+      to: ["compliance@company.com"]
+  - id: create_audit_record
+    action: audit.create_entry

@@ -1,0 +1,193 @@
+<?xml version="1.0"?>
+<!--
+  ClickHouse Users Configuration
+  SIEM-SOAR Platform
+
+  Users:
+  - admin: Full administrative access
+  - siem_app: Application user with read/write to siem database
+  - siem_readonly: Read-only access for dashboards/reporting
+  - siem_internal: Internal cluster replication
+-->
+<clickhouse>
+    <!-- Profiles define query settings -->
+    <profiles>
+        <!-- Default profile with reasonable limits -->
+        <default>
+            <max_memory_usage>10000000000</max_memory_usage>
+            <max_memory_usage_for_user>20000000000</max_memory_usage_for_user>
+            <use_uncompressed_cache>0</use_uncompressed_cache>
+            <load_balancing>random</load_balancing>
+            <max_partitions_per_insert_block>100</max_partitions_per_insert_block>
+            <log_queries>1</log_queries>
+            <max_execution_time>300</max_execution_time>
+            <max_rows_to_read>1000000000</max_rows_to_read>
+            <max_bytes_to_read>100000000000</max_bytes_to_read>
+            <distributed_product_mode>global</distributed_product_mode>
+        </default>
+
+        <!-- Profile for high-throughput ingestion -->
+        <ingestion>
+            <max_memory_usage>20000000000</max_memory_usage>
+            <max_insert_block_size>1048576</max_insert_block_size>
+            <min_insert_block_size_rows>1000000</min_insert_block_size_rows>
+            <min_insert_block_size_bytes>268435456</min_insert_block_size_bytes>
+            <max_partitions_per_insert_block>1000</max_partitions_per_insert_block>
+            <max_execution_time>3600</max_execution_time>
+            <log_queries>1</log_queries>
+            <async_insert>1</async_insert>
+            <wait_for_async_insert>0</wait_for_async_insert>
+            <async_insert_max_data_size>10000000</async_insert_max_data_size>
+            <async_insert_busy_timeout_ms>200</async_insert_busy_timeout_ms>
+        </ingestion>
+
+        <!-- Profile for analytics queries -->
+        <analytics>
+            <max_memory_usage>30000000000</max_memory_usage>
+            <max_execution_time>600</max_execution_time>
+            <max_rows_to_read>10000000000</max_rows_to_read>
+            <max_bytes_to_read>1000000000000</max_bytes_to_read>
+            <use_uncompressed_cache>1</use_uncompressed_cache>
+            <load_balancing>random</load_balancing>
+            <log_queries>1</log_queries>
+            <allow_experimental_analyzer>1</allow_experimental_analyzer>
+            <distributed_group_by_no_merge>0</distributed_group_by_no_merge>
+            <optimize_aggregation_in_order>1</optimize_aggregation_in_order>
+        </analytics>
+
+        <!-- Read-only profile -->
+        <readonly>
+            <readonly>1</readonly>
+            <max_memory_usage>5000000000</max_memory_usage>
+            <max_execution_time>60</max_execution_time>
+            <max_rows_to_read>100000000</max_rows_to_read>
+            <log_queries>1</log_queries>
+        </readonly>
+
+        <!-- Internal replication profile -->
+        <internal>
+            <max_memory_usage>40000000000</max_memory_usage>
+            <max_execution_time>3600</max_execution_time>
+            <log_queries>0</log_queries>
+        </internal>
+    </profiles>
+
+    <!-- Quotas for rate limiting -->
+    <quotas>
+        <default>
+            <interval>
+                <duration>3600</duration>
+                <queries>10000</queries>
+                <errors>1000</errors>
+                <result_rows>1000000000</result_rows>
+                <read_rows>10000000000</read_rows>
+                <execution_time>36000</execution_time>
+            </interval>
+        </default>
+
+        <ingestion_quota>
+            <interval>
+                <duration>3600</duration>
+                <queries>1000000</queries>
+                <errors>10000</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>360000</execution_time>
+            </interval>
+        </ingestion_quota>
+
+        <unlimited>
+            <interval>
+                <duration>3600</duration>
+                <queries>0</queries>
+                <errors>0</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>0</execution_time>
+            </interval>
+        </unlimited>
+    </quotas>
+
+    <!-- User Definitions -->
+    <users>
+        <!-- Default user (disabled in production) -->
+        <default>
+            <password></password>
+            <networks>
+                <ip>127.0.0.1</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>0</access_management>
+        </default>
+
+        <!-- Admin user with full privileges -->
+        <admin>
+            <password_sha256_hex from_env="CLICKHOUSE_ADMIN_PASSWORD_SHA256"/>
+            <networks>
+                <ip>10.0.0.0/8</ip>
+                <ip>172.16.0.0/12</ip>
+                <ip>192.168.0.0/16</ip>
+                <ip>127.0.0.1</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>unlimited</quota>
+            <access_management>1</access_management>
+        </admin>
+
+        <!-- Application user for SIEM services -->
+        <siem_app>
+            <password_sha256_hex from_env="CLICKHOUSE_SIEM_APP_PASSWORD_SHA256"/>
+            <networks>
+                <ip>10.0.0.0/8</ip>
+                <ip>172.16.0.0/12</ip>
+                <ip>192.168.0.0/16</ip>
+            </networks>
+            <profile>ingestion</profile>
+            <quota>ingestion_quota</quota>
+            <access_management>0</access_management>
+            <databases>
+                <siem>
+                    <table>*</table>
+                </siem>
+                <siem_metrics>
+                    <table>*</table>
+                </siem_metrics>
+            </databases>
+        </siem_app>
+
+        <!-- Read-only user for dashboards and reporting -->
+        <siem_readonly>
+            <password_sha256_hex from_env="CLICKHOUSE_SIEM_READONLY_PASSWORD_SHA256"/>
+            <networks>
+                <ip>10.0.0.0/8</ip>
+                <ip>172.16.0.0/12</ip>
+                <ip>192.168.0.0/16</ip>
+            </networks>
+            <profile>readonly</profile>
+            <quota>default</quota>
+            <access_management>0</access_management>
+            <databases>
+                <siem>
+                    <table>*</table>
+                </siem>
+                <siem_metrics>
+                    <table>*</table>
+                </siem_metrics>
+            </databases>
+        </siem_readonly>
+
+        <!-- Internal user for cluster replication -->
+        <siem_internal>
+            <password_sha256_hex from_env="CLICKHOUSE_INTERNAL_PASSWORD_SHA256"/>
+            <networks>
+                <host>clickhouse-01</host>
+                <host>clickhouse-02</host>
+                <host>clickhouse-03</host>
+            </networks>
+            <profile>internal</profile>
+            <quota>unlimited</quota>
+            <access_management>0</access_management>
+        </siem_internal>
+    </users>
+</clickhouse>

@@ -1,0 +1,353 @@
+{
+  "feature_to_phase_mapping": [
+    {
+      "feature_id": "F1.1",
+      "feature_name": "Security Data Pipeline",
+      "priority": "P0",
+      "phases": ["pipeline"],
+      "tasks": [
+        "pipeline-T2: 수집 컴포넌트",
+        "pipeline-T3: Parser 엔진",
+        "pipeline-T4: Normalizer (UDM)",
+        "pipeline-T5: Enricher",
+        "pipeline-T6: Router"
+      ]
+    },
+    {
+      "feature_id": "F1.2",
+      "feature_name": "ClickHouse 저장소",
+      "priority": "P0",
+      "phases": ["data"],
+      "tasks": [
+        "data-T1: ClickHouse 클러스터",
+        "data-T2: UDM 스키마 설계",
+        "data-T3: 이벤트 테이블"
+      ]
+    },
+    {
+      "feature_id": "F2.1",
+      "feature_name": "규칙 기반 탐지",
+      "priority": "P0",
+      "phases": ["backend-core"],
+      "tasks": [
+        "core-T1: Detection Engine 기본",
+        "core-T2: Sigma 규칙 엔진",
+        "core-T3: 상관분석 규칙"
+      ]
+    },
+    {
+      "feature_id": "F2.2",
+      "feature_name": "ML 기반 탐지",
+      "priority": "P1-P2",
+      "phases": ["ai-basic", "ai-advanced"],
+      "tasks": [
+        "ai1-T3: 분류 모델 학습",
+        "ai2-T5: UEBA 모델"
+      ]
+    },
+    {
+      "feature_id": "F3.1",
+      "feature_name": "AI Alert Triage",
+      "priority": "P0",
+      "phases": ["ai-basic"],
+      "tasks": [
+        "ai1-T1: ML 모델 설계",
+        "ai1-T3: 분류 모델 학습",
+        "ai1-T4: 우선순위 모델",
+        "ai1-T6: FP 학습"
+      ]
+    },
+    {
+      "feature_id": "F3.2",
+      "feature_name": "LLM Copilot",
+      "priority": "P1",
+      "phases": ["ai-advanced"],
+      "tasks": [
+        "ai2-T1: LLM 인프라",
+        "ai2-T2: NL2SQL 모델",
+        "ai2-T3: 인시던트 요약",
+        "ai2-T5: 한국어 파인튜닝",
+        "ai2-T7: Copilot API"
+      ]
+    },
+    {
+      "feature_id": "F3.3",
+      "feature_name": "Agentic AI",
+      "priority": "P2-P3",
+      "phases": ["ai-agentic"],
+      "tasks": [
+        "ai3-T1: Agent 아키텍처",
+        "ai3-T2: 조사 에이전트",
+        "ai3-T3: 분석 에이전트",
+        "ai3-T4: 대응 에이전트",
+        "ai3-T7: Self-Healing"
+      ]
+    },
+    {
+      "feature_id": "F4.1",
+      "feature_name": "플레이북 관리",
+      "priority": "P0",
+      "phases": ["soar"],
+      "tasks": [
+        "soar-T1: Temporal 설정",
+        "soar-T2: 플레이북 모델",
+        "soar-T3: 플레이북 실행기",
+        "soar-T8: 플레이북 라이브러리"
+      ]
+    },
+    {
+      "feature_id": "F4.2",
+      "feature_name": "자동화 실행",
+      "priority": "P0-P1",
+      "phases": ["soar"],
+      "tasks": [
+        "soar-T4: 커넥터 프레임워크",
+        "soar-T7: 승인 워크플로우"
+      ]
+    },
+    {
+      "feature_id": "F4.3",
+      "feature_name": "케이스 관리",
+      "priority": "P0",
+      "phases": ["soar", "frontend"],
+      "tasks": [
+        "soar-T5: 케이스 관리",
+        "soar-T6: 타임라인",
+        "fe-T6: 케이스 관리 UI"
+      ]
+    },
+    {
+      "feature_id": "F5",
+      "feature_name": "위협 인텔리전스",
+      "priority": "P0-P1",
+      "phases": ["backend-core"],
+      "tasks": [
+        "core-T4: TI Engine",
+        "core-T5: IOC 매칭"
+      ]
+    },
+    {
+      "feature_id": "F6",
+      "feature_name": "Multi-SIEM 통합",
+      "priority": "P0-P1",
+      "phases": ["integration"],
+      "tasks": [
+        "intg-T1: Connector 프레임워크",
+        "intg-T2: Splunk 커넥터",
+        "intg-T3: Elastic 커넥터",
+        "intg-T4: Sentinel 커넥터",
+        "intg-T5: 통합 쿼리 레이어"
+      ]
+    },
+    {
+      "feature_id": "F7.1",
+      "feature_name": "대시보드",
+      "priority": "P0",
+      "phases": ["frontend"],
+      "tasks": [
+        "fe-T4: SOC 대시보드",
+        "fe-T5: Alert 목록",
+        "fe-T9: 위젯 라이브러리"
+      ]
+    },
+    {
+      "feature_id": "F7.2",
+      "feature_name": "리포팅",
+      "priority": "P1-P2",
+      "phases": ["frontend", "ai-advanced"],
+      "tasks": [
+        "fe-T10: 리포트 화면",
+        "ai2-T4: 자동 리포트 생성"
+      ]
+    }
+  ],
+
+  "phase_to_task_mapping": {
+    "setup": {
+      "task_count": 5,
+      "related_features": [],
+      "tasks": [
+        {"id": "setup-T1", "name": "모노레포 초기화"},
+        {"id": "setup-T2", "name": "Go 프로젝트 구조"},
+        {"id": "setup-T3", "name": "Python 프로젝트 구조"},
+        {"id": "setup-T4", "name": "공통 설정"},
+        {"id": "setup-T5", "name": "문서 템플릿"}
+      ]
+    },
+    "infra": {
+      "task_count": 7,
+      "related_features": [],
+      "tasks": [
+        {"id": "infra-T1", "name": "K8s 클러스터 설계"},
+        {"id": "infra-T2", "name": "Terraform IaC"},
+        {"id": "infra-T3", "name": "Helm Charts"},
+        {"id": "infra-T4", "name": "CI 파이프라인"},
+        {"id": "infra-T5", "name": "CD 파이프라인"},
+        {"id": "infra-T6", "name": "모니터링 스택"},
+        {"id": "infra-T7", "name": "시크릿 관리"}
+      ]
+    },
+    "data": {
+      "task_count": 6,
+      "related_features": ["F1.2"],
+      "tasks": [
+        {"id": "data-T1", "name": "ClickHouse 클러스터"},
+        {"id": "data-T2", "name": "UDM 스키마 설계"},
+        {"id": "data-T3", "name": "이벤트 테이블"},
+        {"id": "data-T4", "name": "PostgreSQL 스키마"},
+        {"id": "data-T5", "name": "Redis 설정"},
+        {"id": "data-T6", "name": "Go Repository"}
+      ]
+    },
+    "pipeline": {
+      "task_count": 7,
+      "related_features": ["F1.1"],
+      "tasks": [
+        {"id": "pipeline-T1", "name": "Kafka 클러스터"},
+        {"id": "pipeline-T2", "name": "수집 컴포넌트"},
+        {"id": "pipeline-T3", "name": "Parser 엔진"},
+        {"id": "pipeline-T4", "name": "Normalizer (UDM)"},
+        {"id": "pipeline-T5", "name": "Enricher"},
+        {"id": "pipeline-T6", "name": "Router"},
+        {"id": "pipeline-T7", "name": "Vector 통합"}
+      ]
+    },
+    "backend-core": {
+      "task_count": 8,
+      "related_features": ["F2.1", "F5"],
+      "tasks": [
+        {"id": "core-T1", "name": "Detection Engine 기본"},
+        {"id": "core-T2", "name": "Sigma 규칙 엔진"},
+        {"id": "core-T3", "name": "상관분석 규칙"},
+        {"id": "core-T4", "name": "TI Engine"},
+        {"id": "core-T5", "name": "IOC 매칭"},
+        {"id": "core-T6", "name": "Query Service"},
+        {"id": "core-T7", "name": "Alert 생성"},
+        {"id": "core-T8", "name": "API Gateway"}
+      ]
+    },
+    "integration": {
+      "task_count": 6,
+      "related_features": ["F6"],
+      "tasks": [
+        {"id": "intg-T1", "name": "Connector 프레임워크"},
+        {"id": "intg-T2", "name": "Splunk 커넥터"},
+        {"id": "intg-T3", "name": "Elastic 커넥터"},
+        {"id": "intg-T4", "name": "Sentinel 커넥터"},
+        {"id": "intg-T5", "name": "통합 쿼리 레이어"},
+        {"id": "intg-T6", "name": "Sigma 배포"}
+      ]
+    },
+    "ai-basic": {
+      "task_count": 7,
+      "related_features": ["F3.1", "F2.2"],
+      "tasks": [
+        {"id": "ai1-T1", "name": "ML 모델 설계"},
+        {"id": "ai1-T2", "name": "데이터 파이프라인"},
+        {"id": "ai1-T3", "name": "분류 모델 학습"},
+        {"id": "ai1-T4", "name": "우선순위 모델"},
+        {"id": "ai1-T5", "name": "모델 서빙"},
+        {"id": "ai1-T6", "name": "FP 학습"},
+        {"id": "ai1-T7", "name": "Alert 통합"}
+      ]
+    },
+    "soar": {
+      "task_count": 8,
+      "related_features": ["F4.1", "F4.2", "F4.3"],
+      "tasks": [
+        {"id": "soar-T1", "name": "Temporal 설정"},
+        {"id": "soar-T2", "name": "플레이북 모델"},
+        {"id": "soar-T3", "name": "플레이북 실행기"},
+        {"id": "soar-T4", "name": "커넥터 프레임워크"},
+        {"id": "soar-T5", "name": "케이스 관리"},
+        {"id": "soar-T6", "name": "타임라인"},
+        {"id": "soar-T7", "name": "승인 워크플로우"},
+        {"id": "soar-T8", "name": "플레이북 라이브러리"}
+      ]
+    },
+    "frontend": {
+      "task_count": 9,
+      "related_features": ["F7.1", "F7.2", "F4.3"],
+      "tasks": [
+        {"id": "fe-T1", "name": "프로젝트 설정"},
+        {"id": "fe-T2", "name": "디자인 시스템"},
+        {"id": "fe-T3", "name": "인증/인가"},
+        {"id": "fe-T4", "name": "SOC 대시보드"},
+        {"id": "fe-T5", "name": "Alert 목록"},
+        {"id": "fe-T6", "name": "케이스 관리 UI"},
+        {"id": "fe-T7", "name": "쿼리 콘솔"},
+        {"id": "fe-T8", "name": "플레이북 편집기"},
+        {"id": "fe-T9", "name": "위젯 라이브러리"}
+      ]
+    },
+    "ai-advanced": {
+      "task_count": 8,
+      "related_features": ["F3.2", "F7.2"],
+      "tasks": [
+        {"id": "ai2-T1", "name": "LLM 인프라"},
+        {"id": "ai2-T2", "name": "NL2SQL 모델"},
+        {"id": "ai2-T3", "name": "인시던트 요약"},
+        {"id": "ai2-T4", "name": "대응 권장"},
+        {"id": "ai2-T5", "name": "한국어 파인튜닝"},
+        {"id": "ai2-T6", "name": "RAG 파이프라인"},
+        {"id": "ai2-T7", "name": "Copilot API"},
+        {"id": "ai2-T8", "name": "Copilot UI"}
+      ]
+    },
+    "ai-agentic": {
+      "task_count": 8,
+      "related_features": ["F3.3"],
+      "tasks": [
+        {"id": "ai3-T1", "name": "Agent 아키텍처"},
+        {"id": "ai3-T2", "name": "조사 에이전트"},
+        {"id": "ai3-T3", "name": "분석 에이전트"},
+        {"id": "ai3-T4", "name": "대응 에이전트"},
+        {"id": "ai3-T5", "name": "오케스트레이터"},
+        {"id": "ai3-T6", "name": "안전장치"},
+        {"id": "ai3-T7", "name": "Self-Healing"},
+        {"id": "ai3-T8", "name": "자율 SOC 대시보드"}
+      ]
+    },
+    "test-qa": {
+      "task_count": 6,
+      "related_features": [],
+      "tasks": [
+        {"id": "qa-T1", "name": "통합 테스트"},
+        {"id": "qa-T2", "name": "성능 테스트"},
+        {"id": "qa-T3", "name": "보안 테스트"},
+        {"id": "qa-T4", "name": "가용성 테스트"},
+        {"id": "qa-T5", "name": "문서화"},
+        {"id": "qa-T6", "name": "버그 수정"}
+      ]
+    },
+    "deploy": {
+      "task_count": 5,
+      "related_features": [],
+      "tasks": [
+        {"id": "deploy-T1", "name": "프로덕션 환경"},
+        {"id": "deploy-T2", "name": "데이터 마이그레이션"},
+        {"id": "deploy-T3", "name": "배포 자동화"},
+        {"id": "deploy-T4", "name": "모니터링 설정"},
+        {"id": "deploy-T5", "name": "GA 릴리스"}
+      ]
+    }
+  },
+
+  "summary": {
+    "total_phases": 13,
+    "total_tasks": 90,
+    "total_features": 14,
+    "critical_path": [
+      "setup",
+      "data",
+      "pipeline",
+      "backend-core",
+      "ai-basic",
+      "soar",
+      "ai-advanced",
+      "ai-agentic",
+      "test-qa",
+      "deploy"
+    ]
+  }
+}

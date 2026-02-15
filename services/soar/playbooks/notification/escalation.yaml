@@ -1,0 +1,18 @@
+name: escalation
+version: "1.0"
+description: Escalate incidents to management and stakeholders
+category: notification
+severity: high
+steps:
+  - id: check_sla
+    action: case.check_sla_status
+  - id: identify_escalation_path
+    action: script
+    script: |
+      const path = input.severity === 'critical' ? 'executive' : 'manager';
+      return {escalation_level: path};
+  - id: notify_management
+    action: email.send
+    params:
+      to: "{{config.management_email}}"
+      subject: "ESCALATION: {{input.title}}"

@@ -1,0 +1,162 @@
+name: alert_notification
+version: "1.0"
+description: Send alert notifications to security teams via multiple channels
+category: notification
+severity: medium
+trigger:
+  type: alert
+  conditions:
+    - field: severity
+      operator: in
+      value: [high, critical]
+
+inputs:
+  - name: alert_id
+    type: string
+    required: true
+  - name: severity
+    type: string
+    required: true
+  - name: title
+    type: string
+    required: true
+  - name: description
+    type: string
+    required: true
+  - name: channels
+    type: array
+    default: [email, slack]
+  - name: recipients
+    type: array
+    required: true
+  - name: oncall_group
+    type: string
+    default: "security-oncall"
+
+steps:
+  - id: determine_urgency
+    name: Determine notification urgency
+    action: script
+    script: |
+      const urgency = input.severity === 'critical' ? 'immediate' : 'normal';
+      const requiresAck = input.severity === 'critical';
+      return {urgency, requiresAck};
+
+  - id: format_message
+    name: Format notification message
+    action: template
+    template: |
+      🚨 Security Alert: {{title}}
+
+      Severity: {{severity | upper}}
+      Alert ID: {{alert_id}}
+
+      {{description}}
+
+      Time: {{timestamp}}
+
+      View Details: {{alert_url}}
+
+  - id: send_email
+    name: Send email notification
+    condition: "'email' in input.channels"
+    action: email.send
+    params:
+      to: "{{input.recipients}}"
+      subject: "[{{input.severity | upper}}] Security Alert: {{input.title}}"
+      body: "{{steps.format_message.output}}"
+      priority: high
+    retry:
+      max_attempts: 3
+      backoff: exponential
+
+  - id: send_slack
+    name: Send Slack notification
+    condition: "'slack' in input.channels"
+    action: slack.send_message
+    params:
+      channel: "#security-alerts"
+      text: "{{steps.format_message.output}}"
+      blocks:
+        - type: header
+          text: "🚨 Security Alert"
+        - type: section
+          fields:
+            - type: mrkdwn
+              text: "*Severity:*\n{{input.severity}}"
+            - type: mrkdwn
+              text: "*Alert ID:*\n{{input.alert_id}}"
+        - type: section
+          text: "*{{input.title}}*\n{{input.description}}"
+        - type: actions
+          elements:
+            - type: button
+              text: "View Alert"
+              url: "{{alert_url}}"
+              style: danger
+
+  - id: send_teams
+    name: Send Teams notification
+    condition: "'teams' in input.channels"
+    action: teams.send_message
+    params:
+      webhook_url: "{{config.teams_webhook}}"
+      title: "Security Alert: {{input.title}}"
+      text: "{{steps.format_message.output}}"
+      theme_color: "FF0000"
+
+  - id: send_pagerduty
+    name: Page on-call team for critical alerts
+    condition: "input.severity == 'critical'"
+    action: pagerduty.create_incident
+    params:
+      service_id: "{{config.pagerduty_service}}"
+      title: "{{input.title}}"
+      body: "{{input.description}}"
+      urgency: high
+      escalation_policy: "{{input.oncall_group}}"
+
+  - id: send_sms
+    name: Send SMS for critical alerts
+    condition: "input.severity == 'critical' and 'sms' in input.channels"
+    action: sms.send
+    params:
+      to: "{{input.recipients}}"
+      message: "CRITICAL: {{input.title}} - Alert ID: {{input.alert_id}}"
+
+  - id: log_notification
+    name: Log notification event
+    action: logging.log
+    params:
+      level: info
+      message: "Alert notification sent"
+      metadata:
+        alert_id: "{{input.alert_id}}"
+        channels: "{{input.channels}}"
+        recipients: "{{input.recipients}}"
+
+outputs:
+  - name: notification_sent
+    value: true
+  - name: channels_notified
+    value: "{{input.channels}}"
+  - name: timestamp
+    value: "{{now()}}"
+
+metrics:
+  - name: notifications_sent
+    type: counter
+    labels:
+      severity: "{{input.severity}}"
+      channel: "{{input.channels}}"
+  - name: notification_latency
+    type: histogram
+    unit: seconds
+
+error_handling:
+  on_error: continue
+  fallback:
+    - action: logging.log
+      params:
+        level: error
+        message: "Failed to send alert notification"

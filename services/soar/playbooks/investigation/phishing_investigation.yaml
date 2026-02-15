@@ -1,0 +1,22 @@
+name: phishing_investigation
+version: "1.0"
+description: Investigate suspected phishing emails
+category: investigation
+severity: medium
+steps:
+  - id: extract_email_headers
+    action: email.parse_headers
+  - id: analyze_sender
+    action: ti.check_sender_reputation
+  - id: extract_urls
+    action: email.extract_urls
+  - id: check_url_reputation
+    action: ti.check_urls
+  - id: extract_attachments
+    action: email.extract_attachments
+  - id: scan_attachments
+    action: sandbox.analyze_file
+  - id: identify_recipients
+    action: email.get_recipients
+  - id: check_recipient_actions
+    action: email.check_opened

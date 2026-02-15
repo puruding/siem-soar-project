@@ -1,0 +1,269 @@
+# Parse Transforms Configuration
+# Log parsing and field extraction
+
+# Parse JSON logs
+[transforms.parse_json]
+type = "remap"
+inputs = ["*"]
+drop_on_error = false
+source = '''
+if .format == "json" && exists(.message) {
+    parsed, err = parse_json(.message)
+    if err == null {
+        . = merge(., parsed)
+        .parse_success = true
+    } else {
+        .parse_error = to_string(err)
+        .parse_success = false
+    }
+}
+'''
+
+# Parse CEF (Common Event Format)
+[transforms.parse_cef]
+type = "remap"
+inputs = ["*"]
+drop_on_error = false
+source = '''
+if .format == "cef" && exists(.message) {
+    msg = string!(.message)
+
+    # Extract CEF header: CEF:Version|Device Vendor|Device Product|Device Version|Signature ID|Name|Severity|Extension
+    cef_pattern = r'^CEF:(?P<version>\d+)\|(?P<device_vendor>[^|]*)\|(?P<device_product>[^|]*)\|(?P<device_version>[^|]*)\|(?P<signature_id>[^|]*)\|(?P<name>[^|]*)\|(?P<severity>[^|]*)\|(?P<extension>.*)$'
+
+    parsed = parse_regex(msg, cef_pattern) ?? {}
+
+    if exists(parsed.version) {
+        .cef.version = parsed.version
+        .cef.device_vendor = parsed.device_vendor
+        .cef.device_product = parsed.device_product
+        .cef.device_version = parsed.device_version
+        .cef.signature_id = parsed.signature_id
+        .cef.name = parsed.name
+        .cef.severity = to_int(parsed.severity) ?? 0
+
+        # Parse extensions (key=value pairs)
+        if exists(parsed.extension) && parsed.extension != "" {
+            ext = parsed.extension
+            .cef.extensions = {}
+
+            # Simple key=value parsing
+            parts = split(ext, " ")
+            for_each(parts) -> |_index, part| {
+                kv = split(part, "=", limit: 2)
+                if length(kv) == 2 {
+                    .cef.extensions = set(.cef.extensions, [kv[0]], kv[1])
+                }
+            }
+        }
+
+        .parse_success = true
+    } else {
+        .parse_success = false
+        .parse_error = "CEF header not matched"
+    }
+}
+'''
+
+# Parse LEEF (Log Event Extended Format)
+[transforms.parse_leef]
+type = "remap"
+inputs = ["*"]
+drop_on_error = false
+source = '''
+if .format == "leef" && exists(.message) {
+    msg = string!(.message)
+
+    # Extract LEEF header: LEEF:Version|Vendor|Product|Version|EventID|delimiter?|attributes
+    leef_pattern = r'^LEEF:(?P<version>[^|]*)\|(?P<vendor>[^|]*)\|(?P<product>[^|]*)\|(?P<product_version>[^|]*)\|(?P<event_id>[^|]*)\|(?P<rest>.*)$'
+
+    parsed = parse_regex(msg, leef_pattern) ?? {}
+
+    if exists(parsed.version) {
+        .leef.version = parsed.version
+        .leef.vendor = parsed.vendor
+        .leef.product = parsed.product
+        .leef.product_version = parsed.product_version
+        .leef.event_id = parsed.event_id
+
+        # LEEF 1.0 uses tab, 2.0 can specify delimiter
+        delimiter = "\t"
+        rest = parsed.rest
+
+        # Check for LEEF 2.0 custom delimiter
+        if starts_with(parsed.version, "2") {
+            # First char might be delimiter spec
+            if length(rest) > 0 && !contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0-9", slice(rest, 0, 1)) {
+                delimiter = slice(rest, 0, 1)
+                rest = slice(rest, 1)
+            }
+        }
+
+        # Parse attributes
+        .leef.attributes = {}
+        parts = split(rest, delimiter)
+        for_each(parts) -> |_index, part| {
+            kv = split(part, "=", limit: 2)
+            if length(kv) == 2 {
+                .leef.attributes = set(.leef.attributes, [kv[0]], kv[1])
+            }
+        }
+
+        .parse_success = true
+    } else {
+        .parse_success = false
+        .parse_error = "LEEF header not matched"
+    }
+}
+'''
+
+# Parse Windows Event Log
+[transforms.parse_windows]
+type = "remap"
+inputs = ["*"]
+drop_on_error = false
+source = '''
+if .format == "windows" && exists(.message) {
+    msg = string!(.message)
+
+    # Try to extract common Windows event fields
+    .windows = {}
+
+    # Extract EventID
+    event_id_match = parse_regex(msg, r'EventID[=:]\s*(?P<event_id>\d+)') ?? {}
+    if exists(event_id_match.event_id) {
+        .windows.event_id = to_int(event_id_match.event_id) ?? 0
+    }
+
+    # Extract Task Category
+    task_match = parse_regex(msg, r'Task[=:]\s*(?P<task>\d+)') ?? {}
+    if exists(task_match.task) {
+        .windows.task = to_int(task_match.task) ?? 0
+    }
+
+    # Extract Keywords
+    keywords_match = parse_regex(msg, r'Keywords[=:]\s*(?P<keywords>[^\s,]+)') ?? {}
+    if exists(keywords_match.keywords) {
+        .windows.keywords = keywords_match.keywords
+    }
+
+    # Extract Computer
+    computer_match = parse_regex(msg, r'Computer[=:]\s*(?P<computer>[^\s,]+)') ?? {}
+    if exists(computer_match.computer) {
+        .windows.computer = computer_match.computer
+    }
+
+    # Extract User
+    user_match = parse_regex(msg, r'User[=:]\s*(?P<user>[^\s,]+)') ?? {}
+    if exists(user_match.user) {
+        .windows.user = user_match.user
+    }
+
+    .parse_success = exists(.windows.event_id)
+    if !.parse_success {
+        .parse_error = "Could not extract Windows event fields"
+    }
+}
+'''
+
+# Parse Apache/Nginx Combined Log Format
+[transforms.parse_access_log]
+type = "remap"
+inputs = ["*"]
+drop_on_error = false
+source = '''
+if exists(.message) && !exists(.format) {
+    msg = string!(.message)
+
+    # Combined log format pattern
+    combined_pattern = r'^(?P<client_ip>\S+)\s+(?P<ident>\S+)\s+(?P<auth>\S+)\s+\[(?P<timestamp>[^\]]+)\]\s+"(?P<method>\S+)\s+(?P<request>\S+)(?:\s+(?P<protocol>\S+))?"\s+(?P<status>\d+)\s+(?P<bytes>\S+)(?:\s+"(?P<referrer>[^"]*)"\s+"(?P<user_agent>[^"]*)")?'
+
+    parsed = parse_regex(msg, combined_pattern) ?? {}
+
+    if exists(parsed.client_ip) {
+        .http = {
+            "client_ip": parsed.client_ip,
+            "method": parsed.method ?? "",
+            "request": parsed.request ?? "",
+            "protocol": parsed.protocol ?? "",
+            "status": to_int(parsed.status) ?? 0,
+            "bytes": to_int(parsed.bytes) ?? 0,
+            "referrer": parsed.referrer ?? "",
+            "user_agent": parsed.user_agent ?? ""
+        }
+        .format = "access_log"
+        .parse_success = true
+    }
+}
+'''
+
+# Parse key=value format
+[transforms.parse_kv]
+type = "remap"
+inputs = ["*"]
+drop_on_error = false
+source = '''
+if !.parse_success && exists(.message) {
+    msg = string!(.message)
+
+    # Check if message contains key=value patterns
+    if contains(msg, "=") {
+        .kv = {}
+
+        # Parse key=value pairs (handles quoted values)
+        kv_pattern = r'(?P<key>\w+)=(?:"(?P<quoted_value>[^"]*)"|(?P<value>\S+))'
+        matches = parse_regex_all(msg, kv_pattern) ?? []
+
+        for_each(matches) -> |_index, m| {
+            key = m.key
+            value = m.quoted_value ?? m.value ?? ""
+            .kv = set(.kv, [key], value)
+        }
+
+        if length(keys(.kv)) > 0 {
+            .format = "kv"
+            .parse_success = true
+        }
+    }
+}
+'''
+
+# Normalize timestamps
+[transforms.normalize_timestamp]
+type = "remap"
+inputs = ["parse_json", "parse_cef", "parse_leef", "parse_windows", "parse_access_log", "parse_kv"]
+source = '''
+# Try to find and normalize timestamp
+timestamp_fields = ["timestamp", "@timestamp", "time", "datetime", "eventTime", "event_time", "ts"]
+
+for_each(timestamp_fields) -> |_index, field| {
+    if !exists(.normalized_timestamp) && exists(get(., [field])) {
+        val = get(., [field])
+
+        # Try parsing as ISO 8601
+        ts, err = parse_timestamp(to_string(val), "%+")
+        if err == null {
+            .normalized_timestamp = ts
+        }
+
+        # Try Unix epoch (seconds)
+        if !exists(.normalized_timestamp) {
+            ts_int = to_int(val) ?? null
+            if ts_int != null {
+                if ts_int > 1000000000000 {
+                    # Milliseconds
+                    .normalized_timestamp = from_unix_timestamp(ts_int / 1000)
+                } else {
+                    # Seconds
+                    .normalized_timestamp = from_unix_timestamp(ts_int)
+                }
+            }
+        }
+    }
+}
+
+# Default to now if no timestamp found
+if !exists(.normalized_timestamp) {
+    .normalized_timestamp = now()
+}
+'''

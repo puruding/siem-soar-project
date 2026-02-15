@@ -1,0 +1,53 @@
+# Query Service Configuration
+replicaCount: 3
+
+image:
+  repository: ghcr.io/siem-soar-platform/query
+  pullPolicy: IfNotPresent
+  tag: ""
+
+service:
+  type: ClusterIP
+  grpcPort: 9000
+  metricsPort: 9090
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 15
+  targetCPUUtilizationPercentage: 70
+
+nodeSelector:
+  node-pool: compute
+
+config:
+  logLevel: info
+  grpcPort: 9000
+  metricsPort: 9090
+
+  # ClickHouse configuration
+  clickhouse:
+    maxOpenConns: 20
+    maxIdleConns: 10
+    queryTimeout: 60s
+    maxRowsLimit: 100000
+    enableQueryCache: true
+    queryCacheTTL: 5m
+
+  # Query features
+  query:
+    maxConcurrentQueries: 50
+    maxQueryDuration: 5m
+    enableSavedQueries: true
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2

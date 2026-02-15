@@ -1,0 +1,63 @@
+apiVersion: v2
+name: siem-platform
+description: SIEM-SOAR Platform Meta Helm Chart
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+dependencies:
+  - name: gateway
+    version: "0.1.0"
+    repository: "file://../gateway"
+    condition: gateway.enabled
+  - name: detection
+    version: "0.1.0"
+    repository: "file://../detection"
+    condition: detection.enabled
+  - name: soar
+    version: "0.1.0"
+    repository: "file://../soar"
+    condition: soar.enabled
+  - name: ti
+    version: "0.1.0"
+    repository: "file://../ti"
+    condition: ti.enabled
+  - name: query
+    version: "0.1.0"
+    repository: "file://../query"
+    condition: query.enabled
+  - name: case
+    version: "0.1.0"
+    repository: "file://../case"
+    condition: case.enabled
+  - name: collector
+    version: "0.1.0"
+    repository: "file://../collector"
+    condition: collector.enabled
+  - name: pipeline
+    version: "0.1.0"
+    repository: "file://../pipeline"
+    condition: pipeline.enabled
+  - name: ai-triage
+    version: "0.1.0"
+    repository: "file://../ai-triage"
+    condition: ai-triage.enabled
+  - name: ai-copilot
+    version: "0.1.0"
+    repository: "file://../ai-copilot"
+    condition: ai-copilot.enabled
+  - name: ai-agentic
+    version: "0.1.0"
+    repository: "file://../ai-agentic"
+    condition: ai-agentic.enabled
+
+maintainers:
+  - name: SIEM-SOAR Team
+    email: siem-soar@example.com
+
+keywords:
+  - siem
+  - soar
+  - security
+  - ai
+  - kubernetes

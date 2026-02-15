@@ -1,0 +1,16 @@
+apiVersion: v2
+name: detection
+description: SIEM-SOAR Detection Engine Service
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+keywords:
+  - detection
+  - sigma
+  - rules
+  - security
+
+maintainers:
+  - name: SIEM-SOAR Team
+    email: siem-soar@example.com

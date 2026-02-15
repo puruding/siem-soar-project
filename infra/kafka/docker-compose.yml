@@ -1,0 +1,296 @@
+version: '3.8'
+
+# Kafka cluster for development using KRaft mode (no Zookeeper)
+# Designed for 100K EPS throughput
+
+services:
+  kafka-1:
+    image: confluentinc/cp-kafka:7.5.3
+    hostname: kafka-1
+    container_name: siem-kafka-1
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://kafka-1:29092,CONTROLLER://kafka-1:9093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: 32
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      # Performance tuning for 100K EPS
+      KAFKA_NUM_NETWORK_THREADS: 8
+      KAFKA_NUM_IO_THREADS: 16
+      KAFKA_SOCKET_SEND_BUFFER_BYTES: 1048576
+      KAFKA_SOCKET_RECEIVE_BUFFER_BYTES: 1048576
+      KAFKA_SOCKET_REQUEST_MAX_BYTES: 104857600
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 107374182400
+      KAFKA_COMPRESSION_TYPE: lz4
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka-1-data:/var/lib/kafka/data
+    networks:
+      - siem-network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 | grep -q 'ApiVersion'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kafka-2:
+    image: confluentinc/cp-kafka:7.5.3
+    hostname: kafka-2
+    container_name: siem-kafka-2
+    ports:
+      - "9093:9092"
+      - "29093:29092"
+    environment:
+      KAFKA_NODE_ID: 2
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENERS: PLAINTEXT://kafka-2:29092,CONTROLLER://kafka-2:9093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: 32
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_NUM_NETWORK_THREADS: 8
+      KAFKA_NUM_IO_THREADS: 16
+      KAFKA_SOCKET_SEND_BUFFER_BYTES: 1048576
+      KAFKA_SOCKET_RECEIVE_BUFFER_BYTES: 1048576
+      KAFKA_SOCKET_REQUEST_MAX_BYTES: 104857600
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 107374182400
+      KAFKA_COMPRESSION_TYPE: lz4
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka-2-data:/var/lib/kafka/data
+    networks:
+      - siem-network
+    depends_on:
+      - kafka-1
+
+  kafka-3:
+    image: confluentinc/cp-kafka:7.5.3
+    hostname: kafka-3
+    container_name: siem-kafka-3
+    ports:
+      - "9094:9092"
+      - "29094:29092"
+    environment:
+      KAFKA_NODE_ID: 3
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:29092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENERS: PLAINTEXT://kafka-3:29092,CONTROLLER://kafka-3:9093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: 32
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_NUM_NETWORK_THREADS: 8
+      KAFKA_NUM_IO_THREADS: 16
+      KAFKA_SOCKET_SEND_BUFFER_BYTES: 1048576
+      KAFKA_SOCKET_RECEIVE_BUFFER_BYTES: 1048576
+      KAFKA_SOCKET_REQUEST_MAX_BYTES: 104857600
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 107374182400
+      KAFKA_COMPRESSION_TYPE: lz4
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka-3-data:/var/lib/kafka/data
+    networks:
+      - siem-network
+    depends_on:
+      - kafka-1
+
+  # Schema Registry for Avro/Protobuf schemas
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.3
+    hostname: schema-registry
+    container_name: siem-schema-registry
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+    networks:
+      - siem-network
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+
+  # Kafka UI for development
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: siem-kafka-ui
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: siem-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      DYNAMIC_CONFIG_ENABLED: "true"
+    networks:
+      - siem-network
+    depends_on:
+      - kafka-1
+      - schema-registry
+
+  # Topic initialization container
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.3
+    container_name: siem-kafka-init
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    command: >
+      bash -c "
+        echo 'Waiting for Kafka to be ready...'
+        cub kafka-ready -b kafka-1:29092 1 120
+
+        echo 'Creating topics...'
+
+        # Raw logs - high volume, 32 partitions
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka-1:29092 \
+          --topic raw-logs \
+          --partitions 32 \
+          --replication-factor 3 \
+          --config retention.ms=86400000 \
+          --config cleanup.policy=delete \
+          --config compression.type=lz4 \
+          --config max.message.bytes=10485760
+
+        # Parsed events - after parsing
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka-1:29092 \
+          --topic parsed-events \
+          --partitions 32 \
+          --replication-factor 3 \
+          --config retention.ms=172800000 \
+          --config cleanup.policy=delete \
+          --config compression.type=lz4
+
+        # Normalized events - UDM format
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka-1:29092 \
+          --topic normalized-events \
+          --partitions 32 \
+          --replication-factor 3 \
+          --config retention.ms=259200000 \
+          --config cleanup.policy=delete \
+          --config compression.type=lz4
+
+        # Enriched events - with TI, GeoIP, Asset info
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka-1:29092 \
+          --topic enriched-events \
+          --partitions 32 \
+          --replication-factor 3 \
+          --config retention.ms=604800000 \
+          --config cleanup.policy=delete \
+          --config compression.type=lz4
+
+        # Alerts - detection output
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka-1:29092 \
+          --topic alerts \
+          --partitions 16 \
+          --replication-factor 3 \
+          --config retention.ms=2592000000 \
+          --config cleanup.policy=delete \
+          --config compression.type=lz4
+
+        # Dead Letter Queues
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka-1:29092 \
+          --topic dlq-parse-errors \
+          --partitions 4 \
+          --replication-factor 3 \
+          --config retention.ms=604800000
+
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka-1:29092 \
+          --topic dlq-normalize-errors \
+          --partitions 4 \
+          --replication-factor 3 \
+          --config retention.ms=604800000
+
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka-1:29092 \
+          --topic dlq-enrich-errors \
+          --partitions 4 \
+          --replication-factor 3 \
+          --config retention.ms=604800000
+
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka-1:29092 \
+          --topic dlq-route-errors \
+          --partitions 4 \
+          --replication-factor 3 \
+          --config retention.ms=604800000
+
+        # Metrics topic for pipeline monitoring
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka-1:29092 \
+          --topic pipeline-metrics \
+          --partitions 8 \
+          --replication-factor 2 \
+          --config retention.ms=86400000
+
+        echo 'Topics created successfully!'
+        kafka-topics --list --bootstrap-server kafka-1:29092
+      "
+    networks:
+      - siem-network
+
+volumes:
+  kafka-1-data:
+  kafka-2-data:
+  kafka-3-data:
+
+networks:
+  siem-network:
+    external: true
+    name: siem-network

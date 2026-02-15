@@ -1,0 +1,16 @@
+name: incident_report
+version: "1.0"
+description: Generate and distribute incident reports
+category: notification
+severity: medium
+steps:
+  - id: collect_incident_data
+    action: case.get_details
+  - id: generate_report
+    action: report.generate
+    template: incident_report
+  - id: send_report
+    action: email.send
+    params:
+      subject: "Incident Report: {{case_id}}"
+      attachments: ["{{steps.generate_report.output}}"]

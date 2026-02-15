@@ -1,0 +1,351 @@
+id: siem-soar-security-checks
+
+info:
+  name: SIEM/SOAR Platform Security Checks
+  author: security-team
+  severity: high
+  description: Custom security checks for SIEM/SOAR platform
+  tags: siem,soar,security,api
+
+# ============================================================
+# Authentication and Authorization Tests
+# ============================================================
+
+http:
+  - raw:
+      - |
+        GET /api/v1/alerts HTTP/1.1
+        Host: {{Hostname}}
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 401
+          - 403
+
+    extractors:
+      - type: regex
+        part: body
+        regex:
+          - '"error":\s*"[^"]*auth[^"]*"'
+
+---
+
+id: siem-api-key-exposure
+
+info:
+  name: API Key Exposure Check
+  severity: critical
+  description: Check for exposed API keys in responses
+  tags: siem,api-key,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v1/config"
+      - "{{BaseURL}}/api/v1/settings"
+      - "{{BaseURL}}/debug"
+      - "{{BaseURL}}/.env"
+      - "{{BaseURL}}/config.json"
+
+    matchers-condition: or
+    matchers:
+      - type: regex
+        regex:
+          - 'api[_-]?key["\s:=]+["\']?[a-zA-Z0-9]{20,}'
+          - 'secret[_-]?key["\s:=]+["\']?[a-zA-Z0-9]{20,}'
+          - 'password["\s:=]+["\']?[a-zA-Z0-9]{8,}'
+
+---
+
+id: siem-sql-injection
+
+info:
+  name: SIEM SQL Injection Test
+  severity: critical
+  description: Test for SQL injection in query endpoint
+  tags: siem,sqli
+
+http:
+  - raw:
+      - |
+        POST /api/v1/query HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"query": "SELECT * FROM events WHERE id = '1' OR '1'='1'--"}
+
+    matchers-condition: or
+    matchers:
+      - type: word
+        words:
+          - "SQL syntax"
+          - "mysql_fetch"
+          - "ORA-"
+          - "PostgreSQL"
+          - "syntax error"
+        condition: or
+
+      - type: regex
+        regex:
+          - 'error.*SQL'
+          - 'database.*error'
+
+---
+
+id: siem-xss-check
+
+info:
+  name: SIEM XSS Vulnerability Check
+  severity: high
+  description: Test for Cross-Site Scripting vulnerabilities
+  tags: siem,xss
+
+http:
+  - raw:
+      - |
+        POST /api/v1/alerts HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"title": "<script>alert('XSS')</script>", "description": "Test"}
+
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "<script>alert('XSS')</script>"
+        part: body
+
+      - type: status
+        status:
+          - 200
+          - 201
+
+---
+
+id: siem-ssrf-check
+
+info:
+  name: SIEM SSRF Vulnerability Check
+  severity: high
+  description: Test for Server-Side Request Forgery
+  tags: siem,ssrf
+
+http:
+  - raw:
+      - |
+        POST /api/v1/enrichment/lookup HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"url": "http://169.254.169.254/latest/meta-data/"}
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        words:
+          - "ami-id"
+          - "instance-id"
+          - "meta-data"
+
+---
+
+id: siem-path-traversal
+
+info:
+  name: SIEM Path Traversal Check
+  severity: high
+  description: Test for directory traversal vulnerabilities
+  tags: siem,lfi,path-traversal
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v1/files/..%2f..%2f..%2fetc%2fpasswd"
+      - "{{BaseURL}}/api/v1/logs/../../../etc/passwd"
+      - "{{BaseURL}}/api/v1/export?file=../../../etc/passwd"
+
+    matchers-condition: and
+    matchers:
+      - type: regex
+        regex:
+          - "root:.*:0:0:"
+
+      - type: status
+        status:
+          - 200
+
+---
+
+id: siem-jwt-none-algorithm
+
+info:
+  name: JWT None Algorithm Check
+  severity: critical
+  description: Test for JWT none algorithm vulnerability
+  tags: siem,jwt,auth
+
+http:
+  - raw:
+      - |
+        GET /api/v1/protected HTTP/1.1
+        Host: {{Hostname}}
+        Authorization: Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkFkbWluIiwiaWF0IjoxNTE2MjM5MDIyfQ.
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        words:
+          - "success"
+          - "authenticated"
+        condition: or
+
+---
+
+id: siem-rate-limiting-check
+
+info:
+  name: Rate Limiting Check
+  severity: medium
+  description: Verify rate limiting is properly configured
+  tags: siem,rate-limit,dos
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v1/alerts"
+
+    threads: 100
+    race: true
+
+    matchers:
+      - type: status
+        status:
+          - 429
+
+---
+
+id: siem-cors-misconfiguration
+
+info:
+  name: CORS Misconfiguration Check
+  severity: medium
+  description: Test for overly permissive CORS configuration
+  tags: siem,cors
+
+http:
+  - raw:
+      - |
+        GET /api/v1/alerts HTTP/1.1
+        Host: {{Hostname}}
+        Origin: https://evil.com
+
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "Access-Control-Allow-Origin: *"
+          - "Access-Control-Allow-Origin: https://evil.com"
+        part: header
+        condition: or
+
+---
+
+id: siem-debug-endpoints
+
+info:
+  name: Debug Endpoints Exposure
+  severity: high
+  description: Check for exposed debug endpoints
+  tags: siem,debug,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/debug"
+      - "{{BaseURL}}/debug/pprof"
+      - "{{BaseURL}}/debug/vars"
+      - "{{BaseURL}}/_debug"
+      - "{{BaseURL}}/api/debug"
+      - "{{BaseURL}}/metrics"
+      - "{{BaseURL}}/actuator"
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        words:
+          - "goroutine"
+          - "heap"
+          - "allocs"
+          - "profile"
+        condition: or
+
+---
+
+id: siem-sensitive-data-exposure
+
+info:
+  name: Sensitive Data Exposure Check
+  severity: high
+  description: Check for sensitive data in API responses
+  tags: siem,pii,data-exposure
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v1/users"
+      - "{{BaseURL}}/api/v1/config"
+      - "{{BaseURL}}/api/v1/settings"
+
+    matchers-condition: or
+    matchers:
+      - type: regex
+        regex:
+          - '"password"\s*:\s*"[^"]+"'
+          - '"secret"\s*:\s*"[^"]+"'
+          - '"api_key"\s*:\s*"[^"]+"'
+          - '"private_key"\s*:\s*"[^"]+"'
+
+---
+
+id: siem-command-injection
+
+info:
+  name: Command Injection Check
+  severity: critical
+  description: Test for OS command injection vulnerabilities
+  tags: siem,rce,command-injection
+
+http:
+  - raw:
+      - |
+        POST /api/v1/playbooks/execute HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"action": "shell", "command": "id; cat /etc/passwd"}
+
+    matchers-condition: and
+    matchers:
+      - type: regex
+        regex:
+          - "uid=[0-9]+.*gid=[0-9]+"
+          - "root:.*:0:0:"
+
+      - type: status
+        status:
+          - 200

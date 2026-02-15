@@ -1,0 +1,20 @@
+name: hipaa_violation
+version: "1.0"
+description: Handle HIPAA violation and breach notification
+category: compliance
+severity: critical
+steps:
+  - id: assess_phi_exposure
+    action: compliance.assess_hipaa_impact
+  - id: determine_notification_requirement
+    action: compliance.check_hipaa_safe_harbor
+  - id: notify_hhs
+    condition: "input.affected_individuals > 500"
+    action: compliance.notify_hhs
+    params:
+      deadline_days: 60
+  - id: notify_affected_individuals
+    action: compliance.send_hipaa_notification
+  - id: notify_media
+    condition: "input.affected_individuals > 500"
+    action: compliance.notify_media

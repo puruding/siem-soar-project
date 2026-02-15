@@ -1,0 +1,476 @@
+# Host Isolation Playbook
+# Isolates a compromised host from the network
+
+id: isolate_host
+name: Isolate Compromised Host
+display_name: Host Isolation
+description: |
+  Isolates a compromised host from the network to prevent lateral movement.
+  Supports multiple isolation methods:
+  - EDR-based network isolation
+  - Firewall-based isolation
+  - Switch port disable (optional)
+
+  Includes approval workflow for production systems.
+
+version: 1
+category: containment
+author: SIEM-SOAR Platform
+tags:
+  - containment
+  - isolation
+  - edr
+  - firewall
+  - incident_response
+enabled: true
+
+trigger:
+  type: manual
+  conditions: []
+
+inputs:
+  - name: hostname
+    type: string
+    required: false
+    description: Hostname of the system to isolate
+  - name: ip_address
+    type: string
+    required: false
+    description: IP address of the system to isolate
+  - name: host_id
+    type: string
+    required: false
+    description: EDR host/agent ID
+  - name: reason
+    type: string
+    required: true
+    description: Reason for isolation
+  - name: case_id
+    type: string
+    required: false
+    description: Associated case ID
+  - name: alert_id
+    type: string
+    required: false
+    description: Associated alert ID
+  - name: require_approval
+    type: bool
+    required: false
+    default: true
+    description: Whether to require approval before isolation
+  - name: isolation_methods
+    type: array
+    required: false
+    default: [edr]
+    description: Isolation methods to use (edr, firewall, switch)
+  - name: allow_dns
+    type: bool
+    required: false
+    default: true
+    description: Allow DNS traffic during isolation
+  - name: allow_management
+    type: bool
+    required: false
+    default: true
+    description: Allow management traffic (RDP, SSH) during isolation
+
+outputs:
+  - name: isolation_result
+    type: object
+    source: steps.execute_isolation.output
+  - name: host_info
+    type: object
+    source: steps.get_host_info.output
+  - name: was_approved
+    type: bool
+    source: steps.approval.output.approved
+
+steps:
+  - id: validate_input
+    name: Validate Input Parameters
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.hostname
+          operator: exists
+        - or:
+          - field: $inputs.ip_address
+            operator: exists
+          - field: $inputs.host_id
+            operator: exists
+      then:
+        - id: input_valid
+          name: Input Valid
+          type: transform
+          transform:
+            type: template
+            expression: "{ 'valid': true }"
+            source: ""
+            target: validation_result
+      else:
+        - id: input_invalid
+          name: Input Invalid - Return Error
+          type: script
+          script:
+            language: python
+            code: |
+              raise Exception("At least hostname, ip_address, or host_id must be provided")
+
+  - id: get_host_info
+    name: Get Host Information
+    type: action
+    action:
+      connector: edr
+      action: get_host_info
+      parameters:
+        hostname: $inputs.hostname
+        ip: $inputs.ip_address
+        host_id: $inputs.host_id
+    output_mapping:
+      host_id: host_info.host_id
+      hostname: host_info.hostname
+      os: host_info.os
+
+  - id: check_criticality
+    name: Check Host Criticality
+    type: action
+    action:
+      connector: asset_management
+      action: get_asset
+      parameters:
+        hostname: $steps.get_host_info.output.hostname
+    continue_on_error: true
+
+  - id: determine_approval
+    name: Determine if Approval Required
+    type: script
+    script:
+      language: python
+      code: |
+        require_approval = inputs.get('require_approval', True)
+        asset_info = inputs.get('asset_info', {})
+
+        # Force approval for critical assets
+        criticality = asset_info.get('criticality', 'low')
+        is_production = asset_info.get('environment', '').lower() == 'production'
+        is_server = asset_info.get('asset_type', '').lower() in ['server', 'domain_controller']
+
+        needs_approval = require_approval or criticality in ['high', 'critical'] or is_production or is_server
+
+        return {
+            'needs_approval': needs_approval,
+            'is_critical': criticality in ['high', 'critical'],
+            'is_production': is_production,
+            'approval_reason': f"Host is {'critical' if criticality in ['high', 'critical'] else 'production' if is_production else 'server' if is_server else 'standard'}"
+        }
+      inputs:
+        require_approval: $inputs.require_approval
+        asset_info: $steps.check_criticality.output
+
+  - id: approval_check
+    name: Check if Approval Needed
+    type: condition
+    condition:
+      conditions:
+        - field: $steps.determine_approval.output.needs_approval
+          operator: equals
+          value: true
+      then:
+        - id: approval
+          name: Request Approval for Isolation
+          type: approval
+          approval:
+            approvers:
+              - security-operations@company.com
+              - incident-response@company.com
+            approver_groups:
+              - security-managers
+            required_count: 1
+            timeout: 30m
+            message: |
+              **Host Isolation Approval Required**
+
+              **Host:** ${steps.get_host_info.output.hostname}
+              **IP:** ${steps.get_host_info.output.ip_addresses[0]}
+              **OS:** ${steps.get_host_info.output.os}
+              **Reason:** ${inputs.reason}
+              **Case ID:** ${inputs.case_id}
+
+              **Asset Criticality:** ${steps.check_criticality.output.criticality}
+              **Environment:** ${steps.check_criticality.output.environment}
+
+              Please review and approve or reject this isolation request.
+            actions:
+              - name: approve
+                label: Approve Isolation
+                style: danger
+                is_approval: true
+              - name: approve_with_monitoring
+                label: Approve with Enhanced Monitoring
+                style: warning
+                is_approval: true
+              - name: reject
+                label: Reject
+                style: secondary
+                is_approval: false
+            escalation:
+              timeout: 15m
+              escalators:
+                - security-director@company.com
+              max_levels: 2
+      else:
+        - id: skip_approval
+          name: Skip Approval
+          type: transform
+          transform:
+            type: template
+            expression: "{ 'approved': true, 'skipped': true }"
+            source: ""
+            target: approval_result
+
+  - id: check_approval_result
+    name: Check Approval Result
+    type: condition
+    condition:
+      conditions:
+        - field: $steps.approval.output.approved
+          operator: equals
+          value: true
+      then:
+        - id: proceed_with_isolation
+          name: Proceed with Isolation
+          type: transform
+          transform:
+            type: template
+            expression: "{ 'proceed': true }"
+            source: ""
+            target: proceed_status
+      else:
+        - id: isolation_rejected
+          name: Isolation Rejected
+          type: action
+          action:
+            connector: case_management
+            action: add_comment
+            parameters:
+              case_id: $inputs.case_id
+              comment: |
+                Host isolation was rejected.
+                Approver: ${steps.approval.output.approvals[0].approver}
+                Comment: ${steps.approval.output.approvals[0].comment}
+              is_internal: false
+
+  - id: notify_before_isolation
+    name: Notify Before Isolation
+    type: parallel
+    parallel:
+      branches:
+        - id: notify_slack
+          name: Notify Slack
+          steps:
+            - id: slack_alert
+              name: Send Slack Alert
+              type: action
+              action:
+                connector: slack
+                action: send_alert
+                parameters:
+                  channel: "#security-incidents"
+                  alert_id: $inputs.alert_id
+                  title: "Host Isolation Initiated"
+                  severity: high
+                  description: |
+                    Host ${steps.get_host_info.output.hostname} is being isolated.
+                    Reason: ${inputs.reason}
+                    Case: ${inputs.case_id}
+                  case_url: "https://soar.company.com/cases/${inputs.case_id}"
+
+        - id: notify_email
+          name: Notify via Email
+          steps:
+            - id: email_alert
+              name: Send Email Alert
+              type: action
+              action:
+                connector: email
+                action: send_template_email
+                parameters:
+                  to:
+                    - security-team@company.com
+                  template_id: host_isolation_notice
+                  template_data:
+                    hostname: $steps.get_host_info.output.hostname
+                    ip_address: $steps.get_host_info.output.ip_addresses[0]
+                    reason: $inputs.reason
+                    case_id: $inputs.case_id
+                    initiated_by: $inputs.initiated_by
+      fail_fast: false
+
+  - id: execute_isolation
+    name: Execute Host Isolation
+    type: loop
+    loop:
+      items: $inputs.isolation_methods
+      item_var: method
+      steps:
+        - id: isolation_method
+          name: Execute Isolation Method
+          type: condition
+          condition:
+            conditions:
+              - field: $method
+                operator: equals
+                value: edr
+            then:
+              - id: edr_isolate
+                name: EDR Network Isolation
+                type: action
+                action:
+                  connector: edr
+                  action: isolate_host
+                  parameters:
+                    host_id: $steps.get_host_info.output.host_id
+                    allow_dns: $inputs.allow_dns
+                    allow_management: $inputs.allow_management
+                    reason: $inputs.reason
+                retry_policy:
+                  max_attempts: 3
+                  initial_interval: 5s
+
+            else:
+              - id: check_firewall
+                name: Check Firewall Method
+                type: condition
+                condition:
+                  conditions:
+                    - field: $method
+                      operator: equals
+                      value: firewall
+                  then:
+                    - id: firewall_isolate
+                      name: Firewall Isolation
+                      type: action
+                      action:
+                        connector: firewall
+                        action: isolate_host
+                        parameters:
+                          ip: $steps.get_host_info.output.ip_addresses[0]
+                          allow_dns: $inputs.allow_dns
+                          allow_management: $inputs.allow_management
+                          reason: $inputs.reason
+
+  - id: verify_isolation
+    name: Verify Isolation Status
+    type: action
+    action:
+      connector: edr
+      action: get_host_info
+      parameters:
+        host_id: $steps.get_host_info.output.host_id
+    timeout: 30s
+
+  - id: check_isolation_success
+    name: Check Isolation Success
+    type: condition
+    condition:
+      conditions:
+        - field: $steps.verify_isolation.output.isolated
+          operator: equals
+          value: true
+      then:
+        - id: isolation_success
+          name: Isolation Successful
+          type: transform
+          transform:
+            type: template
+            expression: "{ 'success': true, 'status': 'isolated' }"
+            source: ""
+            target: isolation_status
+      else:
+        - id: isolation_failed
+          name: Isolation Failed - Alert
+          type: action
+          action:
+            connector: slack
+            action: send_message
+            parameters:
+              channel: "#security-incidents"
+              text: ":warning: Host isolation verification FAILED for ${steps.get_host_info.output.hostname}. Manual intervention required!"
+
+  - id: update_case
+    name: Update Case
+    type: parallel
+    parallel:
+      branches:
+        - id: add_evidence
+          name: Add Isolation Evidence
+          steps:
+            - id: add_isolation_evidence
+              name: Add Isolation Evidence to Case
+              type: action
+              action:
+                connector: case_management
+                action: add_evidence
+                parameters:
+                  case_id: $inputs.case_id
+                  evidence_type: action
+                  name: "Host Isolation - ${steps.get_host_info.output.hostname}"
+                  data:
+                    action: host_isolation
+                    hostname: $steps.get_host_info.output.hostname
+                    ip_address: $steps.get_host_info.output.ip_addresses[0]
+                    isolation_methods: $inputs.isolation_methods
+                    reason: $inputs.reason
+                    isolated: $steps.verify_isolation.output.isolated
+                    approval: $steps.approval.output
+                  tags: [containment, isolation]
+
+        - id: add_comment
+          name: Add Case Comment
+          steps:
+            - id: case_comment
+              name: Add Comment to Case
+              type: action
+              action:
+                connector: case_management
+                action: add_comment
+                parameters:
+                  case_id: $inputs.case_id
+                  comment: |
+                    ## Host Isolation Completed
+
+                    **Host:** ${steps.get_host_info.output.hostname}
+                    **IP:** ${steps.get_host_info.output.ip_addresses[0]}
+                    **Status:** ${steps.verify_isolation.output.isolated ? 'Isolated' : 'Failed'}
+                    **Methods Used:** ${inputs.isolation_methods}
+                    **Reason:** ${inputs.reason}
+                  is_internal: false
+
+        - id: create_task
+          name: Create Follow-up Task
+          steps:
+            - id: followup_task
+              name: Create Investigation Task
+              type: action
+              action:
+                connector: case_management
+                action: create_task
+                parameters:
+                  case_id: $inputs.case_id
+                  title: "Investigate isolated host ${steps.get_host_info.output.hostname}"
+                  description: |
+                    Host has been isolated. Please investigate:
+                    1. Review recent processes and network connections
+                    2. Check for persistence mechanisms
+                    3. Identify initial infection vector
+                    4. Document findings
+                  priority: high
+                  category: investigation
+                  due_hours: 4
+
+timeout: 1h
+retry_policy:
+  max_attempts: 2
+  initial_interval: 30s
+  max_interval: 2m
+  backoff_coefficient: 2.0

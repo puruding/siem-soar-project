@@ -1,0 +1,73 @@
+# Syslog Sources Configuration
+# Detailed configuration for syslog receivers
+
+# RFC 5424 compliant syslog over UDP
+[sources.syslog_rfc5424_udp]
+type = "syslog"
+mode = "udp"
+address = "0.0.0.0:1514"
+max_length = 65536
+
+# RFC 3164 compliant syslog over UDP
+[sources.syslog_rfc3164_udp]
+type = "syslog"
+mode = "udp"
+address = "0.0.0.0:514"
+max_length = 8192
+
+# High-performance syslog TCP
+[sources.syslog_tcp_high_perf]
+type = "syslog"
+mode = "tcp"
+address = "0.0.0.0:1514"
+max_length = 65536
+connection_limit = 1000
+receive_buffer_bytes = 16777216  # 16MB
+
+[sources.syslog_tcp_high_perf.tls]
+enabled = false
+
+# Secure syslog over TLS
+[sources.syslog_tls_secure]
+type = "syslog"
+mode = "tcp"
+address = "0.0.0.0:6514"
+max_length = 65536
+connection_limit = 500
+
+[sources.syslog_tls_secure.tls]
+enabled = true
+crt_file = "/etc/vector/certs/server.crt"
+key_file = "/etc/vector/certs/server.key"
+ca_file = "/etc/vector/certs/ca.crt"
+verify_certificate = true
+verify_hostname = true
+alpn_protocols = ["syslog"]
+
+# Unix socket syslog (for local processes)
+[sources.syslog_unix]
+type = "syslog"
+mode = "unix"
+path = "/var/run/vector/syslog.sock"
+socket_file_mode = 0o777
+
+# Windows Event Log forwarding (via syslog)
+[sources.windows_syslog]
+type = "syslog"
+mode = "tcp"
+address = "0.0.0.0:1515"
+max_length = 65536
+
+# Network device syslog (Cisco, Juniper, etc.)
+[sources.network_device_syslog]
+type = "syslog"
+mode = "udp"
+address = "0.0.0.0:1516"
+max_length = 65536
+
+# Firewall syslog
+[sources.firewall_syslog]
+type = "syslog"
+mode = "udp"
+address = "0.0.0.0:1517"
+max_length = 65536

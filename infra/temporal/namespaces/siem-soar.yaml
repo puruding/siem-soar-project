@@ -1,0 +1,180 @@
+# Temporal Namespace Configuration for SIEM-SOAR Platform
+# Apply with: tctl --ns siem-soar namespace register --retention 7 --description "SIEM-SOAR Playbook Orchestration"
+
+apiVersion: v1
+kind: Namespace
+
+metadata:
+  name: siem-soar
+  description: "SIEM-SOAR Platform - Playbook Orchestration and Automation"
+
+spec:
+  # Workflow history retention period
+  retention: 7d
+
+  # Active cluster for this namespace
+  activeCluster: cluster-primary
+
+  # Data replication settings
+  clusters:
+    - cluster-primary
+    - cluster-secondary
+
+  # Archival settings
+  archival:
+    history:
+      enabled: true
+      uri: "s3://temporal-archive/siem-soar/history"
+    visibility:
+      enabled: true
+      uri: "s3://temporal-archive/siem-soar/visibility"
+
+  # Security policies
+  security:
+    # TLS certificate subject filter (mTLS)
+    certificateFilters:
+      - subjectAlternativeNames:
+          - "soar-worker.siem-soar.svc.cluster.local"
+          - "approval-worker.siem-soar.svc.cluster.local"
+
+  # Custom search attributes for workflow visibility
+  searchAttributes:
+    # Alert attributes
+    AlertID:
+      type: Keyword
+    AlertSeverity:
+      type: Keyword
+    AlertSource:
+      type: Keyword
+
+    # Playbook attributes
+    PlaybookID:
+      type: Keyword
+    PlaybookName:
+      type: Keyword
+    PlaybookVersion:
+      type: Int
+    PlaybookCategory:
+      type: Keyword
+
+    # Case attributes
+    CaseID:
+      type: Keyword
+    CaseSeverity:
+      type: Keyword
+    CaseStatus:
+      type: Keyword
+
+    # Execution attributes
+    ExecutionStatus:
+      type: Keyword
+    ExecutionPriority:
+      type: Int
+    RequiresApproval:
+      type: Bool
+    ApprovalStatus:
+      type: Keyword
+    Approver:
+      type: Keyword
+
+    # Organization attributes
+    TenantID:
+      type: Keyword
+    OrganizationID:
+      type: Keyword
+
+    # Timing attributes
+    ScheduledTime:
+      type: Datetime
+    DueTime:
+      type: Datetime
+    EscalationTime:
+      type: Datetime
+
+    # Action attributes
+    ConnectorType:
+      type: Keyword
+    ActionType:
+      type: Keyword
+    TargetEntity:
+      type: Keyword
+
+    # Investigation attributes
+    InvestigatorID:
+      type: Keyword
+    EscalationLevel:
+      type: Int
+
+---
+# Additional namespaces for environment isolation
+
+apiVersion: v1
+kind: Namespace
+
+metadata:
+  name: siem-soar-dev
+  description: "SIEM-SOAR Development Environment"
+
+spec:
+  retention: 1d
+  activeCluster: cluster-dev
+
+  archival:
+    history:
+      enabled: false
+    visibility:
+      enabled: false
+
+  searchAttributes:
+    AlertID:
+      type: Keyword
+    PlaybookID:
+      type: Keyword
+    CaseID:
+      type: Keyword
+    ExecutionStatus:
+      type: Keyword
+    TenantID:
+      type: Keyword
+
+---
+apiVersion: v1
+kind: Namespace
+
+metadata:
+  name: siem-soar-staging
+  description: "SIEM-SOAR Staging Environment"
+
+spec:
+  retention: 3d
+  activeCluster: cluster-staging
+
+  archival:
+    history:
+      enabled: true
+      uri: "s3://temporal-archive-staging/siem-soar/history"
+    visibility:
+      enabled: true
+      uri: "s3://temporal-archive-staging/siem-soar/visibility"
+
+  searchAttributes:
+    AlertID:
+      type: Keyword
+    AlertSeverity:
+      type: Keyword
+    PlaybookID:
+      type: Keyword
+    PlaybookName:
+      type: Keyword
+    PlaybookCategory:
+      type: Keyword
+    CaseID:
+      type: Keyword
+    CaseSeverity:
+      type: Keyword
+    ExecutionStatus:
+      type: Keyword
+    RequiresApproval:
+      type: Bool
+    TenantID:
+      type: Keyword

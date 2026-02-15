@@ -1,0 +1,87 @@
+# AI Copilot (LLM) Service Configuration
+replicaCount: 1
+
+image:
+  repository: ghcr.io/siem-soar-platform/ai-copilot
+  pullPolicy: IfNotPresent
+  tag: ""
+
+service:
+  type: ClusterIP
+  httpPort: 8000
+  grpcPort: 9000
+  metricsPort: 9090
+
+resources:
+  limits:
+    cpu: 8000m
+    memory: 32Gi
+    nvidia.com/gpu: 2
+  requests:
+    cpu: 4000m
+    memory: 16Gi
+    nvidia.com/gpu: 2
+
+autoscaling:
+  enabled: false  # LLM scaling is complex
+  minReplicas: 1
+  maxReplicas: 4
+
+# GPU node affinity
+nodeSelector:
+  node-pool: ai
+
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Equal
+    value: present
+    effect: NoSchedule
+  - key: workload-type
+    operator: Equal
+    value: ai
+    effect: NoSchedule
+
+config:
+  logLevel: info
+  httpPort: 8000
+  grpcPort: 9000
+  metricsPort: 9090
+
+  # vLLM configuration
+  vllm:
+    modelPath: /models/solar-10.7b
+    tensorParallelSize: 2
+    maxModelLen: 4096
+    gpuMemoryUtilization: 0.9
+    quantization: awq
+    dtype: float16
+
+  # LangChain configuration
+  langchain:
+    enabled: true
+    ragEnabled: true
+    vectorStoreType: redis
+    embeddingModel: sentence-transformers/all-MiniLM-L6-v2
+
+  # NL2SQL configuration
+  nl2sql:
+    enabled: true
+    schemaPath: /etc/copilot/schema.yaml
+    maxRetries: 3
+
+  # Response configuration
+  response:
+    maxTokens: 2048
+    temperature: 0.7
+    topP: 0.9
+    streamingEnabled: true
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Model volume for large LLM models
+modelVolume:
+  enabled: true
+  storageClass: ssd
+  size: 100Gi

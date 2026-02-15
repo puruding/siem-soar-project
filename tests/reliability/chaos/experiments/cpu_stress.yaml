@@ -1,0 +1,281 @@
+# CPU Stress Experiments for SIEM/SOAR Platform
+# Tests system behavior under CPU pressure
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: gateway-cpu-stress
+  namespace: chaos-testing
+  labels:
+    experiment-type: cpu-stress
+    target-service: gateway
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: gateway
+  stressors:
+    cpu:
+      workers: 2
+      load: 70
+  duration: "180s"
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: detection-cpu-stress
+  namespace: chaos-testing
+  labels:
+    experiment-type: cpu-stress
+    target-service: detection
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: detection-engine
+  stressors:
+    cpu:
+      workers: 4
+      load: 80
+  duration: "180s"
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: pipeline-cpu-stress
+  namespace: chaos-testing
+  labels:
+    experiment-type: cpu-stress
+    target-service: pipeline
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: pipeline
+  stressors:
+    cpu:
+      workers: 8
+      load: 90
+  duration: "300s"
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: query-cpu-stress
+  namespace: chaos-testing
+  labels:
+    experiment-type: cpu-stress
+    target-service: query
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: query-service
+  stressors:
+    cpu:
+      workers: 4
+      load: 85
+  duration: "180s"
+
+---
+# AI Services CPU Stress (higher resource needs)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: ai-copilot-cpu-stress
+  namespace: chaos-testing
+  labels:
+    experiment-type: cpu-stress
+    target-service: ai-copilot
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: ai-copilot
+  stressors:
+    cpu:
+      workers: 4
+      load: 95
+  duration: "120s"
+
+---
+# Memory Stress Experiments
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: gateway-memory-stress
+  namespace: chaos-testing
+  labels:
+    experiment-type: memory-stress
+    target-service: gateway
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: gateway
+  stressors:
+    memory:
+      workers: 2
+      size: "256MB"
+  duration: "180s"
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: detection-memory-stress
+  namespace: chaos-testing
+  labels:
+    experiment-type: memory-stress
+    target-service: detection
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: detection-engine
+  stressors:
+    memory:
+      workers: 4
+      size: "512MB"
+  duration: "180s"
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: query-memory-stress
+  namespace: chaos-testing
+  labels:
+    experiment-type: memory-stress
+    target-service: query
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: query-service
+  stressors:
+    memory:
+      workers: 4
+      size: "1GB"
+  duration: "120s"
+
+---
+# Combined CPU and Memory Stress
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: pipeline-combined-stress
+  namespace: chaos-testing
+  labels:
+    experiment-type: combined-stress
+    target-service: pipeline
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: pipeline
+  stressors:
+    cpu:
+      workers: 4
+      load: 70
+    memory:
+      workers: 2
+      size: "512MB"
+  duration: "180s"
+
+---
+# Progressive CPU stress workflow
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: progressive-cpu-stress
+  namespace: chaos-testing
+spec:
+  entry: cpu-stress-stages
+  templates:
+    - name: cpu-stress-stages
+      templateType: Serial
+      deadline: 30m
+      children:
+        - baseline
+        - moderate-load
+        - high-load
+        - extreme-load
+        - recovery
+
+    - name: baseline
+      templateType: Suspend
+      deadline: 2m
+
+    - name: moderate-load
+      templateType: StressChaos
+      deadline: 7m
+      stressChaos:
+        mode: all
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app.kubernetes.io/part-of: siem-platform
+        stressors:
+          cpu:
+            workers: 2
+            load: 50
+        duration: "5m"
+
+    - name: high-load
+      templateType: StressChaos
+      deadline: 7m
+      stressChaos:
+        mode: all
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app.kubernetes.io/part-of: siem-platform
+        stressors:
+          cpu:
+            workers: 4
+            load: 75
+        duration: "5m"
+
+    - name: extreme-load
+      templateType: StressChaos
+      deadline: 5m
+      stressChaos:
+        mode: all
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app.kubernetes.io/part-of: siem-platform
+        stressors:
+          cpu:
+            workers: 8
+            load: 95
+        duration: "3m"
+
+    - name: recovery
+      templateType: Suspend
+      deadline: 5m

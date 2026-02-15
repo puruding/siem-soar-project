@@ -1,0 +1,292 @@
+# CVE Enrichment Playbook
+# Enriches CVE identifiers with vulnerability data
+
+id: cve_enrichment
+name: CVE Enrichment
+display_name: CVE Vulnerability Enrichment
+description: |
+  Enriches CVE identifiers with comprehensive vulnerability data:
+  - NIST NVD data
+  - CVSS scores and vectors
+  - Affected products
+  - Exploit availability
+  - Patch information
+
+version: 1
+category: enrichment
+author: SIEM-SOAR Platform
+tags:
+  - enrichment
+  - cve
+  - vulnerability
+  - patch
+enabled: true
+
+trigger:
+  type: alert
+  conditions:
+    - field: entity_type
+      operator: equals
+      value: cve
+
+inputs:
+  - name: cve_id
+    type: string
+    required: true
+    description: CVE identifier (e.g., CVE-2021-44228)
+    validation:
+      pattern: "^CVE-\\d{4}-\\d{4,}$"
+  - name: check_exploits
+    type: bool
+    required: false
+    default: true
+
+outputs:
+  - name: cve_info
+    type: object
+    source: steps.aggregate_results.output.cve_info
+  - name: risk_score
+    type: int
+    source: steps.calculate_risk.output.score
+  - name: exploitability
+    type: string
+    source: steps.calculate_risk.output.exploitability
+
+steps:
+  - id: parallel_lookups
+    name: Parallel CVE Lookups
+    type: parallel
+    parallel:
+      branches:
+        - id: nvd_lookup
+          name: NVD Lookup
+          steps:
+            - id: nvd_query
+              name: Query NIST NVD
+              type: action
+              action:
+                connector: vulnerability
+                action: get_cve
+                parameters:
+                  cve_id: $inputs.cve_id
+                  source: nvd
+              continue_on_error: true
+
+        - id: mitre_lookup
+          name: MITRE Lookup
+          steps:
+            - id: mitre_query
+              name: Query MITRE CVE
+              type: action
+              action:
+                connector: vulnerability
+                action: get_cve
+                parameters:
+                  cve_id: $inputs.cve_id
+                  source: mitre
+              continue_on_error: true
+
+        - id: exploit_lookup
+          name: Exploit Database Lookup
+          steps:
+            - id: exploitdb_query
+              name: Search Exploit-DB
+              type: action
+              skip_condition:
+                field: $inputs.check_exploits
+                operator: equals
+                value: false
+              action:
+                connector: vulnerability
+                action: search_exploits
+                parameters:
+                  cve_id: $inputs.cve_id
+              continue_on_error: true
+
+        - id: cisa_lookup
+          name: CISA KEV Lookup
+          steps:
+            - id: kev_query
+              name: Check CISA KEV
+              type: action
+              action:
+                connector: vulnerability
+                action: check_kev
+                parameters:
+                  cve_id: $inputs.cve_id
+              continue_on_error: true
+
+      fail_fast: false
+
+  - id: aggregate_results
+    name: Aggregate CVE Information
+    type: script
+    script:
+      language: python
+      code: |
+        from datetime import datetime
+
+        cve_info = {
+            'cve_id': inputs['cve_id'],
+            'enrichment_timestamp': str(datetime.now()),
+            'description': None,
+            'cvss': {},
+            'affected_products': [],
+            'references': [],
+            'exploits': [],
+            'patches': [],
+            'kev_info': None
+        }
+
+        # NVD data
+        if nvd := inputs.get('nvd_query'):
+            cve_info['description'] = nvd.get('description')
+            cve_info['published_date'] = nvd.get('published_date')
+            cve_info['last_modified'] = nvd.get('last_modified')
+
+            # CVSS scores
+            if cvss := nvd.get('cvss'):
+                cve_info['cvss'] = {
+                    'version': cvss.get('version', '3.1'),
+                    'base_score': cvss.get('base_score'),
+                    'severity': cvss.get('severity'),
+                    'vector_string': cvss.get('vector_string'),
+                    'attack_vector': cvss.get('attack_vector'),
+                    'attack_complexity': cvss.get('attack_complexity'),
+                    'privileges_required': cvss.get('privileges_required'),
+                    'user_interaction': cvss.get('user_interaction'),
+                    'impact_score': cvss.get('impact_score'),
+                    'exploitability_score': cvss.get('exploitability_score')
+                }
+
+            # Affected products (CPE)
+            cve_info['affected_products'] = nvd.get('cpe', [])[:20]
+
+            # References
+            cve_info['references'] = nvd.get('references', [])
+
+        # MITRE supplemental data
+        if mitre := inputs.get('mitre_query'):
+            if not cve_info['description']:
+                cve_info['description'] = mitre.get('description')
+            cve_info['cwe_ids'] = mitre.get('cwe_ids', [])
+
+        # Exploits
+        if exploits := inputs.get('exploitdb_query'):
+            cve_info['exploits'] = [
+                {
+                    'id': e.get('id'),
+                    'title': e.get('title'),
+                    'type': e.get('type'),
+                    'platform': e.get('platform'),
+                    'date': e.get('date'),
+                    'url': e.get('url')
+                }
+                for e in exploits.get('exploits', [])[:10]
+            ]
+            cve_info['has_public_exploit'] = len(cve_info['exploits']) > 0
+
+        # CISA KEV
+        if kev := inputs.get('kev_query'):
+            if kev.get('in_kev'):
+                cve_info['kev_info'] = {
+                    'in_kev': True,
+                    'date_added': kev.get('date_added'),
+                    'due_date': kev.get('due_date'),
+                    'ransomware_use': kev.get('known_ransomware_use'),
+                    'notes': kev.get('notes')
+                }
+
+        return {'cve_info': cve_info}
+      inputs:
+        cve_id: $inputs.cve_id
+        nvd_query: $steps.parallel_lookups.nvd_lookup.nvd_query.output
+        mitre_query: $steps.parallel_lookups.mitre_lookup.mitre_query.output
+        exploitdb_query: $steps.parallel_lookups.exploit_lookup.exploitdb_query.output
+        kev_query: $steps.parallel_lookups.cisa_lookup.kev_query.output
+
+  - id: calculate_risk
+    name: Calculate CVE Risk Score
+    type: script
+    script:
+      language: python
+      code: |
+        cve_info = inputs['cve_info']
+        score = 0
+        factors = []
+
+        # CVSS base score
+        cvss = cve_info.get('cvss', {})
+        base_score = cvss.get('base_score', 0)
+        if base_score:
+            # Map CVSS to our risk score
+            score += int(base_score * 5)  # 0-50 points from CVSS
+            factors.append(f"CVSS {cvss.get('version', '3.x')}: {base_score} ({cvss.get('severity', 'unknown')})")
+
+        # Public exploit available
+        if cve_info.get('has_public_exploit'):
+            score += 25
+            factors.append(f"Public exploit available ({len(cve_info.get('exploits', []))} found)")
+
+        # In CISA KEV
+        if cve_info.get('kev_info', {}).get('in_kev'):
+            score += 20
+            factors.append("In CISA Known Exploited Vulnerabilities catalog")
+            if cve_info['kev_info'].get('ransomware_use'):
+                score += 10
+                factors.append("Known ransomware use")
+
+        # Attack vector network
+        if cvss.get('attack_vector') == 'NETWORK':
+            score += 5
+            factors.append("Network-based attack vector")
+
+        score = min(score, 100)
+
+        # Determine exploitability
+        if cve_info.get('has_public_exploit') and cve_info.get('kev_info', {}).get('in_kev'):
+            exploitability = 'actively_exploited'
+        elif cve_info.get('has_public_exploit'):
+            exploitability = 'exploit_available'
+        elif cvss.get('exploitability_score', 0) >= 3.0:
+            exploitability = 'high'
+        elif cvss.get('exploitability_score', 0) >= 1.5:
+            exploitability = 'medium'
+        else:
+            exploitability = 'low'
+
+        return {
+            'score': score,
+            'exploitability': exploitability,
+            'risk_level': 'critical' if score >= 80 else 'high' if score >= 60 else 'medium' if score >= 40 else 'low',
+            'risk_factors': factors,
+            'cvss_base_score': base_score
+        }
+      inputs:
+        cve_info: $steps.aggregate_results.output.cve_info
+
+  - id: update_case
+    name: Update Case with CVE Info
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.case_id
+          operator: exists
+      then:
+        - id: add_enrichment
+          name: Add CVE Enrichment to Case
+          type: action
+          action:
+            connector: case_management
+            action: add_evidence
+            parameters:
+              case_id: $inputs.case_id
+              evidence_type: enrichment
+              name: "CVE Enrichment - ${inputs.cve_id}"
+              data: $steps.aggregate_results.output.cve_info
+              tags: [cve_enrichment, vulnerability]
+
+timeout: 3m
+retry_policy:
+  max_attempts: 2
+  initial_interval: 10s

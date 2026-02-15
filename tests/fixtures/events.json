@@ -1,0 +1,200 @@
+{
+  "events": [
+    {
+      "event_id": "evt-001",
+      "timestamp": "2024-01-15T10:30:00.000Z",
+      "event_type": "PROCESS_LAUNCH",
+      "severity": "high",
+      "source": {
+        "ip": "192.168.1.100",
+        "hostname": "workstation-001",
+        "user": "admin",
+        "mac": "00:11:22:33:44:55"
+      },
+      "destination": {
+        "ip": "10.0.0.50",
+        "port": 443
+      },
+      "process": {
+        "name": "powershell.exe",
+        "pid": 4532,
+        "command_line": "powershell.exe -EncodedCommand SGVsbG8gV29ybGQ=",
+        "hash": {
+          "md5": "d41d8cd98f00b204e9800998ecf8427e",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "parent": {
+          "name": "cmd.exe",
+          "pid": 4520
+        }
+      },
+      "metadata": {
+        "source": "edr",
+        "agent_version": "2.5.0"
+      }
+    },
+    {
+      "event_id": "evt-002",
+      "timestamp": "2024-01-15T10:31:00.000Z",
+      "event_type": "NETWORK_CONNECTION",
+      "severity": "medium",
+      "source": {
+        "ip": "192.168.1.100",
+        "hostname": "workstation-001",
+        "port": 54321
+      },
+      "destination": {
+        "ip": "185.143.220.100",
+        "port": 443,
+        "hostname": "suspicious-domain.com"
+      },
+      "network": {
+        "protocol": "TCP",
+        "bytes_sent": 1024,
+        "bytes_received": 2048,
+        "direction": "outbound"
+      },
+      "metadata": {
+        "source": "firewall",
+        "rule_id": "rule-1234"
+      }
+    },
+    {
+      "event_id": "evt-003",
+      "timestamp": "2024-01-15T10:32:00.000Z",
+      "event_type": "FILE_CREATION",
+      "severity": "high",
+      "source": {
+        "ip": "192.168.1.100",
+        "hostname": "workstation-001",
+        "user": "admin"
+      },
+      "file": {
+        "path": "C:\\Users\\admin\\AppData\\Local\\Temp\\malware.exe",
+        "name": "malware.exe",
+        "size": 524288,
+        "hash": {
+          "md5": "abc123def456",
+          "sha256": "deadbeef12345678"
+        }
+      },
+      "process": {
+        "name": "powershell.exe",
+        "pid": 4532
+      },
+      "metadata": {
+        "source": "edr"
+      }
+    },
+    {
+      "event_id": "evt-004",
+      "timestamp": "2024-01-15T10:35:00.000Z",
+      "event_type": "USER_LOGIN",
+      "severity": "info",
+      "source": {
+        "ip": "192.168.1.50",
+        "hostname": "domain-controller"
+      },
+      "authentication": {
+        "user": "admin@company.local",
+        "type": "interactive",
+        "result": "success",
+        "logon_type": 10
+      },
+      "target": {
+        "hostname": "workstation-001",
+        "ip": "192.168.1.100"
+      },
+      "metadata": {
+        "source": "windows_security",
+        "event_id": 4624
+      }
+    },
+    {
+      "event_id": "evt-005",
+      "timestamp": "2024-01-15T10:40:00.000Z",
+      "event_type": "AUTHENTICATION_FAILURE",
+      "severity": "medium",
+      "source": {
+        "ip": "10.0.0.200",
+        "hostname": "unknown"
+      },
+      "authentication": {
+        "user": "administrator",
+        "type": "network",
+        "result": "failure",
+        "failure_reason": "invalid_password"
+      },
+      "target": {
+        "hostname": "domain-controller",
+        "ip": "192.168.1.50"
+      },
+      "metadata": {
+        "source": "windows_security",
+        "event_id": 4625
+      }
+    },
+    {
+      "event_id": "evt-006",
+      "timestamp": "2024-01-15T10:45:00.000Z",
+      "event_type": "DNS_QUERY",
+      "severity": "low",
+      "source": {
+        "ip": "192.168.1.100",
+        "hostname": "workstation-001"
+      },
+      "dns": {
+        "query": "malicious-c2-server.com",
+        "query_type": "A",
+        "response": "185.143.220.100",
+        "response_code": "NOERROR"
+      },
+      "metadata": {
+        "source": "dns_server"
+      }
+    },
+    {
+      "event_id": "evt-007",
+      "timestamp": "2024-01-15T10:50:00.000Z",
+      "event_type": "REGISTRY_MODIFICATION",
+      "severity": "high",
+      "source": {
+        "ip": "192.168.1.100",
+        "hostname": "workstation-001",
+        "user": "admin"
+      },
+      "registry": {
+        "key": "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "value_name": "MalwareService",
+        "value_data": "C:\\Users\\admin\\AppData\\Local\\Temp\\malware.exe",
+        "action": "create"
+      },
+      "process": {
+        "name": "malware.exe",
+        "pid": 5678
+      },
+      "metadata": {
+        "source": "edr"
+      }
+    },
+    {
+      "event_id": "evt-008",
+      "timestamp": "2024-01-15T11:00:00.000Z",
+      "event_type": "SERVICE_START",
+      "severity": "info",
+      "source": {
+        "ip": "192.168.1.100",
+        "hostname": "workstation-001"
+      },
+      "service": {
+        "name": "MalwareService",
+        "display_name": "Malware Service",
+        "start_type": "auto",
+        "binary_path": "C:\\Users\\admin\\AppData\\Local\\Temp\\malware.exe"
+      },
+      "metadata": {
+        "source": "windows_system"
+      }
+    }
+  ]
+}

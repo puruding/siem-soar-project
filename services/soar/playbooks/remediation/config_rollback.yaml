@@ -1,0 +1,16 @@
+name: config_rollback
+version: "1.0"
+description: Rollback configuration changes after security incident
+category: remediation
+severity: high
+steps:
+  - id: get_last_known_good_config
+    action: config.get_backup
+  - id: backup_current_config
+    action: config.backup
+  - id: apply_rollback
+    action: config.apply
+  - id: verify_rollback
+    action: system.verify_config
+  - id: restart_services
+    action: system.restart_all

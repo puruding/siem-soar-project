@@ -1,0 +1,312 @@
+{
+  "cases": [
+    {
+      "id": "case-001-ransomware-incident",
+      "title": "Ransomware Incident - Multiple Workstations Affected",
+      "description": "Ransomware detected on multiple workstations in the Engineering department. Initial infection vector appears to be phishing email.",
+      "severity": "critical",
+      "priority": "p1",
+      "status": "investigating",
+      "category": "malware",
+      "subcategory": "ransomware",
+      "assignee": "security-analyst-01@example.com",
+      "created_at": "2024-01-15T11:20:00Z",
+      "updated_at": "2024-01-15T15:30:00Z",
+      "tags": ["ransomware", "malware", "phishing", "engineering"],
+      "related_alerts": [
+        "alert-002-malware-detected",
+        "alert-004-phishing",
+        "alert-007-lateral-movement"
+      ],
+      "affected_assets": [
+        {
+          "hostname": "WORKSTATION-042",
+          "ip": "10.0.2.42",
+          "type": "workstation",
+          "owner": "john.doe@example.com",
+          "department": "Engineering",
+          "criticality": "medium"
+        },
+        {
+          "hostname": "WORKSTATION-043",
+          "ip": "10.0.2.43",
+          "type": "workstation",
+          "owner": "jane.smith@example.com",
+          "department": "Engineering",
+          "criticality": "medium"
+        }
+      ],
+      "indicators": {
+        "file_hashes": [
+          "sha256:7d8a4c5b2e1f3a6b9c0d8e7f4a5b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b"
+        ],
+        "c2_domains": ["malicious.example.com"],
+        "malicious_ips": ["198.51.100.50"],
+        "malware_family": "Ransomware.Generic"
+      },
+      "timeline": [
+        {
+          "timestamp": "2024-01-15T08:30:00Z",
+          "event": "Phishing email received by jane.smith@example.com",
+          "actor": "external",
+          "details": "Email from it-support@examp1e.com with malicious link"
+        },
+        {
+          "timestamp": "2024-01-15T11:15:00Z",
+          "event": "Malware executed on WORKSTATION-042",
+          "actor": "john.doe",
+          "details": "invoice.exe executed after file share access"
+        },
+        {
+          "timestamp": "2024-01-15T11:16:00Z",
+          "event": "C2 communication detected",
+          "actor": "malware",
+          "details": "Outbound connection to malicious.example.com"
+        },
+        {
+          "timestamp": "2024-01-15T11:20:00Z",
+          "event": "Case created",
+          "actor": "detection_engine",
+          "details": "Automatic case creation from correlated alerts"
+        },
+        {
+          "timestamp": "2024-01-15T11:30:00Z",
+          "event": "Incident response initiated",
+          "actor": "security-analyst-01",
+          "details": "Affected workstations isolated from network"
+        }
+      ],
+      "notes": [
+        {
+          "id": "note-001",
+          "timestamp": "2024-01-15T11:35:00Z",
+          "author": "security-analyst-01@example.com",
+          "content": "Initial triage completed. Two workstations confirmed infected. Network isolation in place.",
+          "visibility": "team"
+        },
+        {
+          "id": "note-002",
+          "timestamp": "2024-01-15T14:00:00Z",
+          "author": "security-analyst-01@example.com",
+          "content": "Forensic images captured from both workstations. No evidence of lateral movement to servers.",
+          "visibility": "team"
+        }
+      ],
+      "evidence": [
+        {
+          "id": "evidence-001",
+          "type": "file",
+          "name": "invoice.exe",
+          "description": "Original malware sample",
+          "hash": "sha256:7d8a4c5b2e1f3a6b9c0d8e7f4a5b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b",
+          "collected_at": "2024-01-15T11:40:00Z",
+          "collected_by": "security-analyst-01@example.com"
+        },
+        {
+          "id": "evidence-002",
+          "type": "forensic_image",
+          "name": "WORKSTATION-042-image.dd",
+          "description": "Full disk image of infected workstation",
+          "hash": "sha256:abc123...",
+          "collected_at": "2024-01-15T13:00:00Z",
+          "collected_by": "forensics-team@example.com"
+        }
+      ],
+      "playbook_executions": [
+        {
+          "playbook_id": "playbook-malware-response",
+          "execution_id": "exec-001",
+          "status": "completed",
+          "started_at": "2024-01-15T11:25:00Z",
+          "completed_at": "2024-01-15T11:30:00Z",
+          "results": {
+            "hosts_isolated": 2,
+            "artifacts_collected": true
+          }
+        }
+      ],
+      "sla": {
+        "response_time_minutes": 15,
+        "target_response_minutes": 30,
+        "resolution_time_hours": null,
+        "target_resolution_hours": 4
+      },
+      "metadata": {
+        "source": "automated",
+        "confidence": 0.95,
+        "risk_score": 95
+      }
+    },
+    {
+      "id": "case-002-data-breach-investigation",
+      "title": "Potential Data Breach - Unusual Data Transfer",
+      "description": "Investigation into large outbound data transfer from database server to external IP.",
+      "severity": "high",
+      "priority": "p2",
+      "status": "investigating",
+      "category": "data_breach",
+      "subcategory": "exfiltration",
+      "assignee": "security-analyst-02@example.com",
+      "created_at": "2024-01-15T10:00:00Z",
+      "updated_at": "2024-01-15T16:00:00Z",
+      "tags": ["data-exfiltration", "database", "investigation"],
+      "related_alerts": [
+        "alert-003-data-exfiltration"
+      ],
+      "affected_assets": [
+        {
+          "hostname": "db-server-01",
+          "ip": "10.0.1.50",
+          "type": "server",
+          "owner": "database-team@example.com",
+          "department": "IT",
+          "criticality": "critical"
+        }
+      ],
+      "indicators": {
+        "destination_ips": ["198.51.100.100"],
+        "data_volume_gb": 5,
+        "time_period": "45 minutes"
+      },
+      "timeline": [
+        {
+          "timestamp": "2024-01-15T09:00:00Z",
+          "event": "Large data transfer started",
+          "actor": "unknown",
+          "details": "5GB transferred to external IP"
+        },
+        {
+          "timestamp": "2024-01-15T09:45:00Z",
+          "event": "Alert generated",
+          "actor": "network_monitor",
+          "details": "Data exfiltration alert triggered"
+        },
+        {
+          "timestamp": "2024-01-15T10:00:00Z",
+          "event": "Case created",
+          "actor": "security-analyst-02",
+          "details": "Manual case creation for investigation"
+        }
+      ],
+      "notes": [
+        {
+          "id": "note-001",
+          "timestamp": "2024-01-15T10:30:00Z",
+          "author": "security-analyst-02@example.com",
+          "content": "Investigating connection. Destination IP belongs to unknown hosting provider.",
+          "visibility": "team"
+        }
+      ],
+      "evidence": [],
+      "playbook_executions": [],
+      "sla": {
+        "response_time_minutes": 60,
+        "target_response_minutes": 60,
+        "resolution_time_hours": null,
+        "target_resolution_hours": 24
+      },
+      "metadata": {
+        "source": "manual",
+        "confidence": 0.75,
+        "risk_score": 80
+      }
+    },
+    {
+      "id": "case-003-phishing-campaign",
+      "title": "Phishing Campaign Targeting Finance Department",
+      "description": "Multiple users in Finance department received similar phishing emails impersonating the CEO.",
+      "severity": "medium",
+      "priority": "p2",
+      "status": "contained",
+      "category": "phishing",
+      "subcategory": "spear_phishing",
+      "assignee": "security-analyst-01@example.com",
+      "created_at": "2024-01-14T14:00:00Z",
+      "updated_at": "2024-01-15T09:00:00Z",
+      "closed_at": null,
+      "tags": ["phishing", "spear-phishing", "finance", "ceo-fraud"],
+      "related_alerts": [
+        "alert-004-phishing"
+      ],
+      "affected_assets": [
+        {
+          "hostname": "WORKSTATION-101",
+          "ip": "10.0.5.101",
+          "type": "workstation",
+          "owner": "finance-user-01@example.com",
+          "department": "Finance",
+          "criticality": "high"
+        },
+        {
+          "hostname": "WORKSTATION-102",
+          "ip": "10.0.5.102",
+          "type": "workstation",
+          "owner": "finance-user-02@example.com",
+          "department": "Finance",
+          "criticality": "high"
+        }
+      ],
+      "indicators": {
+        "sender_domain": "examp1e.com",
+        "malicious_urls": ["https://fake-login.malicious.com/ceo"],
+        "affected_users": 5
+      },
+      "timeline": [
+        {
+          "timestamp": "2024-01-14T10:00:00Z",
+          "event": "First phishing email received",
+          "actor": "external",
+          "details": "Email to finance-user-01@example.com"
+        },
+        {
+          "timestamp": "2024-01-14T14:00:00Z",
+          "event": "Case created",
+          "actor": "email_security",
+          "details": "Multiple similar emails detected"
+        },
+        {
+          "timestamp": "2024-01-14T15:00:00Z",
+          "event": "Malicious domain blocked",
+          "actor": "security-analyst-01",
+          "details": "Domain added to blocklist"
+        }
+      ],
+      "notes": [],
+      "evidence": [],
+      "playbook_executions": [
+        {
+          "playbook_id": "playbook-phishing-response",
+          "execution_id": "exec-002",
+          "status": "completed",
+          "started_at": "2024-01-14T14:10:00Z",
+          "completed_at": "2024-01-14T14:30:00Z",
+          "results": {
+            "emails_quarantined": 5,
+            "domain_blocked": true,
+            "users_notified": 5
+          }
+        }
+      ],
+      "sla": {
+        "response_time_minutes": 30,
+        "target_response_minutes": 60,
+        "resolution_time_hours": 19,
+        "target_resolution_hours": 24
+      },
+      "metadata": {
+        "source": "automated",
+        "confidence": 0.90,
+        "risk_score": 65
+      }
+    }
+  ],
+  "metadata": {
+    "generated_at": "2024-01-15T18:00:00Z",
+    "version": "1.0",
+    "total_cases": 3,
+    "status_distribution": {
+      "investigating": 2,
+      "contained": 1
+    }
+  }
+}

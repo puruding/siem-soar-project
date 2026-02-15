@@ -1,0 +1,408 @@
+# Disable User Account Playbook
+# Disables compromised user accounts
+
+id: disable_user
+name: Disable User Account
+display_name: Disable Compromised User
+description: |
+  Disables a compromised user account across identity systems:
+  - Active Directory account disable
+  - Revoke active sessions
+  - Disable SSO/cloud accounts
+  - Reset credentials
+
+version: 1
+category: containment
+author: SIEM-SOAR Platform
+tags:
+  - containment
+  - user
+  - identity
+  - active_directory
+enabled: true
+
+trigger:
+  type: manual
+  conditions: []
+
+inputs:
+  - name: username
+    type: string
+    required: true
+    description: Username to disable
+  - name: domain
+    type: string
+    required: false
+    description: AD domain
+  - name: reason
+    type: string
+    required: true
+    description: Reason for disabling
+  - name: case_id
+    type: string
+    required: false
+  - name: require_approval
+    type: bool
+    required: false
+    default: true
+  - name: revoke_sessions
+    type: bool
+    required: false
+    default: true
+  - name: reset_password
+    type: bool
+    required: false
+    default: true
+
+outputs:
+  - name: disable_result
+    type: object
+    source: steps.aggregate_results.output
+  - name: success
+    type: bool
+    source: steps.aggregate_results.output.success
+
+steps:
+  - id: get_user_info
+    name: Get User Information
+    type: action
+    action:
+      connector: active_directory
+      action: get_user_info
+      parameters:
+        username: $inputs.username
+        domain: $inputs.domain
+
+  - id: check_criticality
+    name: Check User Criticality
+    type: script
+    script:
+      language: python
+      code: |
+        user_info = inputs['user_info']
+
+        # Check for service accounts
+        is_service_account = (
+            user_info.get('is_service_account', False) or
+            'svc_' in inputs['username'].lower() or
+            'service' in inputs['username'].lower()
+        )
+
+        # Check for admin accounts
+        groups = user_info.get('groups', [])
+        admin_groups = ['Domain Admins', 'Enterprise Admins', 'Administrators']
+        is_admin = any(ag.lower() in [g.lower() for g in groups] for ag in admin_groups)
+
+        # Check for VIP
+        is_vip = user_info.get('is_vip', False)
+
+        needs_approval = is_service_account or is_admin or is_vip or inputs['require_approval']
+
+        return {
+            'is_service_account': is_service_account,
+            'is_admin': is_admin,
+            'is_vip': is_vip,
+            'needs_approval': needs_approval,
+            'approval_reason': (
+                'Service account' if is_service_account else
+                'Admin account' if is_admin else
+                'VIP user' if is_vip else
+                'Standard approval required'
+            )
+        }
+      inputs:
+        username: $inputs.username
+        user_info: $steps.get_user_info.output
+        require_approval: $inputs.require_approval
+
+  - id: approval_flow
+    name: Approval Flow
+    type: condition
+    condition:
+      conditions:
+        - field: $steps.check_criticality.output.needs_approval
+          operator: equals
+          value: true
+      then:
+        - id: request_approval
+          name: Request Disable Approval
+          type: approval
+          approval:
+            approvers:
+              - security-operations@company.com
+              - it-security@company.com
+            required_count: 1
+            timeout: 30m
+            message: |
+              **User Account Disable Approval Required**
+
+              **Username:** ${inputs.username}
+              **Display Name:** ${steps.get_user_info.output.display_name}
+              **Department:** ${steps.get_user_info.output.department}
+              **Title:** ${steps.get_user_info.output.title}
+              **Manager:** ${steps.get_user_info.output.manager}
+
+              **Account Type:** ${steps.check_criticality.output.approval_reason}
+
+              **Reason for Disable:** ${inputs.reason}
+              **Case ID:** ${inputs.case_id}
+
+              Please approve or reject this account disable request.
+            actions:
+              - name: approve
+                label: Approve Disable
+                style: danger
+                is_approval: true
+              - name: approve_temp
+                label: Approve (24h Temporary)
+                style: warning
+                is_approval: true
+              - name: reject
+                label: Reject
+                style: secondary
+                is_approval: false
+
+  - id: check_approval
+    name: Check Approval Result
+    type: condition
+    condition:
+      conditions:
+        - or:
+          - field: $steps.check_criticality.output.needs_approval
+            operator: equals
+            value: false
+          - field: $steps.approval_flow.request_approval.output.approved
+            operator: equals
+            value: true
+      then:
+        - id: proceed
+          name: Proceed with Disable
+          type: transform
+          transform:
+            type: template
+            expression: "{ 'proceed': true }"
+            source: ""
+            target: proceed_status
+      else:
+        - id: abort_rejected
+          name: Abort - Approval Rejected
+          type: script
+          script:
+            language: python
+            code: |
+              raise Exception("User disable request was rejected")
+
+  - id: disable_ad_account
+    name: Disable AD Account
+    type: action
+    action:
+      connector: active_directory
+      action: disable_user
+      parameters:
+        username: $inputs.username
+        domain: $inputs.domain
+        reason: $inputs.reason
+    retry_policy:
+      max_attempts: 3
+      initial_interval: 5s
+
+  - id: parallel_actions
+    name: Parallel Containment Actions
+    type: parallel
+    parallel:
+      branches:
+        - id: reset_password_branch
+          name: Reset Password
+          steps:
+            - id: reset_pwd
+              name: Reset User Password
+              type: action
+              skip_condition:
+                field: $inputs.reset_password
+                operator: equals
+                value: false
+              action:
+                connector: active_directory
+                action: reset_password
+                parameters:
+                  username: $inputs.username
+                  domain: $inputs.domain
+                  generate_random: true
+                  require_change: true
+              continue_on_error: true
+
+        - id: revoke_sessions_branch
+          name: Revoke Sessions
+          steps:
+            - id: revoke_ad_sessions
+              name: Force AD Logoff
+              type: action
+              skip_condition:
+                field: $inputs.revoke_sessions
+                operator: equals
+                value: false
+              action:
+                connector: active_directory
+                action: force_logoff
+                parameters:
+                  username: $inputs.username
+                  domain: $inputs.domain
+              continue_on_error: true
+
+            - id: revoke_azure_sessions
+              name: Revoke Azure AD Sessions
+              type: action
+              skip_condition:
+                field: $inputs.revoke_sessions
+                operator: equals
+                value: false
+              action:
+                connector: azure_ad
+                action: revoke_sessions
+                parameters:
+                  user_principal_name: $inputs.username
+              continue_on_error: true
+
+        - id: disable_cloud
+          name: Disable Cloud Accounts
+          steps:
+            - id: disable_azure
+              name: Disable Azure AD
+              type: action
+              action:
+                connector: azure_ad
+                action: disable_user
+                parameters:
+                  user_principal_name: $inputs.username
+              continue_on_error: true
+
+            - id: disable_okta
+              name: Disable Okta
+              type: action
+              action:
+                connector: okta
+                action: suspend_user
+                parameters:
+                  username: $inputs.username
+              continue_on_error: true
+
+      fail_fast: false
+
+  - id: aggregate_results
+    name: Aggregate Results
+    type: script
+    script:
+      language: python
+      code: |
+        results = {
+            'username': inputs['username'],
+            'ad_disabled': True,  # We got here, so AD disable succeeded
+            'password_reset': inputs.get('reset_result', {}).get('success', False),
+            'sessions_revoked': inputs.get('revoke_result', {}).get('success', False),
+            'cloud_disabled': {
+                'azure_ad': inputs.get('azure_result', {}).get('success', False),
+                'okta': inputs.get('okta_result', {}).get('success', False)
+            },
+            'success': True,
+            'timestamp': str(datetime.now())
+        }
+
+        return results
+      inputs:
+        username: $inputs.username
+        reset_result: $steps.parallel_actions.reset_password_branch.reset_pwd.output
+        revoke_result: $steps.parallel_actions.revoke_sessions_branch.revoke_ad_sessions.output
+        azure_result: $steps.parallel_actions.disable_cloud.disable_azure.output
+        okta_result: $steps.parallel_actions.disable_cloud.disable_okta.output
+
+  - id: notifications
+    name: Send Notifications
+    type: parallel
+    parallel:
+      branches:
+        - id: notify_slack
+          name: Notify Slack
+          steps:
+            - id: slack_alert
+              name: Send Slack Alert
+              type: action
+              action:
+                connector: slack
+                action: send_message
+                parameters:
+                  channel: "#security-incidents"
+                  text: |
+                    :no_entry: **User Account Disabled**
+
+                    **Username:** ${inputs.username}
+                    **Display Name:** ${steps.get_user_info.output.display_name}
+                    **Reason:** ${inputs.reason}
+                    **Case:** ${inputs.case_id}
+
+                    **Actions Taken:**
+                    - AD Account Disabled: Yes
+                    - Password Reset: ${inputs.reset_password}
+                    - Sessions Revoked: ${inputs.revoke_sessions}
+
+        - id: notify_manager
+          name: Notify Manager
+          steps:
+            - id: email_manager
+              name: Email User's Manager
+              type: action
+              skip_condition:
+                field: $steps.get_user_info.output.manager_email
+                operator: not_exists
+              action:
+                connector: email
+                action: send_email
+                parameters:
+                  to: $steps.get_user_info.output.manager_email
+                  subject: "Security Notice: ${inputs.username} account disabled"
+                  body: |
+                    Dear Manager,
+
+                    The account for ${steps.get_user_info.output.display_name} (${inputs.username})
+                    has been disabled by the Security Operations team.
+
+                    Reason: ${inputs.reason}
+
+                    If you believe this was done in error, please contact the Security Operations team immediately.
+
+                    Case Reference: ${inputs.case_id}
+
+                    Regards,
+                    Security Operations Team
+              continue_on_error: true
+
+        - id: update_case
+          name: Update Case
+          steps:
+            - id: add_evidence
+              name: Add Disable Evidence
+              type: action
+              skip_condition:
+                field: $inputs.case_id
+                operator: not_exists
+              action:
+                connector: case_management
+                action: add_evidence
+                parameters:
+                  case_id: $inputs.case_id
+                  evidence_type: action
+                  name: "User Disabled - ${inputs.username}"
+                  data:
+                    action: disable_user
+                    username: $inputs.username
+                    display_name: $steps.get_user_info.output.display_name
+                    department: $steps.get_user_info.output.department
+                    reason: $inputs.reason
+                    result: $steps.aggregate_results.output
+                  tags: [containment, user_disabled]
+
+      fail_fast: false
+
+timeout: 30m
+retry_policy:
+  max_attempts: 2
+  initial_interval: 30s

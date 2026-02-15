@@ -1,0 +1,18 @@
+name: system_restore
+version: "1.0"
+description: Restore system from backup after compromise
+category: remediation
+severity: high
+steps:
+  - id: verify_backup_integrity
+    action: backup.verify
+  - id: shutdown_system
+    action: system.shutdown
+  - id: restore_from_backup
+    action: backup.restore
+  - id: verify_restoration
+    action: system.health_check
+  - id: apply_security_patches
+    action: patch.apply_updates
+  - id: restart_system
+    action: system.start

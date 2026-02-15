@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-pipeline
+  labels:
+    app.kubernetes.io/name: pipeline
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pipeline
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pipeline
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: pipeline
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.config.grpcPort }}
+            - name: metrics
+              containerPort: {{ .Values.config.metricsPort }}
+          env:
+            - name: KAFKA_BROKERS
+              value: {{ .Values.global.kafka.brokers | quote }}
+            - name: KAFKA_CONSUMER_GROUP
+              value: {{ .Values.config.kafka.consumerGroup | quote }}
+            - name: CLICKHOUSE_HOST
+              value: {{ .Values.global.clickhouse.host | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.clickhouse.existingSecret }}
+                  key: {{ .Values.global.clickhouse.secretKey }}
+            - name: PARSER_WORKERS
+              value: {{ .Values.config.parser.workers | quote }}
+            - name: NORMALIZER_WORKERS
+              value: {{ .Values.config.normalizer.workers | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: geoip
+              mountPath: /etc/pipeline/geoip
+              readOnly: true
+            - name: config
+              mountPath: /etc/pipeline
+              readOnly: true
+          livenessProbe:
+            grpc:
+              port: {{ .Values.config.grpcPort }}
+            initialDelaySeconds: 10
+          readinessProbe:
+            grpc:
+              port: {{ .Values.config.grpcPort }}
+            initialDelaySeconds: 5
+      volumes:
+        - name: geoip
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-geoip-pvc
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-pipeline-config
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-pipeline
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.grpcPort }}
+      targetPort: grpc
+      name: grpc
+    - port: {{ .Values.service.metricsPort }}
+      targetPort: metrics
+      name: metrics
+  selector:
+    app.kubernetes.io/name: pipeline
+    app.kubernetes.io/instance: {{ .Release.Name }}

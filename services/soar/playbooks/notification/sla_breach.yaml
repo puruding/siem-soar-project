@@ -1,0 +1,15 @@
+name: sla_breach
+version: "1.0"
+description: Alert on SLA breaches for cases
+category: notification
+trigger:
+  type: sla_breach
+steps:
+  - id: get_case_details
+    action: case.get
+  - id: notify_assignee
+    action: email.send
+  - id: notify_management
+    action: slack.send
+  - id: create_escalation_ticket
+    action: jira.create_issue

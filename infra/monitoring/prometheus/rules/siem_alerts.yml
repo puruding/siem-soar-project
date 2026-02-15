@@ -1,0 +1,304 @@
+---
+# Prometheus Alert Rules for SIEM-SOAR Platform
+groups:
+  - name: siem-platform-availability
+    interval: 30s
+    rules:
+      # Service availability alerts
+      - alert: SIEMServiceDown
+        expr: up{job=~"siem-.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: soc
+        annotations:
+          summary: "SIEM service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been down for more than 1 minute."
+          runbook_url: "https://docs.siem.local/runbooks/service-down"
+
+      - alert: SIEMHighErrorRate
+        expr: |
+          sum(rate(http_requests_total{job=~"siem-.*",status=~"5.."}[5m])) by (job)
+          /
+          sum(rate(http_requests_total{job=~"siem-.*"}[5m])) by (job)
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          team: soc
+        annotations:
+          summary: "High error rate on {{ $labels.job }}"
+          description: "Service {{ $labels.job }} has error rate above 5% for 5 minutes."
+          runbook_url: "https://docs.siem.local/runbooks/high-error-rate"
+
+      - alert: SIEMHighLatency
+        expr: |
+          histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=~"siem-.*"}[5m])) by (job, le))
+          > 2
+        for: 5m
+        labels:
+          severity: warning
+          team: soc
+        annotations:
+          summary: "High latency on {{ $labels.job }}"
+          description: "P99 latency on {{ $labels.job }} is above 2 seconds."
+          runbook_url: "https://docs.siem.local/runbooks/high-latency"
+
+  - name: siem-platform-ingestion
+    interval: 30s
+    rules:
+      # Event ingestion alerts
+      - alert: SIEMIngestionLag
+        expr: |
+          sum(kafka_consumer_group_lag{group=~"siem-.*"}) by (group, topic)
+          > 100000
+        for: 5m
+        labels:
+          severity: warning
+          team: soc
+        annotations:
+          summary: "High ingestion lag for {{ $labels.group }}"
+          description: "Consumer group {{ $labels.group }} has lag > 100K on topic {{ $labels.topic }}."
+          runbook_url: "https://docs.siem.local/runbooks/ingestion-lag"
+
+      - alert: SIEMIngestionStopped
+        expr: |
+          rate(siem_events_ingested_total[5m]) == 0
+        for: 10m
+        labels:
+          severity: critical
+          team: soc
+        annotations:
+          summary: "Event ingestion has stopped"
+          description: "No events have been ingested for 10 minutes."
+          runbook_url: "https://docs.siem.local/runbooks/ingestion-stopped"
+
+      - alert: SIEMIngestionBelowThreshold
+        expr: |
+          sum(rate(siem_events_ingested_total[5m])) < 10000
+        for: 15m
+        labels:
+          severity: warning
+          team: soc
+        annotations:
+          summary: "Event ingestion rate below threshold"
+          description: "Event ingestion rate is below 10K EPS for 15 minutes."
+          runbook_url: "https://docs.siem.local/runbooks/low-ingestion"
+
+  - name: siem-platform-detection
+    interval: 30s
+    rules:
+      # Detection engine alerts
+      - alert: SIEMDetectionEngineOverloaded
+        expr: |
+          sum(rate(siem_detection_queue_size[5m])) > 10000
+        for: 5m
+        labels:
+          severity: warning
+          team: soc
+        annotations:
+          summary: "Detection engine queue is growing"
+          description: "Detection queue size exceeds 10K events."
+          runbook_url: "https://docs.siem.local/runbooks/detection-overload"
+
+      - alert: SIEMDetectionLatencyHigh
+        expr: |
+          histogram_quantile(0.95, rate(siem_detection_latency_seconds_bucket[5m]))
+          > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: soc
+        annotations:
+          summary: "Detection latency is high"
+          description: "P95 detection latency exceeds 5 seconds."
+          runbook_url: "https://docs.siem.local/runbooks/detection-latency"
+
+      - alert: SIEMRuleEngineFailure
+        expr: |
+          rate(siem_rule_evaluation_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: critical
+          team: soc
+        annotations:
+          summary: "Rule engine experiencing failures"
+          description: "Rule evaluation errors rate > 10/s."
+          runbook_url: "https://docs.siem.local/runbooks/rule-engine-failure"
+
+  - name: siem-platform-soar
+    interval: 30s
+    rules:
+      # SOAR engine alerts
+      - alert: SIEMPlaybookFailureRate
+        expr: |
+          sum(rate(siem_playbook_failures_total[5m]))
+          /
+          sum(rate(siem_playbook_executions_total[5m]))
+          > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          team: soc
+        annotations:
+          summary: "High playbook failure rate"
+          description: "Playbook failure rate exceeds 10%."
+          runbook_url: "https://docs.siem.local/runbooks/playbook-failures"
+
+      - alert: SIEMPlaybookQueueBacklog
+        expr: |
+          siem_playbook_queue_size > 500
+        for: 5m
+        labels:
+          severity: warning
+          team: soc
+        annotations:
+          summary: "Playbook execution backlog"
+          description: "Playbook queue has more than 500 pending executions."
+          runbook_url: "https://docs.siem.local/runbooks/playbook-backlog"
+
+      - alert: SIEMApprovalTimeout
+        expr: |
+          siem_pending_approvals > 20
+        for: 30m
+        labels:
+          severity: warning
+          team: soc
+        annotations:
+          summary: "Many pending approvals"
+          description: "More than 20 playbook executions waiting for approval."
+          runbook_url: "https://docs.siem.local/runbooks/approval-timeout"
+
+  - name: siem-platform-ai
+    interval: 30s
+    rules:
+      # AI service alerts
+      - alert: SIEMAIModelLatencyHigh
+        expr: |
+          histogram_quantile(0.95, rate(siem_ai_inference_latency_seconds_bucket[5m]))
+          > 1
+        for: 5m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "AI model inference latency high"
+          description: "P95 AI inference latency exceeds 1 second."
+          runbook_url: "https://docs.siem.local/runbooks/ai-latency"
+
+      - alert: SIEMAIModelErrorRate
+        expr: |
+          rate(siem_ai_inference_errors_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: critical
+          team: ml
+        annotations:
+          summary: "AI model inference errors"
+          description: "AI inference error rate exceeds 5/s."
+          runbook_url: "https://docs.siem.local/runbooks/ai-errors"
+
+      - alert: SIEMAIGPUMemoryHigh
+        expr: |
+          nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "GPU memory usage high"
+          description: "GPU memory usage exceeds 90%."
+          runbook_url: "https://docs.siem.local/runbooks/gpu-memory"
+
+  - name: siem-platform-infrastructure
+    interval: 30s
+    rules:
+      # Infrastructure alerts
+      - alert: SIEMClickHouseDown
+        expr: up{job="clickhouse"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "ClickHouse is down"
+          description: "ClickHouse database is not responding."
+          runbook_url: "https://docs.siem.local/runbooks/clickhouse-down"
+
+      - alert: SIEMKafkaDown
+        expr: up{job="kafka"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "Kafka is down"
+          description: "Kafka cluster is not responding."
+          runbook_url: "https://docs.siem.local/runbooks/kafka-down"
+
+      - alert: SIEMRedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "Redis is down"
+          description: "Redis is not responding."
+          runbook_url: "https://docs.siem.local/runbooks/redis-down"
+
+      - alert: SIEMDiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/data"} / node_filesystem_size_bytes{mountpoint="/data"}) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "Low disk space on data volume"
+          description: "Less than 10% disk space remaining on data volume."
+          runbook_url: "https://docs.siem.local/runbooks/disk-space"
+
+  - name: siem-platform-slo
+    interval: 30s
+    rules:
+      # SLO-based alerts
+      - alert: SIEMAvailabilitySLOBreach
+        expr: |
+          (1 - avg_over_time(up{job=~"siem-.*"}[24h])) > 0.001
+        for: 5m
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "Availability SLO breach risk"
+          description: "24h availability is below 99.9% target."
+          runbook_url: "https://docs.siem.local/runbooks/slo-breach"
+
+      - alert: SIEMLatencySLOBreach
+        expr: |
+          histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=~"siem-.*"}[24h]))
+          > 1
+        for: 5m
+        labels:
+          severity: warning
+          team: sre
+        annotations:
+          summary: "Latency SLO breach risk"
+          description: "P99 latency over 24h exceeds 1 second target."
+          runbook_url: "https://docs.siem.local/runbooks/slo-breach"
+
+      - alert: SIEMErrorBudgetBurning
+        expr: |
+          sum(rate(http_requests_total{job=~"siem-.*",status=~"5.."}[1h]))
+          /
+          sum(rate(http_requests_total{job=~"siem-.*"}[1h]))
+          > 0.01
+        for: 15m
+        labels:
+          severity: warning
+          team: sre
+        annotations:
+          summary: "Error budget burning too fast"
+          description: "Hourly error rate exceeds 1%, burning error budget."
+          runbook_url: "https://docs.siem.local/runbooks/error-budget"

@@ -1,0 +1,109 @@
+# Git files
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+docs/
+CHANGELOG.md
+README.md
+LICENSE
+
+# CI/CD artifacts
+.github/workflows/
+.gitlab-ci.yml
+.circleci/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test files and coverage
+tests/
+*_test.go
+*.test
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+__pycache__/
+
+# Dependencies (will be installed during build)
+node_modules/
+web/dashboard/node_modules/
+ai/.venv/
+ai/venv/
+*.egg-info/
+
+# Build artifacts
+dist/
+build/
+target/
+*.pyc
+*.pyo
+*.so
+*.dylib
+*.exe
+
+# AI/ML specific
+ai/data/
+ai/models/checkpoints/
+ai/models/artifacts/
+*.pth
+*.pt
+*.onnx
+*.h5
+*.pkl
+*.joblib
+
+# Terraform state
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+*.tfvars.json
+
+# Secrets and environment files
+.env
+.env.*
+*.key
+*.pem
+*.crt
+secrets/
+credentials.json
+
+# Logs
+*.log
+logs/
+clickhouse_logs/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.cache
+
+# OS specific
+Thumbs.DB
+desktop.ini
+
+# Docker files (we only need the specific Dockerfile being built)
+.dockerignore
+docker-compose.override.yml
+
+# Large binary data
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+*.iso

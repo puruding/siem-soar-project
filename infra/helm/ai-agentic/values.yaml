@@ -1,0 +1,89 @@
+# AI Agentic Service Configuration
+replicaCount: 2
+
+image:
+  repository: ghcr.io/siem-soar-platform/ai-agentic
+  pullPolicy: IfNotPresent
+  tag: ""
+
+service:
+  type: ClusterIP
+  httpPort: 8000
+  grpcPort: 9000
+  metricsPort: 9090
+
+resources:
+  limits:
+    cpu: 4000m
+    memory: 16Gi
+    nvidia.com/gpu: 1
+  requests:
+    cpu: 2000m
+    memory: 8Gi
+    nvidia.com/gpu: 1
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+# GPU node affinity
+nodeSelector:
+  node-pool: ai
+
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Equal
+    value: present
+    effect: NoSchedule
+  - key: workload-type
+    operator: Equal
+    value: ai
+    effect: NoSchedule
+
+config:
+  logLevel: info
+  httpPort: 8000
+  grpcPort: 9000
+  metricsPort: 9090
+
+  # LangGraph configuration
+  langgraph:
+    checkpointStore: redis
+    maxConcurrentAgents: 20
+    agentTimeout: 10m
+
+  # Agent types
+  agents:
+    investigation:
+      enabled: true
+      maxDepth: 5
+      contextWindowSize: 10
+    analysis:
+      enabled: true
+      llmModel: solar-10.7b
+    response:
+      enabled: true
+      requireApproval: true
+      maxAutoActions: 3
+
+  # Safety configuration
+  safety:
+    humanInTheLoop: true
+    approvalRequired:
+      - block_ip
+      - isolate_host
+      - disable_user
+    rollbackEnabled: true
+    maxRiskScore: 70
+
+  # Orchestrator
+  orchestrator:
+    enabled: true
+    planningEnabled: true
+    feedbackLoopEnabled: true
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

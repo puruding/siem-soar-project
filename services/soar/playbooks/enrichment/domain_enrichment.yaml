@@ -1,0 +1,362 @@
+# Domain Enrichment Playbook
+# Enriches domain names with DNS, WHOIS, and threat intelligence data
+
+id: domain_enrichment
+name: Domain Enrichment
+display_name: Domain Name Enrichment
+description: |
+  Enriches domain names with comprehensive data including:
+  - DNS records (A, MX, NS, TXT)
+  - WHOIS registration data
+  - SSL certificate information
+  - Threat intelligence lookups
+  - Domain age and reputation
+
+version: 1
+category: enrichment
+author: SIEM-SOAR Platform
+tags:
+  - enrichment
+  - domain
+  - dns
+  - whois
+  - threat_intel
+enabled: true
+
+trigger:
+  type: alert
+  conditions:
+    - field: entity_type
+      operator: equals
+      value: domain
+
+inputs:
+  - name: domain
+    type: string
+    required: true
+    description: Domain name to enrich
+    validation:
+      pattern: "^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9](?:\\.[a-zA-Z]{2,})+$"
+  - name: include_subdomains
+    type: bool
+    required: false
+    default: false
+  - name: include_ssl
+    type: bool
+    required: false
+    default: true
+
+outputs:
+  - name: enrichment_results
+    type: object
+    source: steps.aggregate_results.output.results
+  - name: risk_score
+    type: int
+    source: steps.calculate_risk.output.score
+  - name: is_malicious
+    type: bool
+    source: steps.calculate_risk.output.is_malicious
+
+steps:
+  - id: parallel_lookups
+    name: Parallel Domain Lookups
+    type: parallel
+    parallel:
+      branches:
+        - id: dns_lookup
+          name: DNS Lookup
+          steps:
+            - id: dns_records
+              name: Get DNS Records
+              type: action
+              action:
+                connector: dns
+                action: lookup
+                parameters:
+                  domain: $inputs.domain
+                  record_types: [A, AAAA, MX, NS, TXT, CNAME, SOA]
+              continue_on_error: true
+
+        - id: whois_lookup
+          name: WHOIS Lookup
+          steps:
+            - id: whois_query
+              name: Query WHOIS
+              type: action
+              action:
+                connector: whois
+                action: lookup
+                parameters:
+                  domain: $inputs.domain
+              continue_on_error: true
+
+        - id: ssl_lookup
+          name: SSL Certificate Lookup
+          steps:
+            - id: ssl_query
+              name: Get SSL Certificate
+              type: action
+              skip_condition:
+                field: $inputs.include_ssl
+                operator: equals
+                value: false
+              action:
+                connector: ssl
+                action: get_certificate
+                parameters:
+                  domain: $inputs.domain
+                  port: 443
+              continue_on_error: true
+
+        - id: virustotal_lookup
+          name: VirusTotal Lookup
+          steps:
+            - id: vt_query
+              name: Query VirusTotal
+              type: action
+              action:
+                connector: threat_intel
+                action: lookup_domain
+                parameters:
+                  domain: $inputs.domain
+                  source: virustotal
+              continue_on_error: true
+
+        - id: urlhaus_lookup
+          name: URLhaus Lookup
+          steps:
+            - id: urlhaus_query
+              name: Query URLhaus
+              type: action
+              action:
+                connector: threat_intel
+                action: lookup_domain
+                parameters:
+                  domain: $inputs.domain
+                  source: urlhaus
+              continue_on_error: true
+
+        - id: passive_dns
+          name: Passive DNS Lookup
+          steps:
+            - id: pdns_query
+              name: Query Passive DNS
+              type: action
+              action:
+                connector: threat_intel
+                action: passive_dns
+                parameters:
+                  domain: $inputs.domain
+                  limit: 100
+              continue_on_error: true
+
+      fail_fast: false
+      max_concurrent: 6
+
+  - id: subdomain_enum
+    name: Subdomain Enumeration
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.include_subdomains
+          operator: equals
+          value: true
+      then:
+        - id: enum_subdomains
+          name: Enumerate Subdomains
+          type: action
+          action:
+            connector: recon
+            action: subdomain_enum
+            parameters:
+              domain: $inputs.domain
+              sources: [crtsh, dnsdumpster, virustotal]
+          continue_on_error: true
+
+  - id: aggregate_results
+    name: Aggregate Domain Enrichment
+    type: script
+    script:
+      language: python
+      code: |
+        from datetime import datetime
+
+        results = {
+            'domain': inputs['domain'],
+            'enrichment_timestamp': str(datetime.now()),
+            'dns': {},
+            'whois': {},
+            'ssl': {},
+            'threat_intel': {},
+            'passive_dns': {},
+            'subdomains': []
+        }
+
+        # DNS records
+        if dns := inputs.get('dns_records'):
+            results['dns'] = {
+                'a_records': dns.get('A', []),
+                'aaaa_records': dns.get('AAAA', []),
+                'mx_records': dns.get('MX', []),
+                'ns_records': dns.get('NS', []),
+                'txt_records': dns.get('TXT', []),
+                'cname_records': dns.get('CNAME', [])
+            }
+
+        # WHOIS
+        if whois := inputs.get('whois_query'):
+            created = whois.get('creation_date')
+            if created:
+                try:
+                    created_date = datetime.fromisoformat(str(created).replace('Z', '+00:00'))
+                    domain_age_days = (datetime.now() - created_date.replace(tzinfo=None)).days
+                except:
+                    domain_age_days = None
+            else:
+                domain_age_days = None
+
+            results['whois'] = {
+                'registrar': whois.get('registrar'),
+                'creation_date': str(created) if created else None,
+                'expiration_date': str(whois.get('expiration_date')),
+                'updated_date': str(whois.get('updated_date')),
+                'domain_age_days': domain_age_days,
+                'registrant_country': whois.get('registrant_country'),
+                'registrant_org': whois.get('registrant_org'),
+                'name_servers': whois.get('name_servers', [])
+            }
+
+        # SSL
+        if ssl := inputs.get('ssl_query'):
+            results['ssl'] = {
+                'issuer': ssl.get('issuer'),
+                'subject': ssl.get('subject'),
+                'valid_from': str(ssl.get('not_before')),
+                'valid_until': str(ssl.get('not_after')),
+                'serial_number': ssl.get('serial_number'),
+                'fingerprint_sha256': ssl.get('fingerprint_sha256'),
+                'san': ssl.get('san', [])
+            }
+
+        # Threat intel
+        ti_results = {}
+        if vt := inputs.get('vt_query'):
+            ti_results['virustotal'] = {
+                'malicious': vt.get('malicious', 0),
+                'suspicious': vt.get('suspicious', 0),
+                'categories': vt.get('categories', [])
+            }
+        if urlhaus := inputs.get('urlhaus_query'):
+            ti_results['urlhaus'] = {
+                'threat_type': urlhaus.get('threat_type'),
+                'urls_count': urlhaus.get('urls_count', 0),
+                'first_seen': urlhaus.get('first_seen')
+            }
+        results['threat_intel'] = ti_results
+
+        # Passive DNS
+        if pdns := inputs.get('pdns_query'):
+            results['passive_dns'] = {
+                'total_records': len(pdns.get('records', [])),
+                'first_seen': pdns.get('first_seen'),
+                'last_seen': pdns.get('last_seen'),
+                'unique_ips': list(set(r.get('ip') for r in pdns.get('records', []) if r.get('ip')))[:20]
+            }
+
+        # Subdomains
+        if subdomains := inputs.get('subdomains'):
+            results['subdomains'] = subdomains.get('subdomains', [])[:100]
+
+        return {'results': results}
+      inputs:
+        domain: $inputs.domain
+        dns_records: $steps.parallel_lookups.dns_lookup.dns_records.output
+        whois_query: $steps.parallel_lookups.whois_lookup.whois_query.output
+        ssl_query: $steps.parallel_lookups.ssl_lookup.ssl_query.output
+        vt_query: $steps.parallel_lookups.virustotal_lookup.vt_query.output
+        urlhaus_query: $steps.parallel_lookups.urlhaus_lookup.urlhaus_query.output
+        pdns_query: $steps.parallel_lookups.passive_dns.pdns_query.output
+        subdomains: $steps.subdomain_enum.enum_subdomains.output
+
+  - id: calculate_risk
+    name: Calculate Domain Risk Score
+    type: script
+    script:
+      language: python
+      code: |
+        results = inputs['results']
+        score = 0
+        factors = []
+
+        # Threat intel scoring
+        ti = results.get('threat_intel', {})
+        vt = ti.get('virustotal', {})
+        if vt:
+            malicious = vt.get('malicious', 0)
+            if malicious > 0:
+                score += min(malicious * 10, 40)
+                factors.append(f"VirusTotal: {malicious} malicious votes")
+
+        urlhaus = ti.get('urlhaus', {})
+        if urlhaus.get('threat_type'):
+            score += 30
+            factors.append(f"URLhaus: {urlhaus.get('threat_type')}")
+
+        # Domain age
+        whois = results.get('whois', {})
+        age_days = whois.get('domain_age_days')
+        if age_days is not None and age_days < 30:
+            score += 20
+            factors.append(f"New domain: {age_days} days old")
+        elif age_days is not None and age_days < 90:
+            score += 10
+            factors.append(f"Recently registered: {age_days} days old")
+
+        # Missing WHOIS
+        if not whois.get('registrar'):
+            score += 5
+            factors.append("No WHOIS data available")
+
+        # SSL issues
+        ssl = results.get('ssl', {})
+        if not ssl:
+            score += 5
+            factors.append("No SSL certificate")
+
+        score = min(score, 100)
+        is_malicious = score >= 70
+
+        return {
+            'score': score,
+            'is_malicious': is_malicious,
+            'risk_level': 'critical' if score >= 80 else 'high' if score >= 60 else 'medium' if score >= 40 else 'low',
+            'risk_factors': factors
+        }
+      inputs:
+        results: $steps.aggregate_results.output.results
+
+  - id: update_case
+    name: Update Case with Enrichment
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.case_id
+          operator: exists
+      then:
+        - id: add_enrichment
+          name: Add Domain Enrichment to Case
+          type: action
+          action:
+            connector: case_management
+            action: add_evidence
+            parameters:
+              case_id: $inputs.case_id
+              evidence_type: enrichment
+              name: "Domain Enrichment - ${inputs.domain}"
+              data: $steps.aggregate_results.output.results
+              tags: [domain_enrichment, threat_intel]
+
+timeout: 5m
+retry_policy:
+  max_attempts: 2
+  initial_interval: 10s

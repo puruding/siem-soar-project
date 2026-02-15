@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "detection.fullname" . }}-config
+  labels:
+    {{- include "detection.labels" . | nindent 4 }}
+data:
+  KAFKA_BATCH_SIZE: {{ .Values.config.kafka.batchSize | quote }}
+  KAFKA_BATCH_TIMEOUT: {{ .Values.config.kafka.batchTimeout | quote }}
+  CLICKHOUSE_MAX_OPEN_CONNS: {{ .Values.config.clickhouse.maxOpenConns | quote }}
+  CLICKHOUSE_QUERY_TIMEOUT: {{ .Values.config.clickhouse.queryTimeout | quote }}
+  SIGMA_ENABLED: {{ .Values.config.rules.sigmaEnabled | quote }}
+  CORRELATION_ENABLED: {{ .Values.config.rules.correlationEnabled | quote }}
+  RULES_RELOAD_INTERVAL: {{ .Values.config.rules.reloadInterval | quote }}
+  MAX_CONCURRENT_RULES: {{ .Values.config.rules.maxConcurrentRules | quote }}

@@ -1,0 +1,20 @@
+name: gdpr_breach
+version: "1.0"
+description: Handle GDPR breach notification requirements
+category: compliance
+severity: critical
+steps:
+  - id: assess_breach_scope
+    action: compliance.assess_gdpr_impact
+  - id: determine_notification_requirement
+    action: script
+  - id: notify_dpa
+    condition: "steps.determine_notification_requirement.requires_dpa"
+    action: compliance.notify_dpa
+    params:
+      regulation: GDPR
+      deadline_hours: 72
+  - id: notify_affected_individuals
+    action: email.send_breach_notification
+  - id: document_breach
+    action: compliance.create_breach_record

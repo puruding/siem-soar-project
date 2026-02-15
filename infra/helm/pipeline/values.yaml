@@ -1,0 +1,70 @@
+# Pipeline Service Configuration
+replicaCount: 5
+
+image:
+  repository: ghcr.io/siem-soar-platform/pipeline
+  pullPolicy: IfNotPresent
+  tag: ""
+
+service:
+  type: ClusterIP
+  grpcPort: 9000
+  metricsPort: 9090
+
+resources:
+  limits:
+    cpu: 4000m
+    memory: 8Gi
+  requests:
+    cpu: 1000m
+    memory: 2Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 5
+  maxReplicas: 50
+  targetCPUUtilizationPercentage: 60
+
+nodeSelector:
+  node-pool: compute
+
+config:
+  logLevel: info
+  grpcPort: 9000
+  metricsPort: 9090
+
+  # Kafka configuration
+  kafka:
+    consumerGroup: pipeline-processor
+    inputTopics:
+      - raw-events
+    outputTopics:
+      - parsed-events
+      - normalized-events
+    batchSize: 5000
+    batchTimeout: 500ms
+
+  # Parser configuration
+  parser:
+    autoDetect: true
+    grokPatterns: true
+    jsonPaths: true
+    regexPatterns: true
+    workers: 8
+
+  # Normalizer configuration
+  normalizer:
+    udmSchema: v1
+    fieldMappingFile: /etc/pipeline/field-mappings.yaml
+    workers: 4
+
+  # Enricher configuration
+  enricher:
+    geoipEnabled: true
+    geoipPath: /etc/pipeline/geoip/GeoLite2-City.mmdb
+    assetMappingEnabled: true
+    workers: 4
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 3

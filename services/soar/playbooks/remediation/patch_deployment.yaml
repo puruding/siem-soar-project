@@ -1,0 +1,20 @@
+name: patch_deployment
+version: "1.0"
+description: Deploy security patches to vulnerable systems
+category: remediation
+severity: high
+steps:
+  - id: identify_vulnerable_systems
+    action: vuln_scan.get_affected_hosts
+  - id: test_patch
+    action: patch.test_deployment
+    params:
+      target: test_environment
+  - id: schedule_maintenance
+    action: schedule.create_window
+  - id: deploy_patches
+    action: patch.deploy
+  - id: verify_deployment
+    action: patch.verify
+  - id: reboot_if_required
+    action: system.reboot

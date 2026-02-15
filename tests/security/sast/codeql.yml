@@ -1,0 +1,156 @@
+# CodeQL Analysis Configuration for SIEM/SOAR Platform
+# This workflow configures CodeQL for static application security testing
+
+name: "CodeQL Security Analysis"
+
+# Trigger on push to main branches and pull requests
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run weekly security scan
+    - cron: "0 2 * * 1"  # Every Monday at 2 AM
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["go", "python"]
+        # CodeQL supports: cpp, csharp, go, java, javascript, python, ruby
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # Custom queries for security analysis
+          queries: +security-extended,security-and-quality
+          # Configuration file with custom settings
+          config-file: .github/codeql/codeql-config.yml
+
+      # For Go: Set up Go environment
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      # For Python: Set up Python environment
+      - name: Set up Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Build Go services
+      - name: Build Go services
+        if: matrix.language == 'go'
+        run: |
+          for dir in services/*/; do
+            if [ -f "${dir}go.mod" ]; then
+              echo "Building ${dir}..."
+              cd "${dir}"
+              go build -v ./...
+              cd -
+            fi
+          done
+
+      # Install Python dependencies
+      - name: Install Python dependencies
+        if: matrix.language == 'python'
+        run: |
+          if [ -f "ai/requirements.txt" ]; then
+            pip install -r ai/requirements.txt
+          fi
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+          # Upload SARIF results
+          upload: true
+
+      - name: Upload SARIF results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: ${{ runner.workspace }}/results
+
+---
+# CodeQL Configuration File (.github/codeql/codeql-config.yml)
+# This file should be placed at .github/codeql/codeql-config.yml
+
+# codeql-config.yml content:
+name: "SIEM/SOAR CodeQL Config"
+
+# Paths to analyze
+paths:
+  - services
+  - pkg
+  - ai
+  - internal
+
+# Paths to ignore
+paths-ignore:
+  - "**/node_modules"
+  - "**/vendor"
+  - "**/*_test.go"
+  - "**/test_*.py"
+  - "**/tests"
+  - "**/docs"
+  - "**/*.md"
+
+# Query suites to use
+queries:
+  - uses: security-extended
+  - uses: security-and-quality
+
+# Custom query packs (if any)
+packs:
+  go:
+    - codeql/go-queries
+  python:
+    - codeql/python-queries
+
+# Threat models to consider
+threat-models:
+  - remote  # Analyze for remote code execution
+  - local   # Analyze for local privilege escalation
+
+# Query filters
+query-filters:
+  # Include all security queries with high confidence
+  - include:
+      tags: security
+      severity:
+        - error
+        - warning
+
+  # Exclude false-positive-prone queries
+  - exclude:
+      id: go/incorrect-integer-conversion
+      reason: "Too many false positives in our codebase"
+
+# Additional settings
+disable-default-queries: false
+
+# Alert suppression patterns (for known false positives)
+# These should be reviewed regularly
+alert-suppressions:
+  - "*/generated/*"      # Ignore generated code
+  - "*_mock.go"          # Ignore mock files
+  - "*/testdata/*"       # Ignore test data

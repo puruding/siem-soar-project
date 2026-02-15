@@ -1,0 +1,19 @@
+name: executive_summary
+version: "1.0"
+description: Monthly executive security summary
+category: notification
+trigger:
+  type: schedule
+  cron: "0 10 1 * *"
+steps:
+  - id: collect_monthly_stats
+    action: metrics.aggregate
+    params:
+      period: last_30d
+  - id: generate_executive_summary
+    action: report.generate
+    template: executive_summary
+  - id: send_to_executives
+    action: email.send
+    params:
+      to: ["ciso@company.com", "ceo@company.com"]

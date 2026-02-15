@@ -1,0 +1,16 @@
+name: chain_of_custody
+version: "1.0"
+description: Maintain chain of custody for evidence
+category: compliance
+severity: high
+steps:
+  - id: record_evidence_collection
+    action: forensics.record_collection
+  - id: assign_custodian
+    action: forensics.assign_custodian
+  - id: track_evidence_transfer
+    action: forensics.track_transfer
+  - id: verify_evidence_integrity
+    action: crypto.verify_hash
+  - id: document_access
+    action: forensics.log_access

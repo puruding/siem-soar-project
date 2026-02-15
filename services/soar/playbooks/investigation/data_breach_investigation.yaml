@@ -1,0 +1,18 @@
+name: data_breach_investigation
+version: "1.0"
+description: Investigate potential data breach
+category: investigation
+severity: critical
+steps:
+  - id: identify_data_accessed
+    action: audit.query_access_logs
+  - id: determine_breach_scope
+    action: data.assess_exposure
+  - id: identify_attacker
+    action: forensics.analyze_logs
+  - id: trace_exfiltration
+    action: network.trace_connections
+  - id: assess_impact
+    action: compliance.assess_breach_impact
+  - id: preserve_evidence
+    action: forensics.collect_evidence

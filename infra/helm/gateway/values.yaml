@@ -1,0 +1,155 @@
+# Gateway Service Configuration
+replicaCount: 2
+
+image:
+  repository: ghcr.io/siem-soar-platform/gateway
+  pullPolicy: IfNotPresent
+  tag: ""  # Defaults to Chart appVersion
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  httpPort: 8080
+  grpcPort: 9000
+  metricsPort: 9090
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: api.siem-soar.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: gateway-tls
+      hosts:
+        - api.siem-soar.example.com
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector:
+  node-pool: compute
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - gateway
+          topologyKey: kubernetes.io/hostname
+
+# Application configuration
+config:
+  logLevel: info
+  logFormat: json
+  httpPort: 8080
+  grpcPort: 9000
+  metricsPort: 9090
+
+  # Rate limiting
+  rateLimit:
+    enabled: true
+    requestsPerSecond: 1000
+    burst: 2000
+
+  # CORS
+  cors:
+    enabled: true
+    allowedOrigins:
+      - "https://siem-soar.example.com"
+    allowedMethods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - PATCH
+    allowedHeaders:
+      - "*"
+
+  # JWT authentication
+  jwt:
+    issuer: https://auth.siem-soar.example.com
+    audience: siem-soar-api
+    existingSecret: gateway-jwt-secret
+    secretKey: public-key
+
+  # Service discovery
+  services:
+    detection: detection.siem-services.svc.cluster.local:9000
+    soar: soar.siem-services.svc.cluster.local:9000
+    ti: ti.siem-services.svc.cluster.local:9000
+    query: query.siem-services.svc.cluster.local:9000
+    case: case.siem-services.svc.cluster.local:9000
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

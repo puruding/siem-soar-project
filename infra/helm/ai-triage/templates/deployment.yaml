@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-ai-triage
+  labels:
+    app.kubernetes.io/name: ai-triage
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: ai-service
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-triage
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ai-triage
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: ai-triage
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.httpPort }}
+            - name: grpc
+              containerPort: {{ .Values.config.grpcPort }}
+            - name: metrics
+              containerPort: {{ .Values.config.metricsPort }}
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: HTTP_PORT
+              value: {{ .Values.config.httpPort | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.config.grpcPort | quote }}
+            - name: MODEL_PATH
+              value: {{ .Values.config.model.path | quote }}
+            - name: MODEL_VERSION
+              value: {{ .Values.config.model.version | quote }}
+            - name: DEVICE_TYPE
+              value: {{ .Values.config.model.deviceType | quote }}
+            - name: BATCH_SIZE
+              value: {{ .Values.config.model.batchSize | quote }}
+            - name: KAFKA_BROKERS
+              value: {{ .Values.global.kafka.brokers | quote }}
+            - name: KAFKA_CONSUMER_GROUP
+              value: {{ .Values.config.kafka.consumerGroup | quote }}
+            - name: REDIS_HOST
+              value: {{ .Values.global.redis.host | quote }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.redis.existingSecret }}
+                  key: {{ .Values.global.redis.secretKey }}
+            # NVIDIA GPU settings
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: models
+              mountPath: /models
+            - name: shm
+              mountPath: /dev/shm
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: models
+          {{- if .Values.modelVolume.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-ai-triage-models
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-ai-triage
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.httpPort }}
+      targetPort: http
+      name: http
+    - port: {{ .Values.service.grpcPort }}
+      targetPort: grpc
+      name: grpc
+    - port: {{ .Values.service.metricsPort }}
+      targetPort: metrics
+      name: metrics
+  selector:
+    app.kubernetes.io/name: ai-triage
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- if .Values.modelVolume.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-ai-triage-models
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.modelVolume.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.modelVolume.size }}
+{{- end }}

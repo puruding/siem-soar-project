@@ -1,0 +1,774 @@
+openapi: 3.1.0
+info:
+  title: SIEM/SOAR Platform API
+  description: |
+    Enterprise SIEM/SOAR Platform API providing security event management,
+    detection, automated response, and AI-powered security operations.
+
+    ## Features
+    - Event ingestion and processing (100K+ EPS)
+    - Real-time threat detection with YARA-L rules
+    - Automated incident response with SOAR playbooks
+    - AI-powered alert triage and investigation
+    - Natural language query interface
+
+    ## Authentication
+    All API endpoints require authentication via API Key or JWT Bearer token.
+
+  version: 1.0.0
+  contact:
+    name: Security Platform Team
+    email: security-platform@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.siem.example.com/v1
+    description: Production
+  - url: https://api.staging.siem.example.com/v1
+    description: Staging
+  - url: http://localhost:8080/api/v1
+    description: Local Development
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Alerts
+    description: Alert management operations
+  - name: Events
+    description: Event ingestion and querying
+  - name: Rules
+    description: Detection rule management
+  - name: Playbooks
+    description: SOAR playbook operations
+  - name: Cases
+    description: Case management
+  - name: Query
+    description: Query execution
+  - name: AI
+    description: AI-powered operations
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns the health status of the API gateway
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness check
+      description: Returns whether the service is ready to accept traffic
+      operationId: readinessCheck
+      security: []
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
+          description: Service is not ready
+
+  /alerts:
+    get:
+      tags: [Alerts]
+      summary: List alerts
+      description: Retrieve a paginated list of alerts with optional filters
+      operationId: listAlerts
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [new, investigating, resolved, closed]
+        - name: source
+          in: query
+          schema:
+            type: string
+        - name: start_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+      responses:
+        '200':
+          description: List of alerts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertListResponse'
+
+    post:
+      tags: [Alerts]
+      summary: Create alert
+      description: Create a new alert (typically done by detection engine)
+      operationId: createAlert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertCreate'
+      responses:
+        '201':
+          description: Alert created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /alerts/{alertId}:
+    get:
+      tags: [Alerts]
+      summary: Get alert by ID
+      operationId: getAlert
+      parameters:
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Alert details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        '404':
+          description: Alert not found
+
+    put:
+      tags: [Alerts]
+      summary: Update alert
+      operationId: updateAlert
+      parameters:
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertUpdate'
+      responses:
+        '200':
+          description: Alert updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+
+  /events:
+    post:
+      tags: [Events]
+      summary: Ingest events
+      description: Ingest a batch of security events
+      operationId: ingestEvents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventBatch'
+      responses:
+        '202':
+          description: Events accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestResponse'
+
+  /rules:
+    get:
+      tags: [Rules]
+      summary: List detection rules
+      operationId: listRules
+      parameters:
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+        - name: severity
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleListResponse'
+
+    post:
+      tags: [Rules]
+      summary: Create detection rule
+      operationId: createRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleCreate'
+      responses:
+        '201':
+          description: Rule created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+
+  /playbooks:
+    get:
+      tags: [Playbooks]
+      summary: List playbooks
+      operationId: listPlaybooks
+      responses:
+        '200':
+          description: List of playbooks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybookListResponse'
+
+    post:
+      tags: [Playbooks]
+      summary: Create playbook
+      operationId: createPlaybook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaybookCreate'
+      responses:
+        '201':
+          description: Playbook created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playbook'
+
+  /playbooks/{playbookId}/execute:
+    post:
+      tags: [Playbooks]
+      summary: Execute playbook
+      operationId: executePlaybook
+      parameters:
+        - name: playbookId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaybookExecuteRequest'
+      responses:
+        '202':
+          description: Execution started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybookExecution'
+
+  /query:
+    post:
+      tags: [Query]
+      summary: Execute query
+      description: Execute a SQL query against the event data
+      operationId: executeQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '200':
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+
+  /query/natural:
+    post:
+      tags: [Query, AI]
+      summary: Natural language query
+      description: Convert natural language to SQL and execute
+      operationId: naturalLanguageQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NaturalQueryRequest'
+      responses:
+        '200':
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NaturalQueryResponse'
+
+  /cases:
+    get:
+      tags: [Cases]
+      summary: List cases
+      operationId: listCases
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: severity
+          in: query
+          schema:
+            type: string
+        - name: assignee
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of cases
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseListResponse'
+
+    post:
+      tags: [Cases]
+      summary: Create case
+      operationId: createCase
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseCreate'
+      responses:
+        '201':
+          description: Case created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: healthy
+        service:
+          type: string
+          example: gateway
+        version:
+          type: string
+          example: 1.0.0
+
+    ReadyResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ready
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
+
+    Alert:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        status:
+          type: string
+          enum: [new, investigating, resolved, closed]
+        source:
+          type: string
+        rule_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        indicators:
+          type: object
+        mitre_tactics:
+          type: array
+          items:
+            type: string
+        mitre_techniques:
+          type: array
+          items:
+            type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    AlertCreate:
+      type: object
+      required: [title, severity]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        source:
+          type: string
+        indicators:
+          type: object
+
+    AlertUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+        assignee:
+          type: string
+        notes:
+          type: string
+
+    AlertListResponse:
+      type: object
+      properties:
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    EventBatch:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+
+    Event:
+      type: object
+      required: [timestamp, event_type]
+      properties:
+        event_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        event_type:
+          type: string
+        source:
+          type: object
+        destination:
+          type: object
+        user:
+          type: object
+        message:
+          type: string
+        metadata:
+          type: object
+
+    IngestResponse:
+      type: object
+      properties:
+        accepted:
+          type: integer
+        failed:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
+
+    Rule:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+        query:
+          type: string
+        enabled:
+          type: boolean
+
+    RuleCreate:
+      type: object
+      required: [name, query, severity]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+        query:
+          type: string
+        enabled:
+          type: boolean
+          default: true
+
+    RuleListResponse:
+      type: object
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/Rule'
+
+    Playbook:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        enabled:
+          type: boolean
+        steps:
+          type: array
+          items:
+            type: object
+
+    PlaybookCreate:
+      type: object
+      required: [name, steps]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        trigger:
+          type: object
+        steps:
+          type: array
+          items:
+            type: object
+        enabled:
+          type: boolean
+          default: true
+
+    PlaybookListResponse:
+      type: object
+      properties:
+        playbooks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Playbook'
+
+    PlaybookExecuteRequest:
+      type: object
+      properties:
+        trigger_data:
+          type: object
+        alert_id:
+          type: string
+
+    PlaybookExecution:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        playbook_id:
+          type: string
+        status:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+
+    QueryRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+        limit:
+          type: integer
+          default: 1000
+        parameters:
+          type: object
+
+    QueryResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+        metadata:
+          type: object
+          properties:
+            total:
+              type: integer
+            duration_ms:
+              type: integer
+
+    NaturalQueryRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+        context:
+          type: object
+
+    NaturalQueryResponse:
+      type: object
+      properties:
+        generated_sql:
+          type: string
+        explanation:
+          type: string
+        results:
+          type: array
+          items:
+            type: object
+
+    Case:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+        priority:
+          type: string
+        status:
+          type: string
+        assignee:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CaseCreate:
+      type: object
+      required: [title, severity]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+        priority:
+          type: string
+        related_alerts:
+          type: array
+          items:
+            type: string
+
+    CaseListResponse:
+      type: object
+      properties:
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/Case'
+        total:
+          type: integer

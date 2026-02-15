@@ -1,0 +1,358 @@
+# Block Domain Playbook
+# Blocks malicious domains across security infrastructure
+
+id: block_domain
+name: Block Domain
+display_name: Block Malicious Domain
+description: |
+  Blocks a malicious domain across security infrastructure:
+  - DNS sinkhole
+  - Firewall/proxy blocking
+  - EDR network blocking
+  - Browser isolation rules
+
+version: 1
+category: containment
+author: SIEM-SOAR Platform
+tags:
+  - containment
+  - block
+  - domain
+  - dns
+enabled: true
+
+trigger:
+  type: manual
+  conditions: []
+
+inputs:
+  - name: domain
+    type: string
+    required: true
+    description: Domain to block
+    validation:
+      pattern: "^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9](?:\\.[a-zA-Z]{2,})+$"
+  - name: include_subdomains
+    type: bool
+    required: false
+    default: true
+  - name: reason
+    type: string
+    required: true
+  - name: case_id
+    type: string
+    required: false
+  - name: block_locations
+    type: array
+    required: false
+    default: [dns, firewall, proxy]
+  - name: duration
+    type: string
+    required: false
+    default: "permanent"
+
+outputs:
+  - name: block_results
+    type: object
+    source: steps.aggregate_results.output
+  - name: success
+    type: bool
+    source: steps.aggregate_results.output.success
+
+steps:
+  - id: validate_domain
+    name: Validate Domain
+    type: script
+    script:
+      language: python
+      code: |
+        import re
+
+        domain = inputs['domain'].lower().strip()
+
+        # Remove protocol if present
+        if domain.startswith('http://'):
+            domain = domain[7:]
+        elif domain.startswith('https://'):
+            domain = domain[8:]
+
+        # Remove path if present
+        domain = domain.split('/')[0]
+
+        # Validate domain format
+        pattern = r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$'
+        if not re.match(pattern, domain):
+            raise Exception(f"Invalid domain format: {domain}")
+
+        # Extract top-level domain info
+        parts = domain.split('.')
+        tld = parts[-1]
+        sld = parts[-2] if len(parts) > 1 else None
+
+        return {
+            'domain': domain,
+            'tld': tld,
+            'sld': sld,
+            'valid': True
+        }
+      inputs:
+        domain: $inputs.domain
+
+  - id: check_whitelist
+    name: Check Domain Whitelist
+    type: action
+    action:
+      connector: ioc_database
+      action: check_whitelist
+      parameters:
+        type: domain
+        value: $steps.validate_domain.output.domain
+    continue_on_error: true
+
+  - id: whitelist_check
+    name: Verify Not Whitelisted
+    type: condition
+    condition:
+      conditions:
+        - field: $steps.check_whitelist.output.is_whitelisted
+          operator: equals
+          value: true
+      then:
+        - id: abort_whitelisted
+          name: Abort - Domain is Whitelisted
+          type: script
+          script:
+            language: python
+            code: |
+              raise Exception(f"Domain {inputs['domain']} is whitelisted and cannot be blocked")
+            inputs:
+              domain: $steps.validate_domain.output.domain
+
+  - id: resolve_domain
+    name: Resolve Domain IPs
+    type: action
+    action:
+      connector: dns
+      action: lookup
+      parameters:
+        domain: $steps.validate_domain.output.domain
+        record_types: [A, AAAA]
+    continue_on_error: true
+
+  - id: execute_blocks
+    name: Execute Domain Blocks
+    type: loop
+    loop:
+      items: $inputs.block_locations
+      item_var: location
+      steps:
+        - id: block_by_location
+          name: Block at Location
+          type: condition
+          condition:
+            conditions:
+              - field: $location
+                operator: equals
+                value: dns
+            then:
+              - id: dns_sinkhole
+                name: Add to DNS Sinkhole
+                type: action
+                action:
+                  connector: dns
+                  action: add_sinkhole
+                  parameters:
+                    domain: $steps.validate_domain.output.domain
+                    include_subdomains: $inputs.include_subdomains
+                    reason: $inputs.reason
+                retry_policy:
+                  max_attempts: 3
+                  initial_interval: 5s
+
+            else:
+              - id: check_firewall
+                name: Check Firewall Block
+                type: condition
+                condition:
+                  conditions:
+                    - field: $location
+                      operator: equals
+                      value: firewall
+                  then:
+                    - id: firewall_block
+                      name: Block on Firewall
+                      type: action
+                      action:
+                        connector: firewall
+                        action: block_domain
+                        parameters:
+                          domain: $steps.validate_domain.output.domain
+                          include_subdomains: $inputs.include_subdomains
+                          reason: $inputs.reason
+                      retry_policy:
+                        max_attempts: 3
+                        initial_interval: 5s
+
+                  else:
+                    - id: check_proxy
+                      name: Check Proxy Block
+                      type: condition
+                      condition:
+                        conditions:
+                          - field: $location
+                            operator: equals
+                            value: proxy
+                        then:
+                          - id: proxy_block
+                            name: Block on Proxy
+                            type: action
+                            action:
+                              connector: proxy
+                              action: block_destination
+                              parameters:
+                                type: domain
+                                value: $steps.validate_domain.output.domain
+                                include_subdomains: $inputs.include_subdomains
+                                reason: $inputs.reason
+
+                        else:
+                          - id: check_edr
+                            name: Check EDR Block
+                            type: condition
+                            condition:
+                              conditions:
+                                - field: $location
+                                  operator: equals
+                                  value: edr
+                              then:
+                                - id: edr_block
+                                  name: Block on EDR
+                                  type: action
+                                  action:
+                                    connector: edr
+                                    action: add_ioc
+                                    parameters:
+                                      type: domain
+                                      value: $steps.validate_domain.output.domain
+                                      action: block
+                                      reason: $inputs.reason
+
+  - id: block_resolved_ips
+    name: Block Resolved IPs
+    type: condition
+    condition:
+      conditions:
+        - field: $steps.resolve_domain.output.A
+          operator: exists
+      then:
+        - id: block_ips
+          name: Block Associated IPs
+          type: loop
+          loop:
+            items: $steps.resolve_domain.output.A
+            item_var: ip
+            concurrency: 5
+            steps:
+              - id: block_ip
+                name: Block IP
+                type: action
+                action:
+                  connector: firewall
+                  action: block_ip
+                  parameters:
+                    ip: $ip
+                    direction: both
+                    reason: "Associated with blocked domain: ${steps.validate_domain.output.domain}"
+                continue_on_error: true
+
+  - id: add_to_blocklist
+    name: Add to Internal Blocklist
+    type: action
+    action:
+      connector: ioc_database
+      action: add_ioc
+      parameters:
+        type: domain
+        value: $steps.validate_domain.output.domain
+        classification: malicious
+        reason: $inputs.reason
+        source: soar_playbook
+        case_id: $inputs.case_id
+        expiration: $inputs.duration
+    continue_on_error: true
+
+  - id: aggregate_results
+    name: Aggregate Block Results
+    type: script
+    script:
+      language: python
+      code: |
+        from datetime import datetime
+
+        results = {
+            'domain': inputs['domain'],
+            'locations_blocked': inputs['locations'],
+            'resolved_ips': inputs.get('resolved_ips', []),
+            'ips_blocked': len(inputs.get('resolved_ips', [])),
+            'include_subdomains': inputs['include_subdomains'],
+            'timestamp': str(datetime.now()),
+            'success': True
+        }
+
+        return results
+      inputs:
+        domain: $steps.validate_domain.output.domain
+        locations: $inputs.block_locations
+        resolved_ips: $steps.resolve_domain.output.A
+        include_subdomains: $inputs.include_subdomains
+
+  - id: notifications
+    name: Send Notifications
+    type: parallel
+    parallel:
+      branches:
+        - id: slack_notify
+          name: Notify Slack
+          steps:
+            - id: slack_message
+              name: Send Slack Alert
+              type: action
+              action:
+                connector: slack
+                action: send_message
+                parameters:
+                  channel: "#security-incidents"
+                  text: |
+                    :no_entry_sign: **Domain Blocked**
+
+                    **Domain:** ${steps.validate_domain.output.domain}
+                    **Include Subdomains:** ${inputs.include_subdomains}
+                    **Blocked At:** ${inputs.block_locations}
+                    **Reason:** ${inputs.reason}
+                    **Case:** ${inputs.case_id}
+
+        - id: update_case
+          name: Update Case
+          steps:
+            - id: add_evidence
+              name: Add Block Evidence
+              type: action
+              skip_condition:
+                field: $inputs.case_id
+                operator: not_exists
+              action:
+                connector: case_management
+                action: add_evidence
+                parameters:
+                  case_id: $inputs.case_id
+                  evidence_type: action
+                  name: "Domain Blocked - ${steps.validate_domain.output.domain}"
+                  data: $steps.aggregate_results.output
+                  tags: [containment, domain_block]
+
+      fail_fast: false
+
+timeout: 15m
+retry_policy:
+  max_attempts: 2
+  initial_interval: 30s

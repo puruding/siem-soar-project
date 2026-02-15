@@ -1,0 +1,345 @@
+# User Account Enrichment Playbook
+# Enriches user accounts with identity and activity data
+
+id: user_enrichment
+name: User Account Enrichment
+display_name: User Account Enrichment
+description: |
+  Enriches user accounts with comprehensive identity data including:
+  - Active Directory attributes
+  - Recent authentication events
+  - Group memberships
+  - Privileged access status
+  - Recent activity patterns
+
+version: 1
+category: enrichment
+author: SIEM-SOAR Platform
+tags:
+  - enrichment
+  - user
+  - identity
+  - active_directory
+enabled: true
+
+trigger:
+  type: alert
+  conditions:
+    - field: entity_type
+      operator: equals
+      value: user
+    - field: severity
+      operator: in
+      value: [medium, high, critical]
+
+inputs:
+  - name: username
+    type: string
+    required: true
+    description: Username or UPN to enrich
+  - name: domain
+    type: string
+    required: false
+    description: Active Directory domain
+  - name: include_activity
+    type: bool
+    required: false
+    default: true
+  - name: activity_days
+    type: int
+    required: false
+    default: 7
+    description: Days of activity to retrieve
+
+outputs:
+  - name: user_info
+    type: object
+    source: steps.aggregate_results.output.user_info
+  - name: risk_score
+    type: int
+    source: steps.calculate_risk.output.score
+  - name: is_privileged
+    type: bool
+    source: steps.check_privileges.output.is_privileged
+
+steps:
+  - id: get_ad_info
+    name: Get Active Directory Information
+    type: action
+    action:
+      connector: active_directory
+      action: get_user_info
+      parameters:
+        username: $inputs.username
+        domain: $inputs.domain
+    continue_on_error: true
+
+  - id: get_groups
+    name: Get User Group Memberships
+    type: action
+    action:
+      connector: active_directory
+      action: get_user_groups
+      parameters:
+        username: $inputs.username
+        domain: $inputs.domain
+    continue_on_error: true
+
+  - id: check_privileges
+    name: Check Privileged Access
+    type: script
+    script:
+      language: python
+      code: |
+        groups = inputs.get('groups', [])
+        ad_info = inputs.get('ad_info', {})
+
+        privileged_groups = [
+            'Domain Admins', 'Enterprise Admins', 'Schema Admins',
+            'Administrators', 'Account Operators', 'Backup Operators',
+            'Server Operators', 'Print Operators', 'DnsAdmins',
+            'Exchange Organization Administrators'
+        ]
+
+        is_privileged = False
+        privileged_memberships = []
+
+        for group in groups:
+            group_name = group.get('name', '') if isinstance(group, dict) else str(group)
+            if any(priv.lower() in group_name.lower() for priv in privileged_groups):
+                is_privileged = True
+                privileged_memberships.append(group_name)
+
+        # Check for admin in title or description
+        title = ad_info.get('title', '').lower()
+        if 'admin' in title or 'administrator' in title:
+            is_privileged = True
+
+        return {
+            'is_privileged': is_privileged,
+            'privileged_groups': privileged_memberships,
+            'total_groups': len(groups)
+        }
+      inputs:
+        groups: $steps.get_groups.output.groups
+        ad_info: $steps.get_ad_info.output
+
+  - id: parallel_enrichment
+    name: Parallel Enrichment Queries
+    type: parallel
+    parallel:
+      branches:
+        - id: auth_events
+          name: Get Authentication Events
+          steps:
+            - id: query_auth
+              name: Query Authentication Logs
+              type: action
+              skip_condition:
+                field: $inputs.include_activity
+                operator: equals
+                value: false
+              action:
+                connector: siem
+                action: search
+                parameters:
+                  query: "event.category:authentication AND user.name:${inputs.username}"
+                  time_range: "${inputs.activity_days}d"
+                  limit: 100
+              continue_on_error: true
+
+        - id: logon_locations
+          name: Get Logon Locations
+          steps:
+            - id: query_locations
+              name: Query Logon Locations
+              type: action
+              skip_condition:
+                field: $inputs.include_activity
+                operator: equals
+                value: false
+              action:
+                connector: siem
+                action: search
+                parameters:
+                  query: "event.action:logon AND user.name:${inputs.username}"
+                  time_range: "${inputs.activity_days}d"
+                  aggregations:
+                    - field: source.ip
+                    - field: source.geo.country_name
+              continue_on_error: true
+
+        - id: failed_logins
+          name: Get Failed Login Attempts
+          steps:
+            - id: query_failures
+              name: Query Failed Logins
+              type: action
+              action:
+                connector: siem
+                action: search
+                parameters:
+                  query: "event.outcome:failure AND user.name:${inputs.username}"
+                  time_range: "${inputs.activity_days}d"
+                  limit: 50
+              continue_on_error: true
+
+        - id: threat_intel
+          name: Check Threat Intel
+          steps:
+            - id: ti_lookup
+              name: Lookup User in Threat Intel
+              type: action
+              action:
+                connector: threat_intel
+                action: lookup_user
+                parameters:
+                  username: $inputs.username
+              continue_on_error: true
+
+      fail_fast: false
+
+  - id: aggregate_results
+    name: Aggregate Enrichment Results
+    type: script
+    script:
+      language: python
+      code: |
+        user_info = {
+            'username': inputs['username'],
+            'enrichment_timestamp': str(datetime.now()),
+            'ad_info': {},
+            'groups': [],
+            'privileges': {},
+            'activity': {},
+            'threat_intel': {}
+        }
+
+        # AD info
+        if ad_info := inputs.get('ad_info'):
+            user_info['ad_info'] = {
+                'display_name': ad_info.get('display_name'),
+                'email': ad_info.get('email'),
+                'department': ad_info.get('department'),
+                'title': ad_info.get('title'),
+                'manager': ad_info.get('manager'),
+                'created': ad_info.get('created_at'),
+                'last_logon': ad_info.get('last_logon'),
+                'password_last_set': ad_info.get('password_last_set'),
+                'account_enabled': ad_info.get('enabled', True),
+                'locked_out': ad_info.get('locked_out', False)
+            }
+
+        # Groups
+        if groups := inputs.get('groups'):
+            user_info['groups'] = [g.get('name') if isinstance(g, dict) else g for g in groups[:50]]
+
+        # Privileges
+        user_info['privileges'] = inputs.get('privilege_info', {})
+
+        # Activity
+        auth_events = inputs.get('auth_events', {})
+        locations = inputs.get('locations', {})
+        failures = inputs.get('failures', {})
+
+        user_info['activity'] = {
+            'total_auth_events': len(auth_events.get('hits', [])),
+            'unique_locations': len(set(locations.get('aggregations', {}).get('source.ip', []))),
+            'countries': locations.get('aggregations', {}).get('source.geo.country_name', []),
+            'failed_logins': len(failures.get('hits', [])),
+            'recent_failures': failures.get('hits', [])[:5]
+        }
+
+        # Threat intel
+        if ti := inputs.get('threat_intel'):
+            user_info['threat_intel'] = {
+                'compromised': ti.get('compromised', False),
+                'breach_sources': ti.get('breaches', []),
+                'risk_indicators': ti.get('indicators', [])
+            }
+
+        return {'user_info': user_info}
+      inputs:
+        username: $inputs.username
+        ad_info: $steps.get_ad_info.output
+        groups: $steps.get_groups.output.groups
+        privilege_info: $steps.check_privileges.output
+        auth_events: $steps.parallel_enrichment.auth_events.query_auth.output
+        locations: $steps.parallel_enrichment.logon_locations.query_locations.output
+        failures: $steps.parallel_enrichment.failed_logins.query_failures.output
+        threat_intel: $steps.parallel_enrichment.threat_intel.ti_lookup.output
+
+  - id: calculate_risk
+    name: Calculate User Risk Score
+    type: script
+    script:
+      language: python
+      code: |
+        user_info = inputs['user_info']
+        score = 0
+        factors = []
+
+        # Privileged user risk
+        if user_info.get('privileges', {}).get('is_privileged'):
+            score += 20
+            factors.append("Privileged user account")
+
+        # Failed logins
+        failed_logins = user_info.get('activity', {}).get('failed_logins', 0)
+        if failed_logins > 10:
+            score += min(failed_logins, 30)
+            factors.append(f"High failed login count: {failed_logins}")
+
+        # Multiple countries
+        countries = user_info.get('activity', {}).get('countries', [])
+        if len(countries) > 3:
+            score += 15
+            factors.append(f"Login from {len(countries)} countries")
+
+        # Threat intel
+        ti = user_info.get('threat_intel', {})
+        if ti.get('compromised'):
+            score += 40
+            factors.append("Found in breach database")
+
+        # Account issues
+        ad_info = user_info.get('ad_info', {})
+        if ad_info.get('locked_out'):
+            score += 10
+            factors.append("Account locked out")
+
+        score = min(score, 100)
+
+        return {
+            'score': score,
+            'risk_level': 'critical' if score >= 80 else 'high' if score >= 60 else 'medium' if score >= 40 else 'low',
+            'risk_factors': factors
+        }
+      inputs:
+        user_info: $steps.aggregate_results.output.user_info
+
+  - id: update_case
+    name: Update Case with Enrichment
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.case_id
+          operator: exists
+      then:
+        - id: add_enrichment
+          name: Add User Enrichment to Case
+          type: action
+          action:
+            connector: case_management
+            action: add_evidence
+            parameters:
+              case_id: $inputs.case_id
+              evidence_type: enrichment
+              name: "User Enrichment - ${inputs.username}"
+              data: $steps.aggregate_results.output.user_info
+              tags: [user_enrichment, identity]
+
+timeout: 5m
+retry_policy:
+  max_attempts: 2
+  initial_interval: 10s

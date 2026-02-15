@@ -1,0 +1,206 @@
+# SIEM-SOAR Platform Kubernetes Namespaces
+# Logical separation of concerns for security, isolation, and resource management
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: siem-system
+  labels:
+    app.kubernetes.io/part-of: siem-soar-platform
+    environment: shared
+    purpose: core-infrastructure
+  annotations:
+    description: "Core SIEM infrastructure components"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: siem-data
+  labels:
+    app.kubernetes.io/part-of: siem-soar-platform
+    environment: shared
+    purpose: data-layer
+  annotations:
+    description: "Data storage and streaming (ClickHouse, Kafka, Redis)"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: siem-services
+  labels:
+    app.kubernetes.io/part-of: siem-soar-platform
+    environment: shared
+    purpose: backend-services
+  annotations:
+    description: "Backend Go services (gateway, detection, soar, etc.)"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: siem-ai
+  labels:
+    app.kubernetes.io/part-of: siem-soar-platform
+    environment: shared
+    purpose: ai-ml-services
+  annotations:
+    description: "AI/ML Python services (triage, copilot, agentic)"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: siem-monitoring
+  labels:
+    app.kubernetes.io/part-of: siem-soar-platform
+    environment: shared
+    purpose: observability
+  annotations:
+    description: "Prometheus, Grafana, Alertmanager"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: siem-ingress
+  labels:
+    app.kubernetes.io/part-of: siem-soar-platform
+    environment: shared
+    purpose: ingress
+  annotations:
+    description: "Ingress controllers and load balancers"
+---
+# Resource Quotas for each namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: siem-services-quota
+  namespace: siem-services
+spec:
+  hard:
+    requests.cpu: "20"
+    requests.memory: 40Gi
+    limits.cpu: "40"
+    limits.memory: 80Gi
+    pods: "100"
+    services: "50"
+    persistentvolumeclaims: "20"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: siem-ai-quota
+  namespace: siem-ai
+spec:
+  hard:
+    requests.cpu: "40"
+    requests.memory: 160Gi
+    limits.cpu: "80"
+    limits.memory: 320Gi
+    pods: "50"
+    services: "20"
+    persistentvolumeclaims: "10"
+    requests.nvidia.com/gpu: "8"
+    limits.nvidia.com/gpu: "8"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: siem-data-quota
+  namespace: siem-data
+spec:
+  hard:
+    requests.cpu: "60"
+    requests.memory: 240Gi
+    limits.cpu: "120"
+    limits.memory: 480Gi
+    pods: "50"
+    services: "30"
+    persistentvolumeclaims: "50"
+---
+# LimitRanges for default resource requests/limits
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: siem-services-limits
+  namespace: siem-services
+spec:
+  limits:
+    - default:
+        cpu: "500m"
+        memory: 512Mi
+      defaultRequest:
+        cpu: "100m"
+        memory: 128Mi
+      type: Container
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: siem-ai-limits
+  namespace: siem-ai
+spec:
+  limits:
+    - default:
+        cpu: "2"
+        memory: 4Gi
+      defaultRequest:
+        cpu: "500m"
+        memory: 1Gi
+      type: Container
+---
+# Network Policies for namespace isolation
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: siem-services
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  namespace: siem-services
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-ingress
+  namespace: siem-services
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              purpose: ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring
+  namespace: siem-services
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              purpose: observability
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 8080

@@ -1,0 +1,16 @@
+name: lateral_movement
+version: "1.0"
+description: Investigate lateral movement in network
+category: investigation
+severity: critical
+steps:
+  - id: identify_source_host
+    action: edr.get_host_details
+  - id: analyze_network_connections
+    action: network.get_connections
+  - id: identify_compromised_accounts
+    action: ad.check_suspicious_auth
+  - id: trace_movement_path
+    action: siem.correlate_events
+  - id: identify_accessed_systems
+    action: network.get_accessed_hosts

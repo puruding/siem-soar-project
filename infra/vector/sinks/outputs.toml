@@ -1,0 +1,253 @@
+# Sink/Output Configuration
+# Destination configurations for processed events
+
+# ============================================================================
+# KAFKA SINKS
+# ============================================================================
+
+# Main enriched events topic
+[sinks.kafka_enriched_events]
+type = "kafka"
+inputs = ["dedupe"]
+bootstrap_servers = "${KAFKA_BROKERS:-localhost:9092}"
+topic = "enriched-events"
+key_field = "tenant_id"
+compression = "lz4"
+
+[sinks.kafka_enriched_events.encoding]
+codec = "json"
+timestamp_format = "rfc3339"
+
+[sinks.kafka_enriched_events.buffer]
+type = "memory"
+max_events = 10000
+when_full = "block"
+
+[sinks.kafka_enriched_events.batch]
+max_events = 1000
+timeout_secs = 1
+
+# High severity alerts
+[sinks.kafka_alerts]
+type = "kafka"
+inputs = ["route_by_severity.high_severity"]
+bootstrap_servers = "${KAFKA_BROKERS:-localhost:9092}"
+topic = "alerts"
+key_field = "tenant_id"
+compression = "lz4"
+
+[sinks.kafka_alerts.encoding]
+codec = "json"
+
+[sinks.kafka_alerts.buffer]
+type = "memory"
+max_events = 1000
+when_full = "block"
+
+# Detection engine input
+[sinks.kafka_detection]
+type = "kafka"
+inputs = ["dedupe"]
+bootstrap_servers = "${KAFKA_BROKERS:-localhost:9092}"
+topic = "detection-input"
+key_field = "tenant_id"
+compression = "lz4"
+
+[sinks.kafka_detection.encoding]
+codec = "json"
+
+# Dead Letter Queue for parsing errors
+[sinks.kafka_dlq_parse]
+type = "kafka"
+inputs = ["parse_errors"]
+bootstrap_servers = "${KAFKA_BROKERS:-localhost:9092}"
+topic = "dlq-parse-errors"
+
+[sinks.kafka_dlq_parse.encoding]
+codec = "json"
+
+# ============================================================================
+# CLICKHOUSE SINKS
+# ============================================================================
+
+# Main events table
+[sinks.clickhouse_events]
+type = "clickhouse"
+inputs = ["dedupe"]
+endpoint = "${CLICKHOUSE_ENDPOINT:-http://localhost:8123}"
+database = "siem"
+table = "events"
+skip_unknown_fields = true
+compression = "lz4"
+date_time_best_effort = true
+
+[sinks.clickhouse_events.auth]
+strategy = "basic"
+user = "${CLICKHOUSE_USER:-siem_app}"
+password = "${CLICKHOUSE_PASSWORD:-}"
+
+[sinks.clickhouse_events.batch]
+max_events = 10000
+timeout_secs = 1
+
+[sinks.clickhouse_events.buffer]
+type = "disk"
+max_size = 1073741824  # 1GB
+when_full = "block"
+
+[sinks.clickhouse_events.healthcheck]
+enabled = true
+
+# Alerts table
+[sinks.clickhouse_alerts]
+type = "clickhouse"
+inputs = ["route_by_severity.high_severity"]
+endpoint = "${CLICKHOUSE_ENDPOINT:-http://localhost:8123}"
+database = "siem"
+table = "alerts"
+skip_unknown_fields = true
+compression = "lz4"
+
+[sinks.clickhouse_alerts.auth]
+strategy = "basic"
+user = "${CLICKHOUSE_USER:-siem_app}"
+password = "${CLICKHOUSE_PASSWORD:-}"
+
+[sinks.clickhouse_alerts.batch]
+max_events = 1000
+timeout_secs = 1
+
+# ============================================================================
+# S3/OBJECT STORAGE SINKS
+# ============================================================================
+
+# Hot storage (recent logs, fast retrieval)
+[sinks.s3_hot]
+type = "aws_s3"
+inputs = ["dedupe"]
+bucket = "${S3_BUCKET:-siem-logs}"
+key_prefix = "hot/%Y/%m/%d/%H/"
+compression = "gzip"
+content_type = "application/x-ndjson"
+filename_time_format = "%Y%m%dT%H%M%S"
+filename_extension = "ndjson.gz"
+
+[sinks.s3_hot.encoding]
+codec = "json"
+
+[sinks.s3_hot.batch]
+max_events = 100000
+max_bytes = 104857600  # 100MB
+timeout_secs = 300
+
+[sinks.s3_hot.buffer]
+type = "disk"
+max_size = 5368709120  # 5GB
+when_full = "block"
+
+# Cold storage (archive, compliance)
+[sinks.s3_cold]
+type = "aws_s3"
+inputs = ["dedupe"]
+bucket = "${S3_ARCHIVE_BUCKET:-siem-archive}"
+key_prefix = "archive/%Y/%m/%d/"
+compression = "gzip"
+content_type = "application/x-ndjson"
+filename_time_format = "%Y%m%dT%H%M%S"
+filename_extension = "ndjson.gz"
+storage_class = "GLACIER"
+
+[sinks.s3_cold.encoding]
+codec = "json"
+
+[sinks.s3_cold.batch]
+max_events = 500000
+max_bytes = 536870912  # 512MB
+timeout_secs = 900
+
+# Tenant-partitioned storage
+[sinks.s3_tenant]
+type = "aws_s3"
+inputs = ["dedupe"]
+bucket = "${S3_BUCKET:-siem-logs}"
+key_prefix = "tenants/{{ tenant_id }}/%Y/%m/%d/%H/"
+compression = "gzip"
+content_type = "application/x-ndjson"
+
+[sinks.s3_tenant.encoding]
+codec = "json"
+
+[sinks.s3_tenant.batch]
+max_events = 50000
+timeout_secs = 300
+
+# ============================================================================
+# ELASTICSEARCH SINK (Optional)
+# ============================================================================
+
+[sinks.elasticsearch]
+type = "elasticsearch"
+inputs = ["dedupe"]
+endpoints = ["${ELASTICSEARCH_ENDPOINT:-http://localhost:9200}"]
+bulk.index = "siem-events-%Y.%m.%d"
+compression = "gzip"
+mode = "bulk"
+
+[sinks.elasticsearch.auth]
+strategy = "basic"
+user = "${ELASTICSEARCH_USER:-elastic}"
+password = "${ELASTICSEARCH_PASSWORD:-}"
+
+[sinks.elasticsearch.batch]
+max_events = 5000
+timeout_secs = 1
+
+[sinks.elasticsearch.buffer]
+type = "memory"
+max_events = 10000
+when_full = "block"
+
+# ============================================================================
+# METRICS SINKS
+# ============================================================================
+
+# Prometheus metrics export
+[sinks.prometheus_metrics]
+type = "prometheus_exporter"
+inputs = ["internal_metrics", "log_to_metric"]
+address = "0.0.0.0:9598"
+default_namespace = "siem_vector"
+
+# Datadog metrics (optional)
+[sinks.datadog_metrics]
+type = "datadog_metrics"
+inputs = ["internal_metrics", "log_to_metric"]
+default_api_key = "${DATADOG_API_KEY:-}"
+site = "datadoghq.com"
+
+# ============================================================================
+# OBSERVABILITY SINKS
+# ============================================================================
+
+# Loki for log aggregation (optional)
+[sinks.loki]
+type = "loki"
+inputs = ["dedupe"]
+endpoint = "${LOKI_ENDPOINT:-http://localhost:3100}"
+encoding.codec = "json"
+labels.service = "siem-pipeline"
+labels.tenant = "{{ tenant_id }}"
+labels.level = "{{ level }}"
+
+[sinks.loki.batch]
+max_events = 1000
+timeout_secs = 1
+
+# Console output for debugging
+[sinks.console_debug]
+type = "console"
+inputs = ["route_by_severity.high_severity"]
+target = "stdout"
+
+[sinks.console_debug.encoding]
+codec = "json"

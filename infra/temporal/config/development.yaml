@@ -1,0 +1,133 @@
+# Temporal Dynamic Configuration for Development Environment
+# This file controls runtime behavior of the Temporal server
+
+# Frontend service settings
+frontend.visibilityMaxPageSize:
+  - value: 100
+    constraints: {}
+
+frontend.rps:
+  - value: 2400
+    constraints: {}
+
+frontend.globalRPS:
+  - value: 2400
+    constraints: {}
+
+# History service settings
+history.longPollExpirationInterval:
+  - value: "60s"
+    constraints: {}
+
+history.eventsCacheMaxSize:
+  - value: 512000
+    constraints: {}
+
+history.numArchiveSystemWorkflows:
+  - value: 1000
+    constraints: {}
+
+history.deleteDurationAfterClose:
+  - value: "24h"
+    constraints: {}
+
+# Workflow execution settings
+limit.maxIDLength:
+  - value: 1000
+    constraints: {}
+
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+    constraints: {}
+
+# Worker settings
+worker.enableScheduler:
+  - value: true
+    constraints: {}
+
+worker.enableBatcher:
+  - value: true
+    constraints: {}
+
+# Namespace settings (can be overridden per namespace)
+system.adminOperationToken:
+  - value: "temporal-admin-token-dev"
+    constraints: {}
+
+# Enable Elasticsearch for advanced visibility
+system.enableAdvancedVisibility:
+  - value: true
+    constraints: {}
+
+# Archival settings (disabled for dev)
+history.enableArchival:
+  - value: false
+    constraints: {}
+
+visibility.enableArchival:
+  - value: false
+    constraints: {}
+
+# Rate limiting
+frontend.namespaceRPS:
+  - value: 400
+    constraints: {}
+
+frontend.persistenceMaxQPS:
+  - value: 3000
+    constraints: {}
+
+frontend.persistenceGlobalMaxQPS:
+  - value: 3000
+    constraints: {}
+
+# Signal and query handling
+frontend.MaximumSignalsPerExecution:
+  - value: 100000
+    constraints: {}
+
+# Activity settings
+limit.workflowActivityExecutionHeartbeatTimeout:
+  - value: "60s"
+    constraints: {}
+
+# Task queue settings
+matching.numTaskqueueReadPartitions:
+  - value: 4
+    constraints: {}
+
+matching.numTaskqueueWritePartitions:
+  - value: 4
+    constraints: {}
+
+# Development convenience settings
+system.enableActivityEagerExecution:
+  - value: true
+    constraints: {}
+
+system.enableWorkflowShadowing:
+  - value: true
+    constraints: {}
+
+# Debug settings for development
+frontend.adminMatchingNamespaceRps:
+  - value: 1000
+    constraints: {}
+
+# Workflow execution time limits
+limit.workflowRunTimeout:
+  - value: "24h"
+    constraints: {}
+
+limit.workflowExecutionTimeout:
+  - value: "168h"  # 7 days
+    constraints: {}
+
+# Task timeout defaults
+limit.workflowTaskTimeout:
+  - value: "10s"
+    constraints: {}
+
+limit.defaultActivityStartToCloseTimeout:
+  - value: "60s"
+    constraints: {}

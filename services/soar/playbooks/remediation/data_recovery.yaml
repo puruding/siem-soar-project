@@ -1,0 +1,17 @@
+name: data_recovery
+version: "1.0"
+description: Recover encrypted or deleted data
+category: remediation
+severity: critical
+steps:
+  - id: assess_data_loss
+    action: data.assess_damage
+  - id: identify_recovery_method
+    action: script
+  - id: recover_from_backup
+    action: backup.restore
+  - id: decrypt_data
+    condition: "input.encrypted == true"
+    action: crypto.decrypt
+  - id: verify_recovery
+    action: data.verify_integrity

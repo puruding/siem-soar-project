@@ -1,0 +1,15 @@
+name: on_call_alert
+version: "1.0"
+description: Alert on-call team for critical incidents
+category: notification
+severity: critical
+steps:
+  - id: get_oncall_schedule
+    action: pagerduty.get_oncall
+  - id: page_oncall
+    action: pagerduty.create_incident
+  - id: send_sms
+    action: sms.send
+  - id: call_phone
+    action: phone.call
+    condition: "input.severity == 'critical'"

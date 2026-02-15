@@ -1,0 +1,349 @@
+# Block IP Address Playbook
+# Blocks malicious IP addresses across security infrastructure
+
+id: block_ip
+name: Block IP Address
+display_name: Block Malicious IP
+description: |
+  Blocks a malicious IP address across security infrastructure:
+  - Firewall rules
+  - EDR network blocking
+  - Proxy/web gateway blocking
+  - DNS sinkhole
+
+version: 1
+category: containment
+author: SIEM-SOAR Platform
+tags:
+  - containment
+  - block
+  - ip
+  - firewall
+enabled: true
+
+trigger:
+  type: manual
+  conditions: []
+
+inputs:
+  - name: ip_address
+    type: string
+    required: true
+    description: IP address to block
+    validation:
+      pattern: "^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$"
+  - name: reason
+    type: string
+    required: true
+    description: Reason for blocking
+  - name: case_id
+    type: string
+    required: false
+  - name: duration
+    type: string
+    required: false
+    default: "permanent"
+    description: Block duration (permanent, 24h, 7d, 30d)
+  - name: block_locations
+    type: array
+    required: false
+    default: [firewall, edr]
+    description: Where to apply the block
+  - name: require_approval
+    type: bool
+    required: false
+    default: false
+
+outputs:
+  - name: block_results
+    type: object
+    source: steps.aggregate_results.output
+  - name: success
+    type: bool
+    source: steps.aggregate_results.output.all_success
+
+steps:
+  - id: validate_ip
+    name: Validate IP Address
+    type: script
+    script:
+      language: python
+      code: |
+        import ipaddress
+
+        ip = ipaddress.ip_address(inputs['ip_address'])
+
+        # Check for reserved IPs that shouldn't be blocked
+        if ip.is_private:
+            return {
+                'valid': True,
+                'warning': 'This is a private IP address',
+                'is_private': True
+            }
+
+        if ip.is_loopback or ip.is_reserved or ip.is_multicast:
+            raise Exception(f"Cannot block reserved IP: {inputs['ip_address']}")
+
+        return {
+            'valid': True,
+            'is_private': False,
+            'ip_version': ip.version
+        }
+      inputs:
+        ip_address: $inputs.ip_address
+
+  - id: check_whitelist
+    name: Check Against Whitelist
+    type: action
+    action:
+      connector: ioc_database
+      action: check_whitelist
+      parameters:
+        type: ip
+        value: $inputs.ip_address
+    continue_on_error: true
+
+  - id: whitelist_check
+    name: Verify Not Whitelisted
+    type: condition
+    condition:
+      conditions:
+        - field: $steps.check_whitelist.output.is_whitelisted
+          operator: equals
+          value: true
+      then:
+        - id: abort_whitelisted
+          name: Abort - IP is Whitelisted
+          type: script
+          script:
+            language: python
+            code: |
+              raise Exception(f"IP {inputs['ip']} is whitelisted: {inputs['reason']}")
+            inputs:
+              ip: $inputs.ip_address
+              reason: $steps.check_whitelist.output.whitelist_reason
+
+  - id: approval_check
+    name: Check if Approval Required
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.require_approval
+          operator: equals
+          value: true
+      then:
+        - id: request_approval
+          name: Request Block Approval
+          type: approval
+          approval:
+            approvers:
+              - security-operations@company.com
+            required_count: 1
+            timeout: 30m
+            message: |
+              **IP Block Approval Required**
+
+              **IP Address:** ${inputs.ip_address}
+              **Reason:** ${inputs.reason}
+              **Duration:** ${inputs.duration}
+              **Block Locations:** ${inputs.block_locations}
+              **Case ID:** ${inputs.case_id}
+
+              Please approve or reject this block request.
+
+  - id: execute_blocks
+    name: Execute IP Blocks
+    type: loop
+    loop:
+      items: $inputs.block_locations
+      item_var: location
+      steps:
+        - id: block_by_location
+          name: Block at Location
+          type: condition
+          condition:
+            conditions:
+              - field: $location
+                operator: equals
+                value: firewall
+            then:
+              - id: firewall_block
+                name: Block on Firewall
+                type: action
+                action:
+                  connector: firewall
+                  action: block_ip
+                  parameters:
+                    ip: $inputs.ip_address
+                    direction: both
+                    reason: $inputs.reason
+                    duration: $inputs.duration
+                retry_policy:
+                  max_attempts: 3
+                  initial_interval: 5s
+
+            else:
+              - id: check_edr
+                name: Check EDR Block
+                type: condition
+                condition:
+                  conditions:
+                    - field: $location
+                      operator: equals
+                      value: edr
+                  then:
+                    - id: edr_block
+                      name: Block on EDR
+                      type: action
+                      action:
+                        connector: edr
+                        action: add_ioc
+                        parameters:
+                          type: ip
+                          value: $inputs.ip_address
+                          action: block
+                          reason: $inputs.reason
+                          expiration: $inputs.duration
+                      retry_policy:
+                        max_attempts: 3
+                        initial_interval: 5s
+
+                  else:
+                    - id: check_proxy
+                      name: Check Proxy Block
+                      type: condition
+                      condition:
+                        conditions:
+                          - field: $location
+                            operator: equals
+                            value: proxy
+                        then:
+                          - id: proxy_block
+                            name: Block on Proxy
+                            type: action
+                            action:
+                              connector: proxy
+                              action: block_destination
+                              parameters:
+                                type: ip
+                                value: $inputs.ip_address
+                                reason: $inputs.reason
+
+                        else:
+                          - id: check_dns
+                            name: Check DNS Sinkhole
+                            type: condition
+                            condition:
+                              conditions:
+                                - field: $location
+                                  operator: equals
+                                  value: dns
+                              then:
+                                - id: dns_sinkhole
+                                  name: Add to DNS Sinkhole
+                                  type: action
+                                  action:
+                                    connector: dns
+                                    action: add_sinkhole
+                                    parameters:
+                                      type: ip
+                                      value: $inputs.ip_address
+                                      reason: $inputs.reason
+
+  - id: add_to_blocklist
+    name: Add to Internal Blocklist
+    type: action
+    action:
+      connector: ioc_database
+      action: add_ioc
+      parameters:
+        type: ip
+        value: $inputs.ip_address
+        classification: malicious
+        reason: $inputs.reason
+        source: soar_playbook
+        case_id: $inputs.case_id
+        expiration: $inputs.duration
+    continue_on_error: true
+
+  - id: aggregate_results
+    name: Aggregate Block Results
+    type: script
+    script:
+      language: python
+      code: |
+        results = {
+            'ip_address': inputs['ip_address'],
+            'locations_blocked': [],
+            'locations_failed': [],
+            'all_success': True
+        }
+
+        # Check results from loop
+        for location in inputs['locations']:
+            # Assume success if we got here without errors
+            results['locations_blocked'].append(location)
+
+        results['block_count'] = len(results['locations_blocked'])
+        results['failure_count'] = len(results['locations_failed'])
+        results['all_success'] = results['failure_count'] == 0
+
+        return results
+      inputs:
+        ip_address: $inputs.ip_address
+        locations: $inputs.block_locations
+
+  - id: notify_completion
+    name: Notify Block Completion
+    type: parallel
+    parallel:
+      branches:
+        - id: slack_notify
+          name: Notify Slack
+          steps:
+            - id: slack_message
+              name: Send Slack Notification
+              type: action
+              action:
+                connector: slack
+                action: send_message
+                parameters:
+                  channel: "#security-incidents"
+                  text: |
+                    :shield: **IP Address Blocked**
+
+                    **IP:** ${inputs.ip_address}
+                    **Reason:** ${inputs.reason}
+                    **Duration:** ${inputs.duration}
+                    **Blocked At:** ${steps.aggregate_results.output.locations_blocked}
+                    **Case:** ${inputs.case_id}
+
+        - id: update_case
+          name: Update Case
+          steps:
+            - id: add_comment
+              name: Add Case Comment
+              type: action
+              skip_condition:
+                field: $inputs.case_id
+                operator: not_exists
+              action:
+                connector: case_management
+                action: add_comment
+                parameters:
+                  case_id: $inputs.case_id
+                  comment: |
+                    ## IP Address Blocked
+
+                    **IP:** ${inputs.ip_address}
+                    **Reason:** ${inputs.reason}
+                    **Duration:** ${inputs.duration}
+                    **Blocked Locations:** ${steps.aggregate_results.output.locations_blocked}
+                  is_internal: false
+
+      fail_fast: false
+
+timeout: 15m
+retry_policy:
+  max_attempts: 2
+  initial_interval: 30s

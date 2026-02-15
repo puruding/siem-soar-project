@@ -1,0 +1,16 @@
+apiVersion: v2
+name: gateway
+description: SIEM-SOAR API Gateway Service
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+keywords:
+  - api-gateway
+  - go
+  - grpc
+  - rest
+
+maintainers:
+  - name: SIEM-SOAR Team
+    email: siem-soar@example.com

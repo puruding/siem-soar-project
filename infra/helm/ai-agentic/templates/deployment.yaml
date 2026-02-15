@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-ai-agentic
+  labels:
+    app.kubernetes.io/name: ai-agentic
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: agentic-ai
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-agentic
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ai-agentic
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: ai-agentic
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.httpPort }}
+            - name: grpc
+              containerPort: {{ .Values.config.grpcPort }}
+            - name: metrics
+              containerPort: {{ .Values.config.metricsPort }}
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: HTTP_PORT
+              value: {{ .Values.config.httpPort | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.config.grpcPort | quote }}
+            # LangGraph settings
+            - name: LANGGRAPH_CHECKPOINT_STORE
+              value: {{ .Values.config.langgraph.checkpointStore | quote }}
+            - name: LANGGRAPH_MAX_CONCURRENT_AGENTS
+              value: {{ .Values.config.langgraph.maxConcurrentAgents | quote }}
+            - name: LANGGRAPH_AGENT_TIMEOUT
+              value: {{ .Values.config.langgraph.agentTimeout | quote }}
+            # Safety settings
+            - name: SAFETY_HUMAN_IN_THE_LOOP
+              value: {{ .Values.config.safety.humanInTheLoop | quote }}
+            - name: SAFETY_MAX_RISK_SCORE
+              value: {{ .Values.config.safety.maxRiskScore | quote }}
+            # Service connections
+            - name: REDIS_HOST
+              value: {{ .Values.global.redis.host | quote }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.redis.existingSecret }}
+                  key: {{ .Values.global.redis.secretKey }}
+            - name: COPILOT_SERVICE
+              value: "ai-copilot.siem-ai.svc.cluster.local:9000"
+            - name: SOAR_SERVICE
+              value: "soar.siem-services.svc.cluster.local:9000"
+            - name: DETECTION_SERVICE
+              value: "detection.siem-services.svc.cluster.local:9000"
+            - name: QUERY_SERVICE
+              value: "query.siem-services.svc.cluster.local:9000"
+            # NVIDIA GPU settings
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: shm
+              mountPath: /dev/shm
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+      volumes:
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-ai-agentic
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.httpPort }}
+      targetPort: http
+      name: http
+    - port: {{ .Values.service.grpcPort }}
+      targetPort: grpc
+      name: grpc
+    - port: {{ .Values.service.metricsPort }}
+      targetPort: metrics
+      name: metrics
+  selector:
+    app.kubernetes.io/name: ai-agentic
+    app.kubernetes.io/instance: {{ .Release.Name }}

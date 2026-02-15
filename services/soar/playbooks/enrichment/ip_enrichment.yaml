@@ -1,0 +1,358 @@
+# IP Address Enrichment Playbook
+# Enriches IP addresses with threat intelligence, geolocation, and reputation data
+
+id: ip_enrichment
+name: IP Address Enrichment
+display_name: IP Address Enrichment
+description: |
+  Enriches IP addresses with comprehensive threat intelligence data including:
+  - Threat intelligence lookups (VirusTotal, AbuseIPDB, etc.)
+  - Geolocation information
+  - ASN and ISP details
+  - Historical DNS data
+  - Reputation scores
+
+version: 1
+category: enrichment
+author: SIEM-SOAR Platform
+tags:
+  - enrichment
+  - ip
+  - threat_intel
+  - geolocation
+enabled: true
+
+trigger:
+  type: alert
+  conditions:
+    - field: entity_type
+      operator: equals
+      value: ip
+    - field: severity
+      operator: in
+      value: [medium, high, critical]
+
+inputs:
+  - name: ip_address
+    type: string
+    required: true
+    description: IP address to enrich
+    validation:
+      pattern: "^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$"
+  - name: enrichment_sources
+    type: array
+    required: false
+    default: [virustotal, abuseipdb, shodan, geoip]
+    description: List of enrichment sources to query
+  - name: include_dns
+    type: bool
+    required: false
+    default: true
+  - name: include_whois
+    type: bool
+    required: false
+    default: true
+
+outputs:
+  - name: enrichment_results
+    type: object
+    source: steps.aggregate_results.output.results
+  - name: risk_score
+    type: int
+    source: steps.calculate_risk.output.score
+  - name: is_malicious
+    type: bool
+    source: steps.calculate_risk.output.is_malicious
+
+variables:
+  - name: results
+    type: object
+    value: {}
+
+steps:
+  - id: validate_ip
+    name: Validate IP Address
+    type: script
+    script:
+      language: python
+      code: |
+        import ipaddress
+        try:
+            ip = ipaddress.ip_address(inputs['ip_address'])
+            is_private = ip.is_private
+            is_loopback = ip.is_loopback
+            is_reserved = ip.is_reserved
+            version = ip.version
+        except ValueError as e:
+            raise Exception(f"Invalid IP address: {e}")
+
+        return {
+            "valid": True,
+            "is_private": is_private,
+            "is_loopback": is_loopback,
+            "is_reserved": is_reserved,
+            "ip_version": version
+        }
+      inputs:
+        ip_address: $inputs.ip_address
+
+  - id: check_private
+    name: Check if Private IP
+    type: condition
+    condition:
+      conditions:
+        - field: $steps.validate_ip.output.is_private
+          operator: equals
+          value: true
+      then:
+        - id: skip_external_enrichment
+          name: Skip External Enrichment
+          type: transform
+          transform:
+            type: template
+            expression: "{ 'skip_reason': 'Private IP address', 'is_private': true }"
+            source: ""
+            target: enrichment_status
+      else:
+        - id: continue_enrichment
+          name: Continue with Enrichment
+          type: transform
+          transform:
+            type: template
+            expression: "{ 'continue': true }"
+            source: ""
+            target: enrichment_status
+
+  - id: parallel_enrichment
+    name: Parallel Enrichment Queries
+    type: parallel
+    parallel:
+      branches:
+        - id: virustotal_lookup
+          name: VirusTotal Lookup
+          steps:
+            - id: vt_query
+              name: Query VirusTotal
+              type: action
+              action:
+                connector: threat_intel
+                action: lookup_ip
+                parameters:
+                  ip: $inputs.ip_address
+                  source: virustotal
+              continue_on_error: true
+
+        - id: abuseipdb_lookup
+          name: AbuseIPDB Lookup
+          steps:
+            - id: abuseipdb_query
+              name: Query AbuseIPDB
+              type: action
+              action:
+                connector: threat_intel
+                action: check_ip_abuse
+                parameters:
+                  ip: $inputs.ip_address
+              continue_on_error: true
+
+        - id: shodan_lookup
+          name: Shodan Lookup
+          steps:
+            - id: shodan_query
+              name: Query Shodan
+              type: action
+              action:
+                connector: threat_intel
+                action: shodan_host
+                parameters:
+                  ip: $inputs.ip_address
+              continue_on_error: true
+
+        - id: geoip_lookup
+          name: GeoIP Lookup
+          steps:
+            - id: geoip_query
+              name: Query GeoIP
+              type: action
+              action:
+                connector: geoip
+                action: lookup
+                parameters:
+                  ip: $inputs.ip_address
+              continue_on_error: true
+
+        - id: dns_lookup
+          name: DNS Lookup
+          steps:
+            - id: reverse_dns
+              name: Reverse DNS Lookup
+              type: action
+              skip_condition:
+                field: $inputs.include_dns
+                operator: equals
+                value: false
+              action:
+                connector: dns
+                action: reverse_lookup
+                parameters:
+                  ip: $inputs.ip_address
+              continue_on_error: true
+
+      fail_fast: false
+      max_concurrent: 5
+
+  - id: aggregate_results
+    name: Aggregate Enrichment Results
+    type: script
+    script:
+      language: python
+      code: |
+        results = {
+            "ip": inputs['ip_address'],
+            "enrichment_timestamp": str(datetime.now()),
+            "sources_queried": [],
+            "threat_intel": {},
+            "geolocation": {},
+            "network_info": {},
+            "dns_info": {},
+            "reputation": {}
+        }
+
+        # Aggregate VirusTotal results
+        if vt_result := inputs.get('vt_query'):
+            results['sources_queried'].append('virustotal')
+            results['threat_intel']['virustotal'] = {
+                'malicious_votes': vt_result.get('malicious', 0),
+                'suspicious_votes': vt_result.get('suspicious', 0),
+                'harmless_votes': vt_result.get('harmless', 0),
+                'last_analysis_date': vt_result.get('last_analysis_date')
+            }
+
+        # Aggregate AbuseIPDB results
+        if abuse_result := inputs.get('abuseipdb_query'):
+            results['sources_queried'].append('abuseipdb')
+            results['reputation']['abuseipdb'] = {
+                'abuse_confidence_score': abuse_result.get('confidence_score', 0),
+                'total_reports': abuse_result.get('total_reports', 0),
+                'is_tor_exit': abuse_result.get('is_tor', False)
+            }
+
+        # Aggregate GeoIP results
+        if geo_result := inputs.get('geoip_query'):
+            results['sources_queried'].append('geoip')
+            results['geolocation'] = {
+                'country': geo_result.get('country'),
+                'country_code': geo_result.get('country_code'),
+                'city': geo_result.get('city'),
+                'region': geo_result.get('region'),
+                'latitude': geo_result.get('latitude'),
+                'longitude': geo_result.get('longitude'),
+                'timezone': geo_result.get('timezone')
+            }
+
+        # Aggregate Shodan results
+        if shodan_result := inputs.get('shodan_query'):
+            results['sources_queried'].append('shodan')
+            results['network_info'] = {
+                'asn': shodan_result.get('asn'),
+                'isp': shodan_result.get('isp'),
+                'organization': shodan_result.get('org'),
+                'open_ports': shodan_result.get('ports', []),
+                'hostnames': shodan_result.get('hostnames', []),
+                'vulnerabilities': shodan_result.get('vulns', [])
+            }
+
+        # Aggregate DNS results
+        if dns_result := inputs.get('reverse_dns'):
+            results['sources_queried'].append('dns')
+            results['dns_info'] = {
+                'ptr_record': dns_result.get('hostname'),
+                'forward_confirmed': dns_result.get('forward_confirmed', False)
+            }
+
+        return {"results": results}
+      inputs:
+        ip_address: $inputs.ip_address
+        vt_query: $steps.parallel_enrichment.virustotal_lookup.vt_query.output
+        abuseipdb_query: $steps.parallel_enrichment.abuseipdb_lookup.abuseipdb_query.output
+        geoip_query: $steps.parallel_enrichment.geoip_lookup.geoip_query.output
+        shodan_query: $steps.parallel_enrichment.shodan_lookup.shodan_query.output
+        reverse_dns: $steps.parallel_enrichment.dns_lookup.reverse_dns.output
+
+  - id: calculate_risk
+    name: Calculate Risk Score
+    type: script
+    script:
+      language: python
+      code: |
+        results = inputs['enrichment_results']
+        score = 0
+        factors = []
+
+        # VirusTotal scoring
+        vt = results.get('threat_intel', {}).get('virustotal', {})
+        if vt:
+            malicious = vt.get('malicious_votes', 0)
+            if malicious > 0:
+                score += min(malicious * 10, 40)
+                factors.append(f"VirusTotal: {malicious} malicious votes")
+
+        # AbuseIPDB scoring
+        abuse = results.get('reputation', {}).get('abuseipdb', {})
+        if abuse:
+            confidence = abuse.get('abuse_confidence_score', 0)
+            score += confidence // 2
+            if confidence > 50:
+                factors.append(f"AbuseIPDB: {confidence}% confidence")
+            if abuse.get('is_tor_exit'):
+                score += 10
+                factors.append("Tor exit node")
+
+        # Network info scoring
+        network = results.get('network_info', {})
+        if network:
+            vulns = network.get('vulnerabilities', [])
+            if vulns:
+                score += min(len(vulns) * 5, 20)
+                factors.append(f"Known vulnerabilities: {len(vulns)}")
+
+        # Cap score at 100
+        score = min(score, 100)
+        is_malicious = score >= 70
+
+        return {
+            "score": score,
+            "is_malicious": is_malicious,
+            "risk_level": "critical" if score >= 80 else "high" if score >= 60 else "medium" if score >= 40 else "low",
+            "risk_factors": factors
+        }
+      inputs:
+        enrichment_results: $steps.aggregate_results.output.results
+
+  - id: update_case
+    name: Update Case with Enrichment
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.case_id
+          operator: exists
+      then:
+        - id: add_enrichment_evidence
+          name: Add Enrichment to Case
+          type: action
+          action:
+            connector: case_management
+            action: add_evidence
+            parameters:
+              case_id: $inputs.case_id
+              evidence_type: enrichment
+              name: "IP Enrichment - ${inputs.ip_address}"
+              data: $steps.aggregate_results.output.results
+              tags: [ip_enrichment, threat_intel]
+
+timeout: 5m
+retry_policy:
+  max_attempts: 2
+  initial_interval: 10s
+  max_interval: 30s
+  backoff_coefficient: 2.0

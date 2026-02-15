@@ -1,0 +1,226 @@
+version: '3.8'
+# Redis Sentinel Cluster for SIEM-SOAR Platform
+# High availability setup with 1 master, 2 replicas, 3 sentinels
+#
+# Usage:
+#   docker-compose up -d
+#   docker-compose exec redis-master redis-cli
+#
+# Test failover:
+#   docker-compose exec sentinel-1 redis-cli -p 26379 SENTINEL failover siem-master
+
+services:
+  # =========================================================================
+  # Redis Master
+  # =========================================================================
+  redis-master:
+    image: redis:7.2-alpine
+    container_name: redis-master
+    hostname: redis-master
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-master-data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - redis-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # =========================================================================
+  # Redis Replica 1
+  # =========================================================================
+  redis-replica-1:
+    image: redis:7.2-alpine
+    container_name: redis-replica-1
+    hostname: redis-replica-1
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-replica-1-data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf --replicaof redis-master 6379
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    networks:
+      - redis-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # =========================================================================
+  # Redis Replica 2
+  # =========================================================================
+  redis-replica-2:
+    image: redis:7.2-alpine
+    container_name: redis-replica-2
+    hostname: redis-replica-2
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis-replica-2-data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf --replicaof redis-master 6379
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    networks:
+      - redis-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # =========================================================================
+  # Sentinel 1
+  # =========================================================================
+  sentinel-1:
+    image: redis:7.2-alpine
+    container_name: sentinel-1
+    hostname: sentinel-1
+    ports:
+      - "26379:26379"
+    volumes:
+      - ./sentinel.conf:/usr/local/etc/redis/sentinel.conf:ro
+      - sentinel-1-data:/data
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      redis-replica-1:
+        condition: service_healthy
+      redis-replica-2:
+        condition: service_healthy
+    networks:
+      - redis-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # =========================================================================
+  # Sentinel 2
+  # =========================================================================
+  sentinel-2:
+    image: redis:7.2-alpine
+    container_name: sentinel-2
+    hostname: sentinel-2
+    ports:
+      - "26380:26379"
+    volumes:
+      - ./sentinel.conf:/usr/local/etc/redis/sentinel.conf:ro
+      - sentinel-2-data:/data
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      redis-replica-1:
+        condition: service_healthy
+      redis-replica-2:
+        condition: service_healthy
+    networks:
+      - redis-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # =========================================================================
+  # Sentinel 3
+  # =========================================================================
+  sentinel-3:
+    image: redis:7.2-alpine
+    container_name: sentinel-3
+    hostname: sentinel-3
+    ports:
+      - "26381:26379"
+    volumes:
+      - ./sentinel.conf:/usr/local/etc/redis/sentinel.conf:ro
+      - sentinel-3-data:/data
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      redis-replica-1:
+        condition: service_healthy
+      redis-replica-2:
+        condition: service_healthy
+    networks:
+      - redis-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # =========================================================================
+  # Redis Insight (Optional GUI)
+  # =========================================================================
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: redis-insight
+    ports:
+      - "8001:8001"
+    volumes:
+      - redis-insight-data:/db
+    networks:
+      - redis-net
+    depends_on:
+      - redis-master
+    restart: unless-stopped
+
+networks:
+  redis-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16
+
+volumes:
+  redis-master-data:
+  redis-replica-1-data:
+  redis-replica-2-data:
+  sentinel-1-data:
+  sentinel-2-data:
+  sentinel-3-data:
+  redis-insight-data:

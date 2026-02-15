@@ -1,0 +1,325 @@
+version: '3.8'
+
+services:
+  # ===================
+  # INFRASTRUCTURE
+  # ===================
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.1
+    container_name: siem-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: siem
+      CLICKHOUSE_USER: siem
+      CLICKHOUSE_PASSWORD: siem_password
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - siem-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: siem-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 8
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - siem-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: siem-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass siem_password --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "siem_password", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - siem-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: siem-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: siem
+      POSTGRES_PASSWORD: siem_password
+      POSTGRES_DB: siem_soar
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U siem -d siem_soar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - siem-network
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    container_name: siem-temporal
+    ports:
+      - "7233:7233"
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=siem
+      - POSTGRES_PWD=siem_password
+      - POSTGRES_SEEDS=postgres
+      - SKIP_SCHEMA_SETUP=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - siem-network
+
+  # ===================
+  # GO SERVICES
+  # ===================
+
+  gateway:
+    build:
+      context: .
+      dockerfile: ./services/gateway/Dockerfile
+    container_name: siem-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=siem_password
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=siem
+      - POSTGRES_PASSWORD=siem_password
+      - POSTGRES_DB=siem_soar
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - siem-network
+
+  detection:
+    build:
+      context: .
+      dockerfile: ./services/detection/Dockerfile
+    container_name: siem-detection
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - CLICKHOUSE_ADDR=clickhouse:9000
+      - CLICKHOUSE_USER=siem
+      - CLICKHOUSE_PASSWORD=siem_password
+      - CLICKHOUSE_DB=siem
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - siem-network
+
+  soar:
+    build:
+      context: .
+      dockerfile: ./services/soar/Dockerfile
+    container_name: siem-soar
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=siem
+      - POSTGRES_PASSWORD=siem_password
+      - POSTGRES_DB=siem_soar
+      - KAFKA_BROKERS=kafka:9092
+      - TEMPORAL_HOST=temporal:7233
+    depends_on:
+      - postgres
+      - kafka
+      - temporal
+    networks:
+      - siem-network
+
+  ti:
+    build:
+      context: .
+      dockerfile: ./services/ti/Dockerfile
+    container_name: siem-ti
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=siem
+      - POSTGRES_PASSWORD=siem_password
+      - POSTGRES_DB=siem_soar
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=siem_password
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - siem-network
+
+  query:
+    build:
+      context: .
+      dockerfile: ./services/query/Dockerfile
+    container_name: siem-query
+    environment:
+      - CLICKHOUSE_ADDR=clickhouse:9000
+      - CLICKHOUSE_USER=siem
+      - CLICKHOUSE_PASSWORD=siem_password
+      - CLICKHOUSE_DB=siem
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - siem-network
+
+  case:
+    build:
+      context: .
+      dockerfile: ./services/case/Dockerfile
+    container_name: siem-case
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=siem
+      - POSTGRES_PASSWORD=siem_password
+      - POSTGRES_DB=siem_soar
+    depends_on:
+      - postgres
+    networks:
+      - siem-network
+
+  collector:
+    build:
+      context: .
+      dockerfile: ./services/collector/Dockerfile
+    container_name: siem-collector
+    ports:
+      - "9514:9514/udp"
+      - "9515:9515/tcp"
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - siem-network
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: ./services/pipeline/Dockerfile
+    container_name: siem-pipeline
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - CLICKHOUSE_ADDR=clickhouse:9000
+      - CLICKHOUSE_USER=siem
+      - CLICKHOUSE_PASSWORD=siem_password
+      - CLICKHOUSE_DB=siem
+    depends_on:
+      - kafka
+      - clickhouse
+    networks:
+      - siem-network
+
+  parser:
+    build:
+      context: .
+      dockerfile: ./services/parser/Dockerfile
+    container_name: siem-parser
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - siem-network
+
+  # ===================
+  # AI SERVICES
+  # ===================
+
+  ml-gateway:
+    build:
+      context: ./ai
+      dockerfile: ./services/ml-gateway/Dockerfile
+    container_name: siem-ml-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=siem_password
+    depends_on:
+      - kafka
+      - redis
+    networks:
+      - siem-network
+
+  # ===================
+  # FRONTEND
+  # ===================
+
+  dashboard:
+    build:
+      context: ./web/dashboard
+      dockerfile: Dockerfile
+    container_name: siem-dashboard
+    ports:
+      - "3000:80"
+    depends_on:
+      - gateway
+    networks:
+      - siem-network
+
+# ===================
+# NETWORKS
+# ===================
+
+networks:
+  siem-network:
+    driver: bridge
+
+# ===================
+# VOLUMES
+# ===================
+
+volumes:
+  clickhouse_data:
+  clickhouse_logs:
+  postgres_data:
+  redis_data:
+  kafka_data:

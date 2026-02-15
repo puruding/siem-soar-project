@@ -1,0 +1,266 @@
+# SIEM Kafka Topics Configuration
+# Designed for 100K EPS throughput
+
+apiVersion: v1
+kind: KafkaTopics
+
+# Topic naming convention: {stage}-{type}
+# Stages: raw, parsed, normalized, enriched
+# Types: logs, events, alerts, metrics
+
+topics:
+  # ============================================================================
+  # Primary Pipeline Topics
+  # ============================================================================
+
+  - name: raw-logs
+    description: "Raw incoming logs from all sources"
+    partitions: 32
+    replicationFactor: 3
+    config:
+      retention.ms: 86400000        # 1 day
+      retention.bytes: 107374182400 # 100GB per partition
+      cleanup.policy: delete
+      compression.type: lz4
+      max.message.bytes: 10485760   # 10MB
+      segment.bytes: 1073741824     # 1GB
+      min.insync.replicas: 2
+    # Estimated throughput: 100K EPS * 1KB avg = 100MB/s
+    # With 32 partitions: ~3.1MB/s per partition
+
+  - name: parsed-events
+    description: "Events after parsing and field extraction"
+    partitions: 32
+    replicationFactor: 3
+    config:
+      retention.ms: 172800000       # 2 days
+      retention.bytes: 107374182400
+      cleanup.policy: delete
+      compression.type: lz4
+      max.message.bytes: 5242880    # 5MB
+      segment.bytes: 1073741824
+      min.insync.replicas: 2
+
+  - name: normalized-events
+    description: "Events normalized to UDM schema"
+    partitions: 32
+    replicationFactor: 3
+    config:
+      retention.ms: 259200000       # 3 days
+      retention.bytes: 107374182400
+      cleanup.policy: delete
+      compression.type: lz4
+      max.message.bytes: 5242880
+      segment.bytes: 1073741824
+      min.insync.replicas: 2
+
+  - name: enriched-events
+    description: "Fully enriched events with TI, GeoIP, Asset data"
+    partitions: 32
+    replicationFactor: 3
+    config:
+      retention.ms: 604800000       # 7 days
+      retention.bytes: 214748364800 # 200GB per partition
+      cleanup.policy: delete
+      compression.type: lz4
+      max.message.bytes: 10485760
+      segment.bytes: 1073741824
+      min.insync.replicas: 2
+
+  # ============================================================================
+  # Alert Topics
+  # ============================================================================
+
+  - name: alerts
+    description: "Detection engine alerts"
+    partitions: 16
+    replicationFactor: 3
+    config:
+      retention.ms: 2592000000      # 30 days
+      cleanup.policy: delete
+      compression.type: lz4
+      max.message.bytes: 1048576
+      min.insync.replicas: 2
+
+  - name: alerts-high-priority
+    description: "High severity alerts for immediate processing"
+    partitions: 8
+    replicationFactor: 3
+    config:
+      retention.ms: 2592000000
+      cleanup.policy: delete
+      compression.type: lz4
+      min.insync.replicas: 2
+
+  - name: alerts-correlation
+    description: "Alerts for correlation engine"
+    partitions: 16
+    replicationFactor: 3
+    config:
+      retention.ms: 604800000
+      cleanup.policy: delete
+      compression.type: lz4
+      min.insync.replicas: 2
+
+  # ============================================================================
+  # Dead Letter Queues
+  # ============================================================================
+
+  - name: dlq-parse-errors
+    description: "Messages that failed parsing"
+    partitions: 4
+    replicationFactor: 3
+    config:
+      retention.ms: 604800000       # 7 days
+      cleanup.policy: delete
+      compression.type: lz4
+
+  - name: dlq-normalize-errors
+    description: "Messages that failed normalization"
+    partitions: 4
+    replicationFactor: 3
+    config:
+      retention.ms: 604800000
+      cleanup.policy: delete
+      compression.type: lz4
+
+  - name: dlq-enrich-errors
+    description: "Messages that failed enrichment"
+    partitions: 4
+    replicationFactor: 3
+    config:
+      retention.ms: 604800000
+      cleanup.policy: delete
+      compression.type: lz4
+
+  - name: dlq-route-errors
+    description: "Messages that failed routing"
+    partitions: 4
+    replicationFactor: 3
+    config:
+      retention.ms: 604800000
+      cleanup.policy: delete
+      compression.type: lz4
+
+  - name: dlq-detection-errors
+    description: "Messages that failed detection processing"
+    partitions: 4
+    replicationFactor: 3
+    config:
+      retention.ms: 604800000
+      cleanup.policy: delete
+      compression.type: lz4
+
+  # ============================================================================
+  # Operational Topics
+  # ============================================================================
+
+  - name: pipeline-metrics
+    description: "Pipeline component metrics"
+    partitions: 8
+    replicationFactor: 2
+    config:
+      retention.ms: 86400000        # 1 day
+      cleanup.policy: delete
+      compression.type: lz4
+
+  - name: pipeline-commands
+    description: "Pipeline control commands"
+    partitions: 4
+    replicationFactor: 3
+    config:
+      retention.ms: 3600000         # 1 hour
+      cleanup.policy: delete
+      compression.type: none
+
+  - name: audit-logs
+    description: "System audit logs"
+    partitions: 8
+    replicationFactor: 3
+    config:
+      retention.ms: 7776000000      # 90 days
+      cleanup.policy: delete
+      compression.type: lz4
+      min.insync.replicas: 2
+
+  # ============================================================================
+  # Compacted Topics (State)
+  # ============================================================================
+
+  - name: parser-patterns
+    description: "Parser pattern configurations"
+    partitions: 4
+    replicationFactor: 3
+    config:
+      cleanup.policy: compact
+      compression.type: lz4
+      min.cleanable.dirty.ratio: 0.1
+      delete.retention.ms: 86400000
+
+  - name: enrichment-cache
+    description: "Enrichment lookup cache"
+    partitions: 16
+    replicationFactor: 3
+    config:
+      cleanup.policy: compact
+      compression.type: lz4
+      min.cleanable.dirty.ratio: 0.05
+      delete.retention.ms: 86400000
+
+  - name: routing-rules
+    description: "Dynamic routing rules"
+    partitions: 4
+    replicationFactor: 3
+    config:
+      cleanup.policy: compact
+      compression.type: lz4
+      min.cleanable.dirty.ratio: 0.1
+      delete.retention.ms: 86400000
+
+  - name: detection-rules
+    description: "Detection rule configurations"
+    partitions: 4
+    replicationFactor: 3
+    config:
+      cleanup.policy: compact
+      compression.type: lz4
+      min.cleanable.dirty.ratio: 0.1
+      delete.retention.ms: 86400000
+
+# Consumer Group Configuration
+consumerGroups:
+  - name: parser-group
+    topics: [raw-logs]
+    autoCommit: false
+    maxPollRecords: 1000
+    maxPollIntervalMs: 300000
+
+  - name: normalizer-group
+    topics: [parsed-events]
+    autoCommit: false
+    maxPollRecords: 1000
+    maxPollIntervalMs: 300000
+
+  - name: enricher-group
+    topics: [normalized-events]
+    autoCommit: false
+    maxPollRecords: 500
+    maxPollIntervalMs: 300000
+
+  - name: router-group
+    topics: [enriched-events]
+    autoCommit: false
+    maxPollRecords: 1000
+    maxPollIntervalMs: 300000
+
+  - name: detection-group
+    topics: [enriched-events]
+    autoCommit: false
+    maxPollRecords: 500
+    maxPollIntervalMs: 300000
+
+  - name: correlation-group
+    topics: [alerts-correlation]
+    autoCommit: false
+    maxPollRecords: 100
+    maxPollIntervalMs: 300000

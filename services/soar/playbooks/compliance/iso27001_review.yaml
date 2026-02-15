@@ -1,0 +1,16 @@
+name: iso27001_review
+version: "1.0"
+description: ISO 27001 compliance review
+category: compliance
+severity: low
+steps:
+  - id: review_information_security_policy
+    action: compliance.check_policies
+  - id: review_risk_assessment
+    action: risk.get_assessment
+  - id: review_asset_inventory
+    action: asset.get_inventory
+  - id: review_access_controls
+    action: iam.audit_access
+  - id: generate_compliance_report
+    action: report.generate

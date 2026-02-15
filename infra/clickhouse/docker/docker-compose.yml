@@ -1,0 +1,177 @@
+version: '3.8'
+# ClickHouse 3-Node Replicated Cluster
+# SIEM-SOAR Platform - Development/Staging Environment
+#
+# Usage:
+#   docker-compose up -d
+#   docker-compose exec clickhouse-01 clickhouse-client
+#
+# Production: Use Kubernetes Helm chart instead
+
+services:
+  # ClickHouse Node 1 (Shard 1, Replica 1)
+  clickhouse-01:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: clickhouse-01
+    hostname: clickhouse-01
+    ports:
+      - "8123:8123"   # HTTP
+      - "9000:9000"   # Native TCP
+      - "9181:9181"   # Keeper
+      - "9363:9363"   # Prometheus metrics
+    volumes:
+      - clickhouse-01-data:/var/lib/clickhouse
+      - clickhouse-01-logs:/var/log/clickhouse-server
+      - ../cluster/config.xml:/etc/clickhouse-server/config.xml:ro
+      - ../cluster/users.xml:/etc/clickhouse-server/users.xml:ro
+      - ../scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      KEEPER_SERVER_ID: 1
+      CLICKHOUSE_SHARD: 01
+      CLICKHOUSE_REPLICA: clickhouse-01
+      CLICKHOUSE_ADMIN_PASSWORD_SHA256: ${CLICKHOUSE_ADMIN_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_SIEM_APP_PASSWORD_SHA256: ${CLICKHOUSE_SIEM_APP_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_SIEM_READONLY_PASSWORD_SHA256: ${CLICKHOUSE_SIEM_READONLY_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_INTERNAL_PASSWORD_SHA256: ${CLICKHOUSE_INTERNAL_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_INTERNAL_PASSWORD: ${CLICKHOUSE_INTERNAL_PASSWORD:-123}
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    cap_add:
+      - SYS_NICE
+      - NET_ADMIN
+      - IPC_LOCK
+    networks:
+      - clickhouse-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ClickHouse Node 2 (Shard 1, Replica 2)
+  clickhouse-02:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: clickhouse-02
+    hostname: clickhouse-02
+    ports:
+      - "8124:8123"
+      - "9001:9000"
+      - "9182:9181"
+      - "9364:9363"
+    volumes:
+      - clickhouse-02-data:/var/lib/clickhouse
+      - clickhouse-02-logs:/var/log/clickhouse-server
+      - ../cluster/config.xml:/etc/clickhouse-server/config.xml:ro
+      - ../cluster/users.xml:/etc/clickhouse-server/users.xml:ro
+    environment:
+      KEEPER_SERVER_ID: 2
+      CLICKHOUSE_SHARD: 01
+      CLICKHOUSE_REPLICA: clickhouse-02
+      CLICKHOUSE_ADMIN_PASSWORD_SHA256: ${CLICKHOUSE_ADMIN_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_SIEM_APP_PASSWORD_SHA256: ${CLICKHOUSE_SIEM_APP_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_SIEM_READONLY_PASSWORD_SHA256: ${CLICKHOUSE_SIEM_READONLY_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_INTERNAL_PASSWORD_SHA256: ${CLICKHOUSE_INTERNAL_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_INTERNAL_PASSWORD: ${CLICKHOUSE_INTERNAL_PASSWORD:-123}
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    cap_add:
+      - SYS_NICE
+      - NET_ADMIN
+      - IPC_LOCK
+    networks:
+      - clickhouse-net
+    depends_on:
+      clickhouse-01:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ClickHouse Node 3 (Shard 2, Replica 1)
+  clickhouse-03:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: clickhouse-03
+    hostname: clickhouse-03
+    ports:
+      - "8125:8123"
+      - "9002:9000"
+      - "9183:9181"
+      - "9365:9363"
+    volumes:
+      - clickhouse-03-data:/var/lib/clickhouse
+      - clickhouse-03-logs:/var/log/clickhouse-server
+      - ../cluster/config.xml:/etc/clickhouse-server/config.xml:ro
+      - ../cluster/users.xml:/etc/clickhouse-server/users.xml:ro
+    environment:
+      KEEPER_SERVER_ID: 3
+      CLICKHOUSE_SHARD: 02
+      CLICKHOUSE_REPLICA: clickhouse-03
+      CLICKHOUSE_ADMIN_PASSWORD_SHA256: ${CLICKHOUSE_ADMIN_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_SIEM_APP_PASSWORD_SHA256: ${CLICKHOUSE_SIEM_APP_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_SIEM_READONLY_PASSWORD_SHA256: ${CLICKHOUSE_SIEM_READONLY_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_INTERNAL_PASSWORD_SHA256: ${CLICKHOUSE_INTERNAL_PASSWORD_SHA256:-a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3}
+      CLICKHOUSE_INTERNAL_PASSWORD: ${CLICKHOUSE_INTERNAL_PASSWORD:-123}
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    cap_add:
+      - SYS_NICE
+      - NET_ADMIN
+      - IPC_LOCK
+    networks:
+      - clickhouse-net
+    depends_on:
+      clickhouse-02:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Grafana for ClickHouse monitoring
+  grafana:
+    image: grafana/grafana:10.4-alpine
+    container_name: clickhouse-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - clickhouse-net
+    depends_on:
+      - clickhouse-01
+    restart: unless-stopped
+
+networks:
+  clickhouse-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  clickhouse-01-data:
+  clickhouse-01-logs:
+  clickhouse-02-data:
+  clickhouse-02-logs:
+  clickhouse-03-data:
+  clickhouse-03-logs:
+  grafana-data:

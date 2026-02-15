@@ -1,0 +1,2006 @@
+import { useState, useCallback, useRef } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import {
+  ReactFlow,
+  MiniMap,
+  Controls,
+  Background,
+  useNodesState,
+  useEdgesState,
+  addEdge,
+  Node,
+  Edge,
+  Connection,
+  BackgroundVariant,
+  MarkerType,
+  Panel,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import { Progress } from '@/components/ui/progress';
+import {
+  ArrowLeft,
+  Save,
+  Play,
+  Zap,
+  Clock,
+  Webhook,
+  Mail,
+  Bell,
+  Shield,
+  Database,
+  Terminal,
+  GitBranch,
+  Ticket,
+  Cloud,
+  Plug,
+  Maximize2,
+  Minimize2,
+  Undo2,
+  Redo2,
+  ZoomIn,
+  ZoomOut,
+  Grid3x3,
+  CheckCircle2,
+  XCircle,
+  Info,
+  StopCircle,
+  RotateCcw,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+import {
+  TriggerNode,
+  ActionNode,
+  DecisionNode,
+  IntegrationNode,
+  TriggerNodeData,
+  ActionNodeData,
+  DecisionNodeData,
+  IntegrationNodeData,
+} from './nodes';
+import { LabeledEdge } from './edges';
+
+// Node type configuration
+const nodeTypes = {
+  trigger: TriggerNode,
+  action: ActionNode,
+  decision: DecisionNode,
+  integration: IntegrationNode,
+} as any;
+
+const edgeTypes = {
+  labeled: LabeledEdge,
+} as any;
+
+// Node palette configuration
+const nodePalette = [
+  {
+    category: 'Triggers',
+    color: '#5CC05C',
+    items: [
+      {
+        type: 'trigger',
+        label: 'Alert Trigger',
+        icon: Zap,
+        data: { triggerType: 'alert' },
+      },
+      {
+        type: 'trigger',
+        label: 'Schedule',
+        icon: Clock,
+        data: { triggerType: 'schedule' },
+      },
+      {
+        type: 'trigger',
+        label: 'Webhook',
+        icon: Webhook,
+        data: { triggerType: 'webhook' },
+      },
+      {
+        type: 'trigger',
+        label: 'Manual',
+        icon: Play,
+        data: { triggerType: 'manual' },
+      },
+    ],
+  },
+  {
+    category: 'Actions',
+    color: '#00A4A6',
+    items: [
+      {
+        type: 'action',
+        label: 'Send Email',
+        icon: Mail,
+        data: { actionType: 'email' },
+      },
+      {
+        type: 'action',
+        label: 'Slack Alert',
+        icon: Bell,
+        data: { actionType: 'slack' },
+      },
+      {
+        type: 'action',
+        label: 'Block IP',
+        icon: Shield,
+        data: { actionType: 'block_ip' },
+      },
+      {
+        type: 'action',
+        label: 'Isolate Host',
+        icon: Shield,
+        data: { actionType: 'isolate' },
+      },
+      {
+        type: 'action',
+        label: 'Create Ticket',
+        icon: Database,
+        data: { actionType: 'jira' },
+      },
+      {
+        type: 'action',
+        label: 'Run Script',
+        icon: Terminal,
+        data: { actionType: 'custom' },
+      },
+    ],
+  },
+  {
+    category: 'Logic',
+    color: '#F79836',
+    items: [
+      {
+        type: 'decision',
+        label: 'Condition',
+        icon: GitBranch,
+        data: { condition: 'severity >= high' },
+      },
+    ],
+  },
+  {
+    category: 'Integrations',
+    color: '#7B61FF',
+    items: [
+      {
+        type: 'integration',
+        label: 'SIEM',
+        icon: Shield,
+        data: { integrationType: 'siem' },
+      },
+      {
+        type: 'integration',
+        label: 'EDR',
+        icon: Shield,
+        data: { integrationType: 'edr' },
+      },
+      {
+        type: 'integration',
+        label: 'Firewall',
+        icon: Shield,
+        data: { integrationType: 'firewall' },
+      },
+      {
+        type: 'integration',
+        label: 'Ticketing',
+        icon: Ticket,
+        data: { integrationType: 'ticketing' },
+      },
+      {
+        type: 'integration',
+        label: 'Custom API',
+        icon: Plug,
+        data: { integrationType: 'custom' },
+      },
+    ],
+  },
+];
+
+// Example initial playbook
+const initialNodes: Node[] = [
+  {
+    id: '1',
+    type: 'trigger',
+    position: { x: 400, y: 50 },
+    data: {
+      label: 'Malware Alert',
+      triggerType: 'alert',
+      description: 'High severity malware detection',
+      status: 'active',
+    } as any,
+  },
+  {
+    id: '2',
+    type: 'action',
+    position: { x: 380, y: 280 },
+    data: {
+      label: 'Enrich IOCs',
+      actionType: 'custom',
+      description: 'Query threat intelligence',
+    } as any,
+  },
+  {
+    id: '3',
+    type: 'decision',
+    position: { x: 355, y: 500 },
+    data: {
+      label: 'Severity Check',
+      condition: 'severity >= critical',
+      outcomes: { yes: 'Critical', no: 'Standard' },
+    } as any,
+  },
+  {
+    id: '4',
+    type: 'action',
+    position: { x: 150, y: 750 },
+    data: {
+      label: 'Isolate Endpoint',
+      actionType: 'isolate',
+      description: 'Network isolation',
+    } as any,
+  },
+  {
+    id: '5',
+    type: 'integration',
+    position: { x: 560, y: 750 },
+    data: {
+      label: 'Create Ticket',
+      integrationType: 'ticketing',
+      connectionStatus: 'connected',
+    } as any,
+  },
+  {
+    id: '6',
+    type: 'action',
+    position: { x: 160, y: 1000 },
+    data: {
+      label: 'Notify SOC',
+      actionType: 'slack',
+      description: '#security-alerts',
+    } as any,
+  },
+];
+
+const initialEdges: Edge[] = [
+  {
+    id: 'e1-2',
+    source: '1',
+    target: '2',
+    type: 'labeled',
+    animated: true,
+    data: { animated: true },
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' },
+    style: { stroke: '#00A4A6' },
+  },
+  {
+    id: 'e2-3',
+    source: '2',
+    target: '3',
+    type: 'labeled',
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#F79836' },
+    style: { stroke: '#F79836' },
+  },
+  {
+    id: 'e3-4',
+    source: '3',
+    sourceHandle: 'yes',
+    target: '4',
+    type: 'labeled',
+    data: { label: 'Yes', condition: 'yes', animated: true },
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#5CC05C' },
+    style: { stroke: '#5CC05C' },
+  },
+  {
+    id: 'e3-5',
+    source: '3',
+    sourceHandle: 'no',
+    target: '5',
+    type: 'labeled',
+    data: { label: 'No', condition: 'no' },
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#DC4E41' },
+    style: { stroke: '#DC4E41' },
+  },
+  {
+    id: 'e4-6',
+    source: '4',
+    target: '6',
+    type: 'labeled',
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#00A4A6' },
+    style: { stroke: '#00A4A6' },
+  },
+];
+
+export function PlaybookEditor() {
+  const { id } = useParams<{ id: string }>();
+  const isNew = !id || id === 'new';
+
+  // Helper to safely get string values from node data
+  const getNodeDataString = (data: any, key: string, defaultValue = ''): string => {
+    return (data[key] as string) || defaultValue;
+  };
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(
+    isNew ? [] : initialNodes
+  );
+  const [edges, setEdges, onEdgesChange] = useEdgesState(
+    isNew ? [] : initialEdges
+  );
+  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
+
+  // Test Run state
+  interface TestRunLog {
+    nodeId: string;
+    message: string;
+    status: 'info' | 'success' | 'error';
+    timestamp: Date;
+  }
+
+  interface TestRunState {
+    isRunning: boolean;
+    currentNodeId: string | null;
+    logs: TestRunLog[];
+    progress: number;
+    results: { success: number; failed: number; skipped: number };
+  }
+
+  const [testRunState, setTestRunState] = useState<TestRunState>({
+    isRunning: false,
+    currentNodeId: null,
+    logs: [],
+    progress: 0,
+    results: { success: 0, failed: 0, skipped: 0 },
+  });
+  const [isTestRunPanelOpen, setIsTestRunPanelOpen] = useState(false);
+
+  // Connect handler
+  const onConnect = useCallback(
+    (params: Connection) => {
+      // Determine edge color based on source node type
+      let edgeColor = '#64748b';
+      let animated = false;
+
+      const sourceNode = nodes.find((n) => n.id === params.source);
+      if (sourceNode?.type === 'trigger') {
+        edgeColor = '#5CC05C';
+        animated = true;
+      } else if (sourceNode?.type === 'action') {
+        edgeColor = '#00A4A6';
+      } else if (sourceNode?.type === 'decision') {
+        edgeColor = params.sourceHandle === 'yes' ? '#5CC05C' : '#DC4E41';
+      } else if (sourceNode?.type === 'integration') {
+        edgeColor = '#7B61FF';
+      }
+
+      const newEdge: Edge = {
+        ...params,
+        id: `e${params.source}-${params.target}`,
+        type: 'labeled',
+        animated,
+        data: { animated },
+        markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
+        style: { stroke: edgeColor },
+      };
+
+      setEdges((eds) => addEdge(newEdge, eds));
+    },
+    [setEdges, nodes]
+  );
+
+  // Add node from palette
+  const onDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+
+      const type = event.dataTransfer.getData('application/reactflow-type');
+      const label = event.dataTransfer.getData('application/reactflow-label');
+      const nodeData = event.dataTransfer.getData('application/reactflow-data');
+
+      if (!type || !reactFlowInstance) return;
+
+      const position = reactFlowInstance.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      const newNode: Node = {
+        id: `${type}-${Date.now()}`,
+        type,
+        position,
+        data: { label, ...JSON.parse(nodeData) },
+      };
+
+      setNodes((nds) => [...nds, newNode]);
+    },
+    [reactFlowInstance, setNodes]
+  );
+
+  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    setSelectedNode(node);
+  }, []);
+
+  const onPaneClick = useCallback(() => {
+    setSelectedNode(null);
+  }, []);
+
+  // Auto layout
+  const autoLayout = useCallback(() => {
+    // Simple vertical layout
+    const layoutedNodes = nodes.map((node, index) => ({
+      ...node,
+      position: { x: 400, y: index * 200 + 50 },
+    }));
+    setNodes(layoutedNodes);
+  }, [nodes, setNodes]);
+
+  // Test Run simulation
+  const startTestRun = useCallback(async () => {
+    if (nodes.length === 0) {
+      alert('No nodes to test');
+      return;
+    }
+
+    setIsTestRunPanelOpen(true);
+    setTestRunState({
+      isRunning: true,
+      currentNodeId: null,
+      logs: [],
+      progress: 0,
+      results: { success: 0, failed: 0, skipped: 0 },
+    });
+
+    // Build execution order using BFS from trigger nodes
+    const triggerNodes = nodes.filter((n) => n.type === 'trigger');
+    if (triggerNodes.length === 0) {
+      setTestRunState((prev) => ({
+        ...prev,
+        isRunning: false,
+        logs: [
+          {
+            nodeId: 'system',
+            message: 'No trigger nodes found',
+            status: 'error',
+            timestamp: new Date(),
+          },
+        ],
+      }));
+      return;
+    }
+
+    const executionOrder: Node[] = [];
+    const visited = new Set<string>();
+    const queue: Node[] = [...triggerNodes];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current.id)) continue;
+
+      visited.add(current.id);
+      executionOrder.push(current);
+
+      // Find connected nodes
+      const outgoingEdges = edges.filter((e) => e.source === current.id);
+      for (const edge of outgoingEdges) {
+        const targetNode = nodes.find((n) => n.id === edge.target);
+        if (targetNode && !visited.has(targetNode.id)) {
+          queue.push(targetNode);
+        }
+      }
+    }
+
+    if (executionOrder.length === 0) {
+      setTestRunState((prev) => ({
+        ...prev,
+        isRunning: false,
+        logs: [
+          {
+            nodeId: 'system',
+            message: 'No nodes in execution order',
+            status: 'error',
+            timestamp: new Date(),
+          },
+        ],
+      }));
+      return;
+    }
+
+    // Execute nodes sequentially
+    for (let i = 0; i < executionOrder.length; i++) {
+      const node = executionOrder[i];
+      if (!node) continue;
+
+      const progressPercent = ((i + 1) / executionOrder.length) * 100;
+
+      setTestRunState((prev) => ({
+        ...prev,
+        currentNodeId: node.id,
+        progress: progressPercent,
+      }));
+
+      // Highlight current node
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === node.id
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  status:
+                    n.type === 'trigger'
+                      ? 'active'
+                      : n.type === 'decision'
+                      ? 'evaluating'
+                      : 'running',
+                } as any,
+              }
+            : n
+        )
+      );
+
+      setTestRunState((prev) => ({
+        ...prev,
+        logs: [
+          ...prev.logs,
+          {
+            nodeId: node.id,
+            message: `Executing: ${(node.data as any).label || node.id}`,
+            status: 'info',
+            timestamp: new Date(),
+          },
+        ],
+      }));
+
+      // Simulate execution delay
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      // Simulate success/failure (90% success rate)
+      const isSuccess = Math.random() > 0.1;
+
+      if (node.type === 'decision') {
+        // Simulate condition evaluation
+        const conditionResult = Math.random() > 0.5;
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === node.id
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    status: 'evaluated',
+                    conditionResult,
+                  } as any,
+                }
+              : n
+          )
+        );
+
+        setTestRunState((prev) => ({
+          ...prev,
+          logs: [
+            ...prev.logs,
+            {
+              nodeId: node.id,
+              message: `Condition evaluated: ${conditionResult ? 'YES' : 'NO'}`,
+              status: 'success',
+              timestamp: new Date(),
+            },
+          ],
+          results: {
+            ...prev.results,
+            success: prev.results.success + 1,
+          },
+        }));
+      } else {
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === node.id
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    status: isSuccess ? 'completed' : 'failed',
+                    duration: Math.floor(Math.random() * 500) + 100,
+                  } as any,
+                }
+              : n
+          )
+        );
+
+        setTestRunState((prev) => ({
+          ...prev,
+          logs: [
+            ...prev.logs,
+            {
+              nodeId: node.id,
+              message: isSuccess
+                ? 'Completed successfully'
+                : 'Execution failed',
+              status: isSuccess ? 'success' : 'error',
+              timestamp: new Date(),
+            },
+          ],
+          results: {
+            ...prev.results,
+            success: isSuccess
+              ? prev.results.success + 1
+              : prev.results.success,
+            failed: isSuccess ? prev.results.failed : prev.results.failed + 1,
+          },
+        }));
+      }
+    }
+
+    setTestRunState((prev) => ({
+      ...prev,
+      isRunning: false,
+      currentNodeId: null,
+      progress: 100,
+    }));
+  }, [nodes, edges, setNodes]);
+
+  const stopTestRun = useCallback(() => {
+    setTestRunState((prev) => ({
+      ...prev,
+      isRunning: false,
+      currentNodeId: null,
+    }));
+
+    // Reset node statuses
+    setNodes((nds) =>
+      nds.map((n) => ({
+        ...n,
+        data: {
+          ...n.data,
+          status: undefined,
+          conditionResult: undefined,
+          duration: undefined,
+        } as any,
+      }))
+    );
+  }, [setNodes]);
+
+  const resetTestRun = useCallback(() => {
+    setTestRunState({
+      isRunning: false,
+      currentNodeId: null,
+      logs: [],
+      progress: 0,
+      results: { success: 0, failed: 0, skipped: 0 },
+    });
+
+    // Reset node statuses
+    setNodes((nds) =>
+      nds.map((n) => ({
+        ...n,
+        data: {
+          ...n.data,
+          status: undefined,
+          conditionResult: undefined,
+          duration: undefined,
+        } as any,
+      }))
+    );
+  }, [setNodes]);
+
+  // Update node data helper
+  const updateNodeData = useCallback(
+    (nodeId: string, newData: Partial<any>) => {
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === nodeId ? { ...n, data: { ...n.data, ...newData } } : n
+        )
+      );
+    },
+    [setNodes]
+  );
+
+  return (
+    <div
+      className={cn(
+        'flex flex-col animate-fade-in',
+        isFullscreen ? 'fixed inset-0 z-50 bg-background' : 'h-[calc(100vh-140px)]'
+      )}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between pb-4 px-4 shrink-0 border-b border-border/50 bg-background/95 backdrop-blur-sm">
+        <div className="flex items-center gap-4">
+          <Link to="/playbooks">
+            <Button variant="ghost" size="icon">
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+          </Link>
+          <div>
+            <div className="flex items-center gap-3">
+              <Input
+                defaultValue={isNew ? 'New Playbook' : 'Malware Response Playbook'}
+                className="text-lg font-display font-bold border-none p-0 h-auto focus-visible:ring-0"
+              />
+              <Badge
+                variant="outline"
+                className="text-[#5CC05C] border-[#5CC05C]/50"
+              >
+                {isNew ? 'Draft' : 'Active'}
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {isNew
+                ? 'Create a new automation workflow'
+                : 'Automated malware detection and response'}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon" onClick={() => reactFlowInstance?.undo()}>
+            <Undo2 className="w-4 h-4" />
+          </Button>
+          <Button variant="outline" size="icon" onClick={() => reactFlowInstance?.redo()}>
+            <Redo2 className="w-4 h-4" />
+          </Button>
+          <Button variant="outline" size="icon" onClick={autoLayout}>
+            <Grid3x3 className="w-4 h-4" />
+          </Button>
+          <Separator orientation="vertical" className="h-6" />
+          <Button
+            variant="outline"
+            onClick={startTestRun}
+            disabled={testRunState.isRunning}
+          >
+            <Play className="w-4 h-4 mr-2" />
+            Test Run
+          </Button>
+          <Button>
+            <Save className="w-4 h-4 mr-2" />
+            Save
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsFullscreen(!isFullscreen)}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-4 h-4" />
+            ) : (
+              <Maximize2 className="w-4 h-4" />
+            )}
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex gap-4 flex-1 min-h-0 p-4">
+        {/* Node Palette */}
+        <Card className="w-72 shrink-0 border-border/50 bg-card/50 backdrop-blur-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Zap className="w-4 h-4 text-primary" />
+              Components
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Tabs defaultValue="Triggers" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-4">
+                <TabsTrigger value="Triggers" className="text-xs">
+                  Triggers
+                </TabsTrigger>
+                <TabsTrigger value="Actions" className="text-xs">
+                  Actions
+                </TabsTrigger>
+              </TabsList>
+              <ScrollArea className="h-[calc(100vh-320px)]">
+                <div className="space-y-4">
+                  {nodePalette.map((category) => (
+                    <TabsContent
+                      key={category.category}
+                      value={category.category}
+                      className="mt-0"
+                    >
+                      <div className="space-y-2">
+                        {category.items.map((item) => {
+                          const Icon = item.icon;
+                          return (
+                            <div
+                              key={item.label}
+                              draggable
+                              onDragStart={(event) => {
+                                event.dataTransfer.setData(
+                                  'application/reactflow-type',
+                                  item.type
+                                );
+                                event.dataTransfer.setData(
+                                  'application/reactflow-label',
+                                  item.label
+                                );
+                                event.dataTransfer.setData(
+                                  'application/reactflow-data',
+                                  JSON.stringify(item.data)
+                                );
+                                event.dataTransfer.effectAllowed = 'move';
+                              }}
+                              className={cn(
+                                'flex items-center gap-3 p-3 rounded-xl cursor-move',
+                                'border-2 border-transparent transition-all duration-300',
+                                'hover:border-current hover:scale-105 hover:shadow-lg',
+                                'bg-gradient-to-br from-muted/30 to-muted/10'
+                              )}
+                              style={{ color: category.color }}
+                            >
+                              <div
+                                className="p-2 rounded-lg bg-current/20"
+                                style={{
+                                  backgroundColor: `${category.color}20`,
+                                }}
+                              >
+                                <Icon
+                                  className="w-4 h-4"
+                                  style={{ color: category.color }}
+                                />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium text-foreground truncate">
+                                  {item.label}
+                                </div>
+                                <div
+                                  className="text-2xs font-medium uppercase tracking-wide"
+                                  style={{ color: category.color }}
+                                >
+                                  {category.category}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </TabsContent>
+                  ))}
+
+                  {/* Logic and Integrations */}
+                  {nodePalette
+                    .filter((c) => c.category === 'Logic' || c.category === 'Integrations')
+                    .map((category) => (
+                      <div key={category.category}>
+                        <h4
+                          className="text-xs font-semibold uppercase tracking-wider mb-2 px-1"
+                          style={{ color: category.color }}
+                        >
+                          {category.category}
+                        </h4>
+                        <div className="space-y-2">
+                          {category.items.map((item) => {
+                            const Icon = item.icon;
+                            return (
+                              <div
+                                key={item.label}
+                                draggable
+                                onDragStart={(event) => {
+                                  event.dataTransfer.setData(
+                                    'application/reactflow-type',
+                                    item.type
+                                  );
+                                  event.dataTransfer.setData(
+                                    'application/reactflow-label',
+                                    item.label
+                                  );
+                                  event.dataTransfer.setData(
+                                    'application/reactflow-data',
+                                    JSON.stringify(item.data)
+                                  );
+                                  event.dataTransfer.effectAllowed = 'move';
+                                }}
+                                className={cn(
+                                  'flex items-center gap-3 p-3 rounded-xl cursor-move',
+                                  'border-2 border-transparent transition-all duration-300',
+                                  'hover:border-current hover:scale-105 hover:shadow-lg',
+                                  'bg-gradient-to-br from-muted/30 to-muted/10'
+                                )}
+                                style={{ color: category.color }}
+                              >
+                                <div
+                                  className="p-2 rounded-lg"
+                                  style={{
+                                    backgroundColor: `${category.color}20`,
+                                  }}
+                                >
+                                  <Icon
+                                    className="w-4 h-4"
+                                    style={{ color: category.color }}
+                                  />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm font-medium text-foreground truncate">
+                                    {item.label}
+                                  </div>
+                                  <div
+                                    className="text-2xs font-medium uppercase tracking-wide"
+                                    style={{ color: category.color }}
+                                  >
+                                    {category.category}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </ScrollArea>
+            </Tabs>
+          </CardContent>
+        </Card>
+
+        {/* Canvas */}
+        <div
+          ref={reactFlowWrapper}
+          className="flex-1 rounded-xl border-2 border-border/50 bg-muted/20 overflow-hidden relative"
+        >
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onNodeClick={onNodeClick}
+            onPaneClick={onPaneClick}
+            onInit={setReactFlowInstance}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            fitView
+            snapToGrid
+            snapGrid={[20, 20]}
+            connectionLineStyle={{
+              stroke: '#00A4A6',
+              strokeWidth: 2,
+            }}
+            defaultEdgeOptions={{
+              type: 'labeled',
+              style: { strokeWidth: 2 },
+            }}
+          >
+            <Background
+              variant={BackgroundVariant.Dots}
+              gap={20}
+              size={1}
+              color="hsl(var(--muted-foreground) / 0.2)"
+            />
+            <Controls
+              className="bg-card/90 backdrop-blur-sm border border-border/50 rounded-lg shadow-lg"
+              showInteractive={false}
+            />
+            <MiniMap
+              className="bg-card/90 backdrop-blur-sm border border-border/50 rounded-lg shadow-lg"
+              nodeColor={(node) => {
+                switch (node.type) {
+                  case 'trigger':
+                    return '#5CC05C';
+                  case 'action':
+                    return '#00A4A6';
+                  case 'decision':
+                    return '#F79836';
+                  case 'integration':
+                    return '#7B61FF';
+                  default:
+                    return '#64748b';
+                }
+              }}
+              maskColor="hsl(var(--background) / 0.8)"
+            />
+            <Panel position="top-left" className="bg-card/90 backdrop-blur-sm border border-border/50 rounded-lg px-3 py-2 shadow-lg">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">
+                  {nodes.length}
+                </span>
+                nodes
+                <Separator orientation="vertical" className="h-4 mx-1" />
+                <span className="font-semibold text-foreground">
+                  {edges.length}
+                </span>
+                connections
+              </div>
+            </Panel>
+          </ReactFlow>
+        </div>
+
+        {/* Properties Panel */}
+        {selectedNode && (
+          <Card className="w-80 shrink-0 border-border/50 bg-card/50 backdrop-blur-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Node Properties</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[calc(100vh-320px)]">
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-muted-foreground uppercase tracking-wide">
+                      Node Type
+                    </label>
+                    <Badge variant="outline" className="mt-1 capitalize">
+                      {selectedNode.type}
+                    </Badge>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                      Label
+                    </label>
+                    <Input
+                      value={selectedNode.data.label as string}
+                      onChange={(e) =>
+                        updateNodeData(selectedNode.id, { label: e.target.value })
+                      }
+                    />
+                  </div>
+
+                  {/* TriggerNode settings */}
+                  {selectedNode.type === 'trigger' && (
+                    <>
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Description
+                        </label>
+                        <Textarea
+                          value={(selectedNode.data.description as string) || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              description: e.target.value,
+                            })
+                          }
+                          rows={2}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Status
+                        </label>
+                        <Select
+                          value={(selectedNode.data.status as string) || 'idle'}
+                          onValueChange={(value) =>
+                            updateNodeData(selectedNode.id, { status: value })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="idle">Idle</SelectItem>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="disabled">Disabled</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Trigger Type
+                        </label>
+                        <Select
+                          value={(selectedNode.data.triggerType as string) || ''}
+                          onValueChange={(value) =>
+                            updateNodeData(selectedNode.id, {
+                              triggerType: value,
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="alert">Alert</SelectItem>
+                            <SelectItem value="schedule">Schedule</SelectItem>
+                            <SelectItem value="webhook">Webhook</SelectItem>
+                            <SelectItem value="manual">Manual</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {selectedNode.data.triggerType === 'alert' && (
+                        <>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Alert Source
+                            </label>
+                            <Input
+                              value={(selectedNode.data.alertSource as string) || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  alertSource: e.target.value,
+                                })
+                              }
+                              placeholder="SIEM, EDR, Firewall"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Alert Type
+                            </label>
+                            <Input
+                              value={(selectedNode.data as any).alertType || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  alertType: e.target.value,
+                                })
+                              }
+                              placeholder="Malware, Intrusion"
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {selectedNode.data.triggerType === 'schedule' && (
+                        <>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Cron Expression
+                            </label>
+                            <Input
+                              value={(selectedNode.data as any).cronExpression || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  cronExpression: e.target.value,
+                                })
+                              }
+                              placeholder="0 0 * * *"
+                              className="font-mono text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Timezone
+                            </label>
+                            <Select
+                              value={(selectedNode.data as any).timezone || 'UTC'}
+                              onValueChange={(value) =>
+                                updateNodeData(selectedNode.id, {
+                                  timezone: value,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="UTC">UTC</SelectItem>
+                                <SelectItem value="Asia/Seoul">
+                                  Asia/Seoul
+                                </SelectItem>
+                                <SelectItem value="America/New_York">
+                                  America/New_York
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </>
+                      )}
+
+                      {selectedNode.data.triggerType === 'webhook' && (
+                        <>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Webhook URL (readonly)
+                            </label>
+                            <Input
+                              value={
+                                ((selectedNode.data as any).webhookUrl as string) ||
+                                `https://api.soar.example.com/webhook/${selectedNode.id}`
+                              }
+                              readOnly
+                              className="font-mono text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Auth Method
+                            </label>
+                            <Select
+                              value={(selectedNode.data as any).authMethod || 'none'}
+                              onValueChange={(value) =>
+                                updateNodeData(selectedNode.id, {
+                                  authMethod: value,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">None</SelectItem>
+                                <SelectItem value="api_key">API Key</SelectItem>
+                                <SelectItem value="bearer_token">
+                                  Bearer Token
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </>
+                      )}
+
+                      {selectedNode.data.triggerType === 'manual' && (
+                        <div>
+                          <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                            Required Inputs
+                          </label>
+                          <Textarea
+                            value={(selectedNode.data as any).requiredInputs || ''}
+                            onChange={(e) =>
+                              updateNodeData(selectedNode.id, {
+                                requiredInputs: e.target.value,
+                              })
+                            }
+                            placeholder="field1, field2, field3"
+                            rows={2}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ActionNode settings */}
+                  {selectedNode.type === 'action' && (
+                    <>
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Description
+                        </label>
+                        <Textarea
+                          value={(selectedNode.data.description as string) || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              description: e.target.value,
+                            })
+                          }
+                          rows={2}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Action Type
+                        </label>
+                        <Select
+                          value={(selectedNode.data as any).actionType}
+                          onValueChange={(value) =>
+                            updateNodeData(selectedNode.id, {
+                              actionType: value,
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="email">Email</SelectItem>
+                            <SelectItem value="slack">Slack</SelectItem>
+                            <SelectItem value="jira">Jira</SelectItem>
+                            <SelectItem value="block_ip">Block IP</SelectItem>
+                            <SelectItem value="isolate">Isolate</SelectItem>
+                            <SelectItem value="custom">Custom</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {selectedNode.data.actionType === 'email' && (
+                        <>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Recipients (comma-separated)
+                            </label>
+                            <Input
+                              value={(selectedNode.data as any).recipients || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  recipients: e.target.value,
+                                })
+                              }
+                              placeholder="user1@example.com, user2@example.com"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Subject Template
+                            </label>
+                            <Input
+                              value={(selectedNode.data as any).subject || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  subject: e.target.value,
+                                })
+                              }
+                              placeholder="Alert: {{severity}} - {{title}}"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Body Template
+                            </label>
+                            <Textarea
+                              value={(selectedNode.data as any).body || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  body: e.target.value,
+                                })
+                              }
+                              placeholder="Alert details..."
+                              rows={3}
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {selectedNode.data.actionType === 'slack' && (
+                        <>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Channel
+                            </label>
+                            <Input
+                              value={(selectedNode.data as any).channel || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  channel: e.target.value,
+                                })
+                              }
+                              placeholder="#security-alerts"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Message Template
+                            </label>
+                            <Textarea
+                              value={(selectedNode.data as any).messageTemplate || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  messageTemplate: e.target.value,
+                                })
+                              }
+                              placeholder="{{severity}} alert detected..."
+                              rows={3}
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {selectedNode.data.actionType === 'jira' && (
+                        <>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Project Key
+                            </label>
+                            <Input
+                              value={(selectedNode.data as any).project || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  project: e.target.value,
+                                })
+                              }
+                              placeholder="SEC"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Issue Type
+                            </label>
+                            <Select
+                              value={(selectedNode.data as any).issueType || 'Incident'}
+                              onValueChange={(value) =>
+                                updateNodeData(selectedNode.id, {
+                                  issueType: value,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Bug">Bug</SelectItem>
+                                <SelectItem value="Task">Task</SelectItem>
+                                <SelectItem value="Story">Story</SelectItem>
+                                <SelectItem value="Incident">Incident</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Priority
+                            </label>
+                            <Select
+                              value={(selectedNode.data as any).priority || 'High'}
+                              onValueChange={(value) =>
+                                updateNodeData(selectedNode.id, {
+                                  priority: value,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Highest">Highest</SelectItem>
+                                <SelectItem value="High">High</SelectItem>
+                                <SelectItem value="Medium">Medium</SelectItem>
+                                <SelectItem value="Low">Low</SelectItem>
+                                <SelectItem value="Lowest">Lowest</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Assignee
+                            </label>
+                            <Input
+                              value={(selectedNode.data as any).assignee || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  assignee: e.target.value,
+                                })
+                              }
+                              placeholder="john.doe"
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {selectedNode.data.actionType === 'block_ip' && (
+                        <>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Firewall Integration
+                            </label>
+                            <Select
+                              value={
+                                ((selectedNode.data as any).firewallIntegration as string) || 'default'
+                              }
+                              onValueChange={(value) =>
+                                updateNodeData(selectedNode.id, {
+                                  firewallIntegration: value,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="default">
+                                  Default Firewall
+                                </SelectItem>
+                                <SelectItem value="palo_alto">
+                                  Palo Alto
+                                </SelectItem>
+                                <SelectItem value="checkpoint">
+                                  Check Point
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Block Duration (minutes)
+                            </label>
+                            <Input
+                              type="number"
+                              value={(selectedNode.data as any).duration || '60'}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  duration: e.target.value,
+                                })
+                              }
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              IP Field Name
+                            </label>
+                            <Input
+                              value={(selectedNode.data as any).ipField || 'src_ip'}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  ipField: e.target.value,
+                                })
+                              }
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {selectedNode.data.actionType === 'isolate' && (
+                        <>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              EDR Integration
+                            </label>
+                            <Select
+                              value={(selectedNode.data as any).edrIntegration || 'default'}
+                              onValueChange={(value) =>
+                                updateNodeData(selectedNode.id, {
+                                  edrIntegration: value,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="default">Default EDR</SelectItem>
+                                <SelectItem value="crowdstrike">
+                                  CrowdStrike
+                                </SelectItem>
+                                <SelectItem value="sentinelone">
+                                  SentinelOne
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Isolation Level
+                            </label>
+                            <Select
+                              value={(selectedNode.data as any).isolationLevel || 'full'}
+                              onValueChange={(value) =>
+                                updateNodeData(selectedNode.id, {
+                                  isolationLevel: value,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="full">Full</SelectItem>
+                                <SelectItem value="network_only">
+                                  Network Only
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </>
+                      )}
+
+                      {selectedNode.data.actionType === 'custom' && (
+                        <>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Script Path
+                            </label>
+                            <Input
+                              value={(selectedNode.data as any).scriptPath || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  scriptPath: e.target.value,
+                                })
+                              }
+                              placeholder="/opt/scripts/custom_action.py"
+                              className="font-mono text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Parameters (JSON)
+                            </label>
+                            <Textarea
+                              value={(selectedNode.data as any).parameters || ''}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  parameters: e.target.value,
+                                })
+                              }
+                              placeholder='{"key": "value"}'
+                              className="font-mono text-sm"
+                              rows={3}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                              Timeout (seconds)
+                            </label>
+                            <Input
+                              type="number"
+                              value={(selectedNode.data as any).timeout || '30'}
+                              onChange={(e) =>
+                                updateNodeData(selectedNode.id, {
+                                  timeout: e.target.value,
+                                })
+                              }
+                            />
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {/* DecisionNode settings */}
+                  {selectedNode.type === 'decision' && (
+                    <>
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Condition
+                        </label>
+                        <Input
+                          value={(selectedNode.data.condition as string) || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              condition: e.target.value,
+                            })
+                          }
+                          placeholder="severity >= critical"
+                          className="font-mono text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Yes Label
+                        </label>
+                        <Input
+                          value={((selectedNode.data.outcomes as any)?.yes as string) || 'Yes'}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              outcomes: {
+                                ...((selectedNode.data.outcomes as any) || { yes: 'Yes', no: 'No' }),
+                                yes: e.target.value,
+                              },
+                            })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          No Label
+                        </label>
+                        <Input
+                          value={((selectedNode.data.outcomes as any)?.no as string) || 'No'}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              outcomes: {
+                                ...((selectedNode.data.outcomes as any) || { yes: 'Yes', no: 'No' }),
+                                no: e.target.value,
+                              },
+                            })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Evaluation Mode
+                        </label>
+                        <Select
+                          value={(selectedNode.data as any).evaluationMode || 'any'}
+                          onValueChange={(value) =>
+                            updateNodeData(selectedNode.id, {
+                              evaluationMode: value,
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="any">Any (OR)</SelectItem>
+                            <SelectItem value="all">All (AND)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </>
+                  )}
+
+                  {/* IntegrationNode settings */}
+                  {selectedNode.type === 'integration' && (
+                    <>
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Description
+                        </label>
+                        <Textarea
+                          value={(selectedNode.data.description as string) || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              description: e.target.value,
+                            })
+                          }
+                          rows={2}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Integration Type
+                        </label>
+                        <Select
+                          value={(selectedNode.data as any).integrationType}
+                          onValueChange={(value) =>
+                            updateNodeData(selectedNode.id, {
+                              integrationType: value,
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="siem">SIEM</SelectItem>
+                            <SelectItem value="edr">EDR</SelectItem>
+                            <SelectItem value="firewall">Firewall</SelectItem>
+                            <SelectItem value="ticketing">Ticketing</SelectItem>
+                            <SelectItem value="custom">Custom</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Connection Status
+                        </label>
+                        <Input
+                          value={(selectedNode.data as any).connectionStatus || 'connected'}
+                          readOnly
+                          className="text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          API URL
+                        </label>
+                        <Input
+                          value={(selectedNode.data as any).apiUrl || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              apiUrl: e.target.value,
+                            })
+                          }
+                          placeholder="https://api.integration.com/v1"
+                          className="font-mono text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          API Key
+                        </label>
+                        <Input
+                          type="password"
+                          value={(selectedNode.data as any).apiKey || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              apiKey: e.target.value,
+                            })
+                          }
+                          placeholder="••••••••"
+                          className="font-mono text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Query Template
+                        </label>
+                        <Textarea
+                          value={(selectedNode.data as any).queryTemplate || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              queryTemplate: e.target.value,
+                            })
+                          }
+                          placeholder="Query or action template..."
+                          className="font-mono text-sm"
+                          rows={3}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <div className="pt-4">
+                    <Button
+                      variant="destructive"
+                      className="w-full"
+                      onClick={() => {
+                        setNodes((nds) => nds.filter((n) => n.id !== selectedNode.id));
+                        setEdges((eds) =>
+                          eds.filter(
+                            (e) =>
+                              e.source !== selectedNode.id &&
+                              e.target !== selectedNode.id
+                          )
+                        );
+                        setSelectedNode(null);
+                      }}
+                    >
+                      Delete Node
+                    </Button>
+                  </div>
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Test Run Panel */}
+      <Sheet open={isTestRunPanelOpen} onOpenChange={setIsTestRunPanelOpen}>
+        <SheetContent className="w-[500px] sm:max-w-[500px]">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <Play className="w-5 h-5" />
+              Test Run
+            </SheetTitle>
+          </SheetHeader>
+
+          <div className="mt-6 space-y-6">
+            {/* Progress */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium">Progress</span>
+                <span className="text-sm text-muted-foreground">
+                  {Math.round(testRunState.progress)}%
+                </span>
+              </div>
+              <Progress value={testRunState.progress} className="h-2" />
+            </div>
+
+            {/* Results Summary */}
+            <div className="flex gap-3">
+              <Badge
+                variant="outline"
+                className="flex items-center gap-1 px-3 py-1 text-green-600 border-green-600/50"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span className="font-semibold">
+                  {testRunState.results.success}
+                </span>
+                <span className="text-xs">Success</span>
+              </Badge>
+              <Badge
+                variant="outline"
+                className="flex items-center gap-1 px-3 py-1 text-red-600 border-red-600/50"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                <span className="font-semibold">
+                  {testRunState.results.failed}
+                </span>
+                <span className="text-xs">Failed</span>
+              </Badge>
+            </div>
+
+            {/* Current Node */}
+            {testRunState.isRunning && testRunState.currentNodeId && (
+              <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                <div className="flex items-center gap-2 text-sm">
+                  <Info className="w-4 h-4 text-blue-500" />
+                  <span className="text-muted-foreground">Executing:</span>
+                  <span className="font-medium">
+                    {
+                      (nodes.find((n) => n.id === testRunState.currentNodeId)
+                        ?.data as any)?.label || testRunState.currentNodeId
+                    }
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Execution Logs */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Execution Log</h4>
+              <ScrollArea className="h-[400px] rounded-lg border border-border/50 bg-muted/20">
+                <div className="p-3 space-y-2">
+                  {testRunState.logs.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No logs yet. Start a test run to see execution details.
+                    </div>
+                  ) : (
+                    testRunState.logs.map((log, i) => (
+                      <div
+                        key={i}
+                        className="flex items-start gap-2 p-2 rounded-lg bg-background border border-border/50"
+                      >
+                        <div className="shrink-0 mt-0.5">
+                          {log.status === 'success' && (
+                            <CheckCircle2 className="w-4 h-4 text-green-500" />
+                          )}
+                          {log.status === 'error' && (
+                            <XCircle className="w-4 h-4 text-red-500" />
+                          )}
+                          {log.status === 'info' && (
+                            <Info className="w-4 h-4 text-blue-500" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-xs font-medium text-foreground truncate">
+                              {
+                                (nodes.find((n) => n.id === log.nodeId)?.data as any)
+                                  ?.label || log.nodeId
+                              }
+                            </span>
+                            <span className="text-2xs text-muted-foreground shrink-0">
+                              {log.timestamp.toLocaleTimeString()}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {log.message}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2">
+              {testRunState.isRunning ? (
+                <Button
+                  onClick={stopTestRun}
+                  variant="destructive"
+                  className="flex-1"
+                >
+                  <StopCircle className="w-4 h-4 mr-2" />
+                  Stop
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    onClick={startTestRun}
+                    className="flex-1"
+                    disabled={nodes.length === 0}
+                  >
+                    <Play className="w-4 h-4 mr-2" />
+                    Run
+                  </Button>
+                  <Button
+                    onClick={resetTestRun}
+                    variant="outline"
+                    disabled={testRunState.logs.length === 0}
+                  >
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Reset
+                  </Button>
+                </>
+              )}
+            </div>
+
+            {/* Status Message */}
+            {!testRunState.isRunning && testRunState.progress === 100 && (
+              <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                <div className="flex items-center gap-2 text-sm text-green-600">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span className="font-medium">Test run completed</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}

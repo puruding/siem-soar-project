@@ -1,0 +1,361 @@
+# Chaos Mesh Configuration for SIEM/SOAR Platform
+# Implements chaos engineering experiments for reliability testing
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaos-testing
+  labels:
+    app: siem-chaos-testing
+
+---
+# RBAC for Chaos Mesh
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chaos-mesh-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces"]
+    verbs: ["get", "watch", "list", "delete"]
+  - apiGroups: ["chaos-mesh.org"]
+    resources: ["*"]
+    verbs: ["*"]
+
+---
+# Chaos Mesh Configuration
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Schedule
+metadata:
+  name: siem-chaos-schedule
+  namespace: chaos-testing
+spec:
+  schedule: "0 2 * * *"  # Run daily at 2 AM
+  type: Workflow
+  historyLimit: 5
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 60
+  workflow:
+    entry: chaos-workflow
+    templates:
+      - name: chaos-workflow
+        templateType: Serial
+        deadline: 2h
+        children:
+          - pod-failure
+          - network-delay
+          - cpu-stress
+          - memory-stress
+          - disk-fill
+
+---
+# Pod Failure Experiment
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-failure-detection
+  namespace: chaos-testing
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: detection-engine
+  duration: "60s"
+  gracePeriod: 0
+
+---
+# Network Delay Experiment
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: network-delay-gateway
+  namespace: chaos-testing
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: gateway
+  delay:
+    latency: "100ms"
+    correlation: "25"
+    jitter: "50ms"
+  duration: "120s"
+  direction: both
+
+---
+# CPU Stress Experiment
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: cpu-stress-pipeline
+  namespace: chaos-testing
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: pipeline
+  stressors:
+    cpu:
+      workers: 4
+      load: 80
+  duration: "180s"
+
+---
+# Memory Stress Experiment
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: memory-stress-query
+  namespace: chaos-testing
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: query-service
+  stressors:
+    memory:
+      workers: 2
+      size: "256MB"
+  duration: "120s"
+
+---
+# Disk Fill Experiment
+apiVersion: chaos-mesh.org/v1alpha1
+kind: IOChaos
+metadata:
+  name: disk-fill-collector
+  namespace: chaos-testing
+spec:
+  action: fault
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: collector
+  volumePath: /var/log
+  errno: 28  # ENOSPC - No space left on device
+  duration: "60s"
+  percent: 100
+
+---
+# DNS Failure Experiment
+apiVersion: chaos-mesh.org/v1alpha1
+kind: DNSChaos
+metadata:
+  name: dns-failure-external
+  namespace: chaos-testing
+spec:
+  action: error
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app.kubernetes.io/part-of: siem-platform
+  patterns:
+    - "external-api.example.com"
+    - "threat-intel.example.com"
+  duration: "60s"
+
+---
+# Time Skew Experiment (useful for detecting time-sensitive bugs)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: TimeChaos
+metadata:
+  name: time-skew-detection
+  namespace: chaos-testing
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: detection-engine
+  timeOffset: "+5m"  # Jump 5 minutes into the future
+  duration: "120s"
+
+---
+# HTTP Fault Injection
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HTTPChaos
+metadata:
+  name: http-abort-soar
+  namespace: chaos-testing
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: soar
+  target: Request
+  port: 8082
+  method: POST
+  path: /api/v1/playbooks/execute
+  abort: true
+  duration: "30s"
+
+---
+# Kernel Chaos (requires privileged containers)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: KernelChaos
+metadata:
+  name: kernel-panic-test
+  namespace: chaos-testing
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - siem-staging  # Only run in staging
+    labelSelectors:
+      chaos-enabled: "true"
+  failKernRequest:
+    callchain:
+      - funcname: "kmalloc"
+    failtype: 0
+    probability: 1
+  duration: "10s"
+
+---
+# Workflow for Comprehensive Chaos Testing
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: siem-resilience-test
+  namespace: chaos-testing
+spec:
+  entry: resilience-workflow
+  templates:
+    - name: resilience-workflow
+      templateType: Serial
+      deadline: 1h
+      children:
+        - baseline-check
+        - pod-chaos-phase
+        - network-chaos-phase
+        - resource-chaos-phase
+        - recovery-check
+
+    - name: baseline-check
+      templateType: Suspend
+      deadline: 2m
+
+    - name: pod-chaos-phase
+      templateType: Parallel
+      deadline: 10m
+      children:
+        - kill-gateway-pod
+        - kill-detection-pod
+
+    - name: kill-gateway-pod
+      templateType: PodChaos
+      deadline: 3m
+      podChaos:
+        action: pod-kill
+        mode: one
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app: gateway
+
+    - name: kill-detection-pod
+      templateType: PodChaos
+      deadline: 3m
+      podChaos:
+        action: pod-kill
+        mode: one
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app: detection-engine
+
+    - name: network-chaos-phase
+      templateType: Serial
+      deadline: 15m
+      children:
+        - add-network-delay
+        - partition-database
+
+    - name: add-network-delay
+      templateType: NetworkChaos
+      deadline: 5m
+      networkChaos:
+        action: delay
+        mode: all
+        selector:
+          namespaces:
+            - siem-production
+        delay:
+          latency: "200ms"
+          jitter: "50ms"
+        duration: "3m"
+
+    - name: partition-database
+      templateType: NetworkChaos
+      deadline: 5m
+      networkChaos:
+        action: partition
+        mode: all
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app: clickhouse
+        direction: both
+        duration: "1m"
+
+    - name: resource-chaos-phase
+      templateType: Parallel
+      deadline: 10m
+      children:
+        - cpu-stress-test
+        - memory-stress-test
+
+    - name: cpu-stress-test
+      templateType: StressChaos
+      deadline: 5m
+      stressChaos:
+        mode: all
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app: pipeline
+        stressors:
+          cpu:
+            workers: 2
+            load: 90
+        duration: "3m"
+
+    - name: memory-stress-test
+      templateType: StressChaos
+      deadline: 5m
+      stressChaos:
+        mode: all
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app: query-service
+        stressors:
+          memory:
+            workers: 1
+            size: "512MB"
+        duration: "3m"
+
+    - name: recovery-check
+      templateType: Suspend
+      deadline: 5m

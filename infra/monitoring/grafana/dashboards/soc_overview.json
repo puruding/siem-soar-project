@@ -1,0 +1,366 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "soc-overview",
+    "title": "SOC Overview Dashboard",
+    "tags": ["siem", "soar", "soc", "security"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "query": "prometheus"
+        },
+        {
+          "name": "environment",
+          "type": "custom",
+          "options": ["production", "staging", "dev"],
+          "current": {"text": "production", "value": "production"}
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "prometheus",
+          "expr": "changes(siem_deployment_version[5m]) > 0",
+          "enable": true
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Platform Health",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(up{job=~\"siem-.*\"}) / count(up{job=~\"siem-.*\"}) * 100",
+            "legendFormat": "Health"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "textMode": "value_and_name"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 90},
+                {"color": "green", "value": 99}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Events Per Second",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(rate(siem_events_ingested_total[5m]))",
+            "legendFormat": "EPS"
+          }
+        ],
+        "options": {
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "steps": [
+                {"color": "yellow", "value": null},
+                {"color": "green", "value": 10000},
+                {"color": "blue", "value": 30000}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Active Alerts",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(siem_alerts_active)",
+            "legendFormat": "Active Alerts"
+          }
+        ],
+        "options": {
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 100},
+                {"color": "red", "value": 500}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Open Cases",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(siem_cases_open)",
+            "legendFormat": "Open Cases"
+          }
+        ],
+        "options": {
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 50},
+                {"color": "red", "value": 100}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Event Ingestion Rate",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {
+            "expr": "sum(rate(siem_events_ingested_total[5m]))",
+            "legendFormat": "Total EPS"
+          },
+          {
+            "expr": "sum(rate(siem_events_ingested_total[5m])) by (source)",
+            "legendFormat": "{{source}}"
+          }
+        ],
+        "options": {
+          "legend": {"displayMode": "table", "placement": "right"}
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {"lineWidth": 2, "fillOpacity": 10}
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Alerts by Severity",
+        "type": "piechart",
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "sum(siem_alerts_total) by (severity)",
+            "legendFormat": "{{severity}}"
+          }
+        ],
+        "options": {
+          "legend": {"displayMode": "table", "placement": "right"}
+        },
+        "fieldConfig": {
+          "overrides": [
+            {"matcher": {"id": "byName", "options": "critical"}, "properties": [{"id": "color", "value": {"fixedColor": "red"}}]},
+            {"matcher": {"id": "byName", "options": "high"}, "properties": [{"id": "color", "value": {"fixedColor": "orange"}}]},
+            {"matcher": {"id": "byName", "options": "medium"}, "properties": [{"id": "color", "value": {"fixedColor": "yellow"}}]},
+            {"matcher": {"id": "byName", "options": "low"}, "properties": [{"id": "color", "value": {"fixedColor": "green"}}]}
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "title": "Playbook Executions",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 4},
+        "targets": [
+          {
+            "expr": "sum(rate(siem_playbook_executions_total[5m])) by (status)",
+            "legendFormat": "{{status}}"
+          }
+        ],
+        "options": {
+          "legend": {"displayMode": "table", "placement": "bottom"}
+        }
+      },
+      {
+        "id": 8,
+        "title": "Detection Rule Matches",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "targets": [
+          {
+            "expr": "topk(10, sum(rate(siem_rule_matches_total[5m])) by (rule_name))",
+            "legendFormat": "{{rule_name}}"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "AI Triage Performance",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(siem_ai_triage_latency_seconds_bucket[5m]))",
+            "legendFormat": "P50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(siem_ai_triage_latency_seconds_bucket[5m]))",
+            "legendFormat": "P95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(siem_ai_triage_latency_seconds_bucket[5m]))",
+            "legendFormat": "P99"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {"unit": "s"}
+        }
+      },
+      {
+        "id": 10,
+        "title": "Mean Time to Detect (MTTD)",
+        "type": "gauge",
+        "gridPos": {"h": 6, "w": 6, "x": 0, "y": 20},
+        "targets": [
+          {
+            "expr": "avg(siem_alert_detection_latency_seconds)",
+            "legendFormat": "MTTD"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "max": 60,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 30},
+                {"color": "red", "value": 60}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Mean Time to Respond (MTTR)",
+        "type": "gauge",
+        "gridPos": {"h": 6, "w": 6, "x": 6, "y": 20},
+        "targets": [
+          {
+            "expr": "avg(siem_alert_response_latency_seconds)",
+            "legendFormat": "MTTR"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "max": 300,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 120},
+                {"color": "red", "value": 300}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "False Positive Rate",
+        "type": "gauge",
+        "gridPos": {"h": 6, "w": 6, "x": 12, "y": 20},
+        "targets": [
+          {
+            "expr": "sum(rate(siem_alerts_false_positive_total[24h])) / sum(rate(siem_alerts_total[24h])) * 100",
+            "legendFormat": "FP Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "max": 50,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 20},
+                {"color": "red", "value": 40}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 13,
+        "title": "Automation Rate",
+        "type": "gauge",
+        "gridPos": {"h": 6, "w": 6, "x": 18, "y": 20},
+        "targets": [
+          {
+            "expr": "sum(rate(siem_alerts_automated_total[24h])) / sum(rate(siem_alerts_total[24h])) * 100",
+            "legendFormat": "Automation Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 30},
+                {"color": "green", "value": 50}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 14,
+        "title": "Recent Critical Alerts",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 26},
+        "targets": [
+          {
+            "expr": "siem_alert_info{severity=\"critical\"}",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "transformations": [
+          {"id": "organize", "options": {"excludeByName": {"__name__": true, "job": true}}}
+        ]
+      }
+    ]
+  }
+}

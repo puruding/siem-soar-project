@@ -1,0 +1,200 @@
+version: '3.8'
+
+services:
+  # vLLM Inference Server
+  vllm:
+    image: vllm/vllm-openai:v0.4.0
+    container_name: vllm-server
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/models
+      - VLLM_CONFIG=/config/vllm.yaml
+    volumes:
+      - ./config/vllm.yaml:/config/vllm.yaml:ro
+      - ./config/models.yaml:/config/models.yaml:ro
+      - vllm_models:/models
+      - vllm_cache:/root/.cache
+    ports:
+      - "8080:8000"
+    command: >
+      --model /models/solar-10.7b-instruct
+      --served-model-name solar-10.7b
+      --host 0.0.0.0
+      --port 8000
+      --tensor-parallel-size 1
+      --max-model-len 4096
+      --gpu-memory-utilization 0.9
+      --dtype half
+      --trust-remote-code
+      --api-key ${VLLM_API_KEY:-default-api-key}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - llm-network
+    restart: unless-stopped
+
+  # vLLM with SOLAR Korean Model (Alternative)
+  vllm-korean:
+    image: vllm/vllm-openai:v0.4.0
+    container_name: vllm-korean
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/models
+    volumes:
+      - ./config/vllm.yaml:/config/vllm.yaml:ro
+      - vllm_models:/models
+      - vllm_cache:/root/.cache
+    ports:
+      - "8081:8000"
+    command: >
+      --model /models/solar-10.7b-instruct-ko
+      --served-model-name solar-ko
+      --host 0.0.0.0
+      --port 8000
+      --tensor-parallel-size 1
+      --max-model-len 4096
+      --gpu-memory-utilization 0.9
+      --dtype half
+      --trust-remote-code
+      --api-key ${VLLM_API_KEY:-default-api-key}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - llm-network
+    profiles:
+      - korean
+    restart: unless-stopped
+
+  # Embedding Model Server
+  embedding-server:
+    image: ghcr.io/huggingface/text-embeddings-inference:1.2
+    container_name: embedding-server
+    runtime: nvidia
+    volumes:
+      - embedding_models:/data
+    ports:
+      - "8082:80"
+    command: >
+      --model-id BAAI/bge-m3
+      --port 80
+      --max-batch-tokens 16384
+      --max-concurrent-requests 512
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - llm-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Reranker Server
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:1.2
+    container_name: reranker-server
+    runtime: nvidia
+    volumes:
+      - reranker_models:/data
+    ports:
+      - "8083:80"
+    command: >
+      --model-id BAAI/bge-reranker-v2-m3
+      --port 80
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - llm-network
+    profiles:
+      - full
+    restart: unless-stopped
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:v1.8.0
+    container_name: qdrant
+    volumes:
+      - qdrant_storage:/qdrant/storage
+      - qdrant_snapshots:/qdrant/snapshots
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__LOG_LEVEL=INFO
+    networks:
+      - llm-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Model Download Helper (One-shot)
+  model-downloader:
+    image: python:3.11-slim
+    container_name: model-downloader
+    volumes:
+      - vllm_models:/models
+      - embedding_models:/embedding_models
+      - ./scripts:/scripts:ro
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+    command: python /scripts/download_models.py
+    profiles:
+      - download
+    networks:
+      - llm-network
+
+networks:
+  llm-network:
+    driver: bridge
+
+volumes:
+  vllm_models:
+  vllm_cache:
+  embedding_models:
+  reranker_models:
+  qdrant_storage:
+  qdrant_snapshots:

@@ -1,0 +1,104 @@
+# SIEM-SOAR Platform - Global Configuration
+# This values file controls all sub-charts
+
+global:
+  # Docker registry configuration
+  imageRegistry: ghcr.io/siem-soar-platform
+  imagePullSecrets:
+    - name: ghcr-secret
+
+  # Environment
+  environment: dev
+
+  # Ingress configuration
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    domain: siem-soar.example.com
+    tls: true
+
+  # Database connections
+  clickhouse:
+    host: clickhouse.siem-data.svc.cluster.local
+    port: 9000
+    database: siem
+    user: default
+    existingSecret: clickhouse-secret
+    secretKey: password
+
+  postgresql:
+    host: postgresql.siem-data.svc.cluster.local
+    port: 5432
+    database: siem
+    user: siem
+    existingSecret: postgresql-secret
+    secretKey: password
+
+  redis:
+    host: redis.siem-data.svc.cluster.local
+    port: 6379
+    existingSecret: redis-secret
+    secretKey: password
+
+  kafka:
+    brokers: kafka-0.kafka.siem-data.svc.cluster.local:9092,kafka-1.kafka.siem-data.svc.cluster.local:9092,kafka-2.kafka.siem-data.svc.cluster.local:9092
+
+  # Service mesh / tracing
+  tracing:
+    enabled: true
+    endpoint: http://jaeger-collector.siem-monitoring.svc.cluster.local:14268/api/traces
+
+  # Metrics
+  metrics:
+    enabled: true
+    port: 9090
+    path: /metrics
+
+  # Security
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+# Sub-chart enable/disable flags
+gateway:
+  enabled: true
+
+detection:
+  enabled: true
+
+soar:
+  enabled: true
+
+ti:
+  enabled: true
+
+query:
+  enabled: true
+
+case:
+  enabled: true
+
+collector:
+  enabled: true
+
+pipeline:
+  enabled: true
+
+ai-triage:
+  enabled: true
+
+ai-copilot:
+  enabled: false  # Enable after LLM infrastructure is ready
+
+ai-agentic:
+  enabled: false  # Enable after AI-Advanced phase

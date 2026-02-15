@@ -1,0 +1,217 @@
+# OWASP ZAP (Zed Attack Proxy) Configuration for SIEM/SOAR Platform
+# This configuration defines automated security scanning settings
+
+# Environment settings
+env:
+  contexts:
+    - name: "SIEM-SOAR-API"
+      urls:
+        - "http://localhost:8080"
+        - "http://localhost:8081"
+        - "http://localhost:8082"
+      includePaths:
+        - "http://localhost:8080/api/.*"
+        - "http://localhost:8081/api/.*"
+        - "http://localhost:8082/api/.*"
+      excludePaths:
+        - ".*\\.js"
+        - ".*\\.css"
+        - ".*\\.png"
+        - ".*\\.jpg"
+      authentication:
+        method: "httpAuthentication"
+        parameters:
+          hostname: "localhost"
+          port: 8080
+          realm: "api"
+
+  parameters:
+    failOnError: true
+    failOnWarning: false
+    progressToStdout: true
+
+# Jobs to run
+jobs:
+  # Spider the application to discover endpoints
+  - type: spider
+    parameters:
+      context: "SIEM-SOAR-API"
+      maxDuration: 5  # minutes
+      maxDepth: 5
+      maxChildren: 10
+
+  # OpenAPI import for API scanning
+  - type: openapi
+    parameters:
+      apiFile: "docs/api/openapi.yaml"
+      apiUrl: "http://localhost:8080/api/v1/openapi.yaml"
+      context: "SIEM-SOAR-API"
+      targetUrl: "http://localhost:8080"
+
+  # Active scan for vulnerabilities
+  - type: activeScan
+    parameters:
+      context: "SIEM-SOAR-API"
+      maxRuleDurationInMins: 5
+      maxScanDurationInMins: 30
+      # Scan policy
+      policy: "API-Scan-Policy"
+      threadPerHost: 5
+
+  # Passive scan rules
+  - type: passiveScan-config
+    parameters:
+      maxAlertsPerRule: 10
+      scanOnlyInScope: true
+      maxBodySizeInBytesToScan: 1048576  # 1MB
+
+  # Generate report
+  - type: report
+    parameters:
+      template: "modern"
+      reportFile: "zap-report.html"
+      reportTitle: "SIEM/SOAR Platform Security Scan Report"
+      reportDescription: "Automated DAST scan results"
+
+  # Output alerts summary
+  - type: outputSummary
+    parameters:
+      format: "Long"
+      summaryFile: "zap-summary.json"
+
+# Scan policies
+policies:
+  - name: "API-Scan-Policy"
+    rules:
+      # SQL Injection
+      - id: 40018
+        name: "SQL Injection"
+        strength: "INSANE"
+        threshold: "LOW"
+
+      # Cross-Site Scripting (XSS)
+      - id: 40012
+        name: "Cross Site Scripting (Reflected)"
+        strength: "HIGH"
+        threshold: "MEDIUM"
+
+      - id: 40014
+        name: "Cross Site Scripting (Persistent)"
+        strength: "HIGH"
+        threshold: "MEDIUM"
+
+      # Path Traversal
+      - id: 6
+        name: "Path Traversal"
+        strength: "HIGH"
+        threshold: "LOW"
+
+      # Remote File Inclusion
+      - id: 7
+        name: "Remote File Inclusion"
+        strength: "HIGH"
+        threshold: "MEDIUM"
+
+      # Command Injection
+      - id: 90020
+        name: "Remote OS Command Injection"
+        strength: "INSANE"
+        threshold: "LOW"
+
+      # Server Side Request Forgery
+      - id: 40046
+        name: "Server Side Request Forgery"
+        strength: "HIGH"
+        threshold: "MEDIUM"
+
+      # LDAP Injection
+      - id: 40015
+        name: "LDAP Injection"
+        strength: "HIGH"
+        threshold: "MEDIUM"
+
+      # XML External Entity
+      - id: 90023
+        name: "XML External Entity Attack"
+        strength: "HIGH"
+        threshold: "LOW"
+
+      # Authentication Bypass
+      - id: 10101
+        name: "Authentication Bypass"
+        strength: "HIGH"
+        threshold: "MEDIUM"
+
+      # Insecure HTTP Methods
+      - id: 90028
+        name: "Insecure HTTP Method"
+        strength: "MEDIUM"
+        threshold: "LOW"
+
+      # Information Disclosure
+      - id: 10023
+        name: "Information Disclosure - Debug Errors"
+        strength: "MEDIUM"
+        threshold: "MEDIUM"
+
+      # Security Misconfiguration
+      - id: 10035
+        name: "Strict-Transport-Security Header"
+        strength: "MEDIUM"
+        threshold: "LOW"
+
+      - id: 10021
+        name: "X-Content-Type-Options Header Missing"
+        strength: "MEDIUM"
+        threshold: "LOW"
+
+# Alert filters to reduce noise
+alertFilters:
+  # Ignore known false positives
+  - ruleId: 10015  # Incomplete or No Cache-control Header
+    newRisk: "Informational"
+    context: "SIEM-SOAR-API"
+    url: ".*"
+    urlRegex: true
+
+  - ruleId: 10096  # Timestamp Disclosure
+    newRisk: "False Positive"
+    context: "SIEM-SOAR-API"
+
+  # Downgrade for internal APIs
+  - ruleId: 10038  # Content Security Policy Header Not Set
+    newRisk: "Low"
+    context: "SIEM-SOAR-API"
+    url: ".*/api/.*"
+    urlRegex: true
+
+# Authentication configuration
+authentication:
+  # API Key authentication
+  - type: "apiKey"
+    header: "X-API-Key"
+    value: "${API_KEY}"
+
+  # JWT Bearer token
+  - type: "bearer"
+    token: "${JWT_TOKEN}"
+
+# Hooks for custom processing
+hooks:
+  # Before each active scan
+  beforeActiveScan:
+    - type: "script"
+      scriptPath: "scripts/pre-scan-setup.js"
+
+  # After scan completion
+  afterScan:
+    - type: "script"
+      scriptPath: "scripts/post-scan-cleanup.js"
+
+# Risk thresholds for CI/CD integration
+riskThresholds:
+  # Fail the build if these are exceeded
+  high: 0      # No high-risk vulnerabilities allowed
+  medium: 5    # Allow up to 5 medium-risk
+  low: 20      # Allow up to 20 low-risk
+  informational: -1  # Unlimited informational

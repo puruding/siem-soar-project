@@ -1,0 +1,302 @@
+# SIEM-SOAR 개발 환경 Docker Compose
+# 사용법: docker-compose -f docker-compose.dev.yml up -d
+
+version: "3.8"
+
+services:
+  # ===================
+  # DATABASES
+  # ===================
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: siem-clickhouse-dev
+    ports:
+      - "8123:8123" # HTTP
+      - "9000:9000" # Native
+    environment:
+      CLICKHOUSE_DB: siem
+      CLICKHOUSE_USER: siem
+      CLICKHOUSE_PASSWORD: siem_dev_password
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      - ./infra/clickhouse/cluster/config.xml:/etc/clickhouse-server/config.d/config.xml:ro
+      - ./infra/clickhouse/cluster/users.xml:/etc/clickhouse-server/users.d/users.xml:ro
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - siem-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: siem-postgres-dev
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: siem
+      POSTGRES_USER: siem
+      POSTGRES_PASSWORD: siem_dev_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U siem -d siem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - siem-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: siem-redis-dev
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass siem_dev_password --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "siem_dev_password", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - siem-network
+
+  # ===================
+  # MESSAGE QUEUE
+  # ===================
+
+  kafka:
+    image: bitnamilegacy/kafka:3.6
+    container_name: siem-kafka-dev
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      # KRaft mode (no Zookeeper)
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,INTERNAL://:29092
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # Performance
+      KAFKA_CFG_NUM_PARTITIONS: 8
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_CFG_LOG_RETENTION_HOURS: 24
+      KAFKA_CFG_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_CFG_MESSAGE_MAX_BYTES: 10485760
+      ALLOW_PLAINTEXT_LISTENER: yes
+    volumes:
+      - kafka_data:/bitnami/kafka
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "kafka-broker-api-versions.sh --bootstrap-server localhost:9092",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - siem-network
+
+  kafka-init:
+    image: bitnamilegacy/kafka:3.6
+    container_name: siem-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      echo 'Creating Kafka topics...'
+      kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic raw-logs --partitions 8 --replication-factor 1
+      kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic parsed-events --partitions 8 --replication-factor 1
+      kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic normalized-events --partitions 8 --replication-factor 1
+      kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic enriched-events --partitions 8 --replication-factor 1
+      kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic alerts --partitions 8 --replication-factor 1
+      kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic dlq-events --partitions 4 --replication-factor 1
+      echo 'Topics created successfully!'
+      kafka-topics.sh --list --bootstrap-server kafka:9092
+      "
+    networks:
+      - siem-network
+
+  # ===================
+  # WORKFLOW ENGINE
+  # ===================
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    container_name: siem-temporal-dev
+    ports:
+      - "7233:7233"
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=siem
+      - POSTGRES_PWD=siem_dev_password
+      - POSTGRES_SEEDS=postgres
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development.yaml
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./infra/temporal/config:/etc/temporal/config/dynamicconfig:ro
+    networks:
+      - siem-network
+
+  temporal-ui:
+    image: temporalio/ui:latest
+    container_name: siem-temporal-ui-dev
+    ports:
+      - "8088:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+    depends_on:
+      - temporal
+    networks:
+      - siem-network
+
+  # ===================
+  # AUTHENTICATION
+  # ===================
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: siem-keycloak-dev
+    ports:
+      - "8180:8080"
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/siem
+      KC_DB_USERNAME: siem
+      KC_DB_PASSWORD: siem_dev_password
+    command: start-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - siem-network
+
+  # ===================
+  # MONITORING
+  # ===================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: siem-prometheus-dev
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/monitoring/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    networks:
+      - siem-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: siem-grafana-dev
+    ports:
+      - "3030:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - siem-network
+
+  # ===================
+  # OBJECT STORAGE
+  # ===================
+
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: siem-minio-dev
+    ports:
+      - "9001:9000" # API
+      - "9002:9001" # Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - siem-network
+
+  # ===================
+  # VECTOR (Optional Pipeline)
+  # ===================
+
+  vector:
+    image: timberio/vector:0.34.0-debian
+    container_name: siem-vector-dev
+    ports:
+      - "8686:8686" # API
+      - "9514:9514" # Syslog UDP
+    environment:
+      - CLICKHOUSE_ENDPOINT=http://clickhouse:8123
+      - CLICKHOUSE_USER=siem
+      - CLICKHOUSE_PASSWORD=siem_dev_password
+      - KAFKA_BROKERS=kafka:29092
+    volumes:
+      - ./infra/vector:/etc/vector:ro
+    command: --config /etc/vector/vector.toml
+    depends_on:
+      - kafka
+      - clickhouse
+    networks:
+      - siem-network
+    profiles:
+      - vector # docker-compose --profile vector up
+
+# ===================
+# NETWORKS
+# ===================
+
+networks:
+  siem-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ===================
+# VOLUMES
+# ===================
+
+volumes:
+  clickhouse_data:
+  clickhouse_logs:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  prometheus_data:
+  grafana_data:
+  minio_data:

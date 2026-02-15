@@ -1,0 +1,16 @@
+name: c2_detection
+version: "1.0"
+description: Detect and investigate C2 communications
+category: investigation
+severity: critical
+steps:
+  - id: analyze_network_traffic
+    action: network.get_unusual_connections
+  - id: check_known_c2_iocs
+    action: ti.check_c2_indicators
+  - id: identify_beaconing
+    action: network.detect_beaconing
+  - id: identify_infected_hosts
+    action: network.get_communicating_hosts
+  - id: block_c2_communication
+    action: firewall.block_domain

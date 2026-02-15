@@ -1,0 +1,16 @@
+name: data_exfiltration
+version: "1.0"
+description: Investigate data exfiltration attempts
+category: investigation
+severity: critical
+steps:
+  - id: analyze_outbound_traffic
+    action: network.get_large_transfers
+  - id: identify_data_accessed
+    action: dlp.get_accessed_files
+  - id: check_external_destinations
+    action: network.get_external_ips
+  - id: correlate_with_ti
+    action: ti.check_destinations
+  - id: calculate_data_volume
+    action: network.calculate_transfer_size

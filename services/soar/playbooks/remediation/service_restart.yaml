@@ -1,0 +1,16 @@
+name: service_restart
+version: "1.0"
+description: Restart services after security updates
+category: remediation
+severity: low
+steps:
+  - id: stop_service
+    action: system.stop_service
+  - id: verify_stopped
+    action: system.check_service_status
+  - id: clear_cache
+    action: system.clear_cache
+  - id: start_service
+    action: system.start_service
+  - id: health_check
+    action: system.health_check

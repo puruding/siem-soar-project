@@ -1,0 +1,206 @@
+---
+# Green Environment Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: siem-platform-green
+  namespace: siem-prod
+  labels:
+    app: siem-platform
+    version: green
+    environment: production
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: siem-platform
+      version: green
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: siem-platform
+        version: green
+        environment: production
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: siem-platform
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: siem-platform
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: gateway
+          image: siem-platform/gateway:green
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+          env:
+            - name: ENVIRONMENT
+              value: "production"
+            - name: VERSION
+              value: "green"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: siem-config
+                  key: kafka.brokers
+            - name: CLICKHOUSE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: siem-config
+                  key: clickhouse.host
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: siem-config
+                  key: redis.host
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/siem/config
+              readOnly: true
+            - name: secrets
+              mountPath: /etc/siem/secrets
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: siem-config
+        - name: secrets
+          secret:
+            secretName: siem-secrets
+
+---
+# Green Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: siem-platform-green
+  namespace: siem-prod
+  labels:
+    app: siem-platform
+    version: green
+spec:
+  type: ClusterIP
+  selector:
+    app: siem-platform
+    version: green
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+
+---
+# Green HPA
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: siem-platform-green-hpa
+  namespace: siem-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: siem-platform-green
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: "1000"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+        - type: Pods
+          value: 4
+          periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+      selectPolicy: Min
+
+---
+# Green PodDisruptionBudget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: siem-platform-green-pdb
+  namespace: siem-prod
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: siem-platform
+      version: green

@@ -1,0 +1,157 @@
+# AlertManager Configuration for SIEM-SOAR Platform
+
+global:
+  resolve_timeout: 5m
+  slack_api_url: 'https://hooks.slack.com/services/xxx/xxx/xxx'
+  pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+# Templates
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route tree
+route:
+  receiver: 'default-receiver'
+  group_by: ['alertname', 'namespace', 'service', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    # Critical alerts - immediate escalation
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      group_wait: 10s
+      repeat_interval: 1h
+      continue: true
+
+    # Data layer alerts
+    - match:
+        component: data-layer
+      receiver: 'data-team-receiver'
+      routes:
+        - match:
+            severity: critical
+          receiver: 'data-critical-receiver'
+
+    # AI service alerts
+    - match:
+        namespace: siem-ai
+      receiver: 'ai-team-receiver'
+      routes:
+        - match:
+            severity: critical
+          receiver: 'ai-critical-receiver'
+
+    # Security alerts (from the SIEM itself)
+    - match:
+        type: security
+      receiver: 'security-receiver'
+      group_by: ['alertname', 'source']
+      repeat_interval: 30m
+
+    # Warning alerts
+    - match:
+        severity: warning
+      receiver: 'warning-receiver'
+      repeat_interval: 8h
+
+    # Info alerts - low priority
+    - match:
+        severity: info
+      receiver: 'info-receiver'
+      repeat_interval: 24h
+
+# Inhibition rules
+inhibit_rules:
+  # Critical inhibits warning for same alert
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'namespace', 'service']
+
+  # Cluster-level issues inhibit pod-level
+  - source_match:
+      alertname: 'KubernetesNodeNotReady'
+    target_match:
+      alertname: 'KubernetesPodCrashLooping'
+    equal: ['node']
+
+# Receivers
+receivers:
+  - name: 'default-receiver'
+    slack_configs:
+      - channel: '#siem-alerts'
+        send_resolved: true
+        title: '[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+
+  - name: 'critical-receiver'
+    slack_configs:
+      - channel: '#siem-critical'
+        send_resolved: true
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+        title: '[CRITICAL] {{ .GroupLabels.alertname }}'
+        text: |
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          *Service:* {{ .GroupLabels.service }}
+          *Namespace:* {{ .GroupLabels.namespace }}
+    pagerduty_configs:
+      - routing_key: 'xxx-pagerduty-key'
+        severity: critical
+        description: '{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+
+  - name: 'warning-receiver'
+    slack_configs:
+      - channel: '#siem-warnings'
+        send_resolved: true
+        title: '[WARNING] {{ .GroupLabels.alertname }}'
+        text: '{{ .CommonAnnotations.summary }}'
+
+  - name: 'info-receiver'
+    slack_configs:
+      - channel: '#siem-info'
+        send_resolved: false
+        title: '[INFO] {{ .GroupLabels.alertname }}'
+
+  - name: 'data-team-receiver'
+    slack_configs:
+      - channel: '#siem-data-team'
+        send_resolved: true
+
+  - name: 'data-critical-receiver'
+    slack_configs:
+      - channel: '#siem-data-team'
+        send_resolved: true
+    pagerduty_configs:
+      - routing_key: 'xxx-data-team-key'
+        severity: critical
+
+  - name: 'ai-team-receiver'
+    slack_configs:
+      - channel: '#siem-ai-team'
+        send_resolved: true
+
+  - name: 'ai-critical-receiver'
+    slack_configs:
+      - channel: '#siem-ai-team'
+        send_resolved: true
+    pagerduty_configs:
+      - routing_key: 'xxx-ai-team-key'
+        severity: critical
+
+  - name: 'security-receiver'
+    slack_configs:
+      - channel: '#security-alerts'
+        send_resolved: true
+        title: '[SECURITY] {{ .GroupLabels.alertname }}'
+        text: |
+          *Alert:* {{ .CommonAnnotations.summary }}
+          *Source:* {{ .GroupLabels.source }}
+          *Count:* {{ len .Alerts }}
+    webhook_configs:
+      - url: 'http://siem-soar.siem-services.svc.cluster.local:8080/api/v1/alerts/internal'
+        send_resolved: true

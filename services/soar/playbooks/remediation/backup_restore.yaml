@@ -1,0 +1,16 @@
+name: backup_restore
+version: "1.0"
+description: Restore data from backup after data loss
+category: remediation
+severity: high
+steps:
+  - id: identify_restore_point
+    action: backup.list_snapshots
+  - id: validate_backup
+    action: backup.verify_integrity
+  - id: prepare_restore
+    action: system.prepare_restore
+  - id: restore_data
+    action: backup.restore
+  - id: verify_data
+    action: data.verify_integrity

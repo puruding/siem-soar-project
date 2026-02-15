@@ -1,0 +1,16 @@
+name: brute_force_investigation
+version: "1.0"
+description: Investigate brute force attack attempts
+category: investigation
+severity: high
+steps:
+  - id: identify_attack_source
+    action: auth.get_failed_logins
+  - id: check_ip_reputation
+    action: ti.check_ip
+  - id: identify_targeted_accounts
+    action: auth.get_target_users
+  - id: check_account_compromise
+    action: auth.check_successful_logins
+  - id: block_attacker_ip
+    action: firewall.block_ip

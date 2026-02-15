@@ -1,0 +1,188 @@
+{
+  "alerts": [
+    {
+      "alert_id": "alert-001",
+      "title": "Suspicious PowerShell Encoded Command Execution",
+      "description": "PowerShell executed with encoded command parameter, commonly used by attackers to obfuscate malicious commands.",
+      "severity": "high",
+      "category": "execution",
+      "status": "new",
+      "source": "detection_engine",
+      "rule_id": "sigma-powershell-encoded",
+      "events": ["evt-001"],
+      "mitre_techniques": ["T1059.001", "T1027"],
+      "mitre_tactics": ["execution", "defense_evasion"],
+      "created_at": "2024-01-15T10:30:05.000Z",
+      "enrichments": {
+        "threat_intel": {
+          "indicators_matched": 0
+        },
+        "asset": {
+          "hostname": "workstation-001",
+          "owner": "IT Department",
+          "criticality": "medium"
+        }
+      }
+    },
+    {
+      "alert_id": "alert-002",
+      "title": "Connection to Known Malicious IP",
+      "description": "Outbound network connection detected to IP address associated with known malware infrastructure.",
+      "severity": "critical",
+      "category": "command_and_control",
+      "status": "new",
+      "source": "detection_engine",
+      "rule_id": "ti-malicious-ip",
+      "events": ["evt-002"],
+      "mitre_techniques": ["T1071.001"],
+      "mitre_tactics": ["command_and_control"],
+      "created_at": "2024-01-15T10:31:02.000Z",
+      "enrichments": {
+        "threat_intel": {
+          "ip": "185.143.220.100",
+          "reputation": "malicious",
+          "score": 95,
+          "categories": ["malware", "c2"],
+          "first_seen": "2023-06-15",
+          "reports": 47
+        },
+        "geoip": {
+          "country": "RU",
+          "city": "Moscow",
+          "asn": "AS12345",
+          "org": "Suspicious Hosting"
+        }
+      }
+    },
+    {
+      "alert_id": "alert-003",
+      "title": "Malicious File Created",
+      "description": "File with known malicious hash was created on the system.",
+      "severity": "critical",
+      "category": "malware",
+      "status": "new",
+      "source": "detection_engine",
+      "rule_id": "ti-malicious-hash",
+      "events": ["evt-003"],
+      "mitre_techniques": ["T1105"],
+      "mitre_tactics": ["command_and_control"],
+      "created_at": "2024-01-15T10:32:01.000Z",
+      "enrichments": {
+        "threat_intel": {
+          "hash": "abc123def456",
+          "malware_family": "Emotet",
+          "first_seen": "2023-12-01",
+          "detections": 58
+        },
+        "virustotal": {
+          "detections": "52/68",
+          "scan_date": "2024-01-10"
+        }
+      }
+    },
+    {
+      "alert_id": "alert-004",
+      "title": "Persistence Mechanism Detected",
+      "description": "Registry run key was modified to establish persistence, indicating potential malware installation.",
+      "severity": "high",
+      "category": "persistence",
+      "status": "new",
+      "source": "detection_engine",
+      "rule_id": "sigma-registry-run-key",
+      "events": ["evt-007"],
+      "mitre_techniques": ["T1547.001"],
+      "mitre_tactics": ["persistence"],
+      "created_at": "2024-01-15T10:50:01.000Z",
+      "enrichments": {}
+    },
+    {
+      "alert_id": "alert-005",
+      "title": "Brute Force Login Attempt",
+      "description": "Multiple failed login attempts detected from single source, indicating potential brute force attack.",
+      "severity": "high",
+      "category": "credential_access",
+      "status": "new",
+      "source": "detection_engine",
+      "rule_id": "correlation-brute-force",
+      "events": ["evt-005"],
+      "mitre_techniques": ["T1110.001"],
+      "mitre_tactics": ["credential_access"],
+      "created_at": "2024-01-15T10:45:00.000Z",
+      "correlation": {
+        "count": 15,
+        "window": "5m",
+        "group_by": "source.ip"
+      },
+      "enrichments": {
+        "threat_intel": {
+          "ip": "10.0.0.200",
+          "reputation": "suspicious",
+          "score": 65
+        }
+      }
+    },
+    {
+      "alert_id": "alert-006",
+      "title": "DNS Query to Known C2 Domain",
+      "description": "DNS query to domain associated with command and control infrastructure.",
+      "severity": "critical",
+      "category": "command_and_control",
+      "status": "new",
+      "source": "detection_engine",
+      "rule_id": "ti-malicious-domain",
+      "events": ["evt-006"],
+      "mitre_techniques": ["T1071.004"],
+      "mitre_tactics": ["command_and_control"],
+      "created_at": "2024-01-15T10:45:01.000Z",
+      "enrichments": {
+        "threat_intel": {
+          "domain": "malicious-c2-server.com",
+          "reputation": "malicious",
+          "category": "c2",
+          "first_seen": "2024-01-01"
+        }
+      }
+    },
+    {
+      "alert_id": "alert-007",
+      "title": "Phishing Email Detected",
+      "description": "Email containing suspicious links and attachments detected.",
+      "severity": "medium",
+      "category": "initial_access",
+      "status": "triaged",
+      "source": "email_gateway",
+      "rule_id": "phishing-detection",
+      "events": [],
+      "mitre_techniques": ["T1566.001"],
+      "mitre_tactics": ["initial_access"],
+      "created_at": "2024-01-15T09:00:00.000Z",
+      "triage_result": {
+        "category": "phishing",
+        "confidence": 0.92,
+        "is_true_positive": true,
+        "priority": 75
+      }
+    },
+    {
+      "alert_id": "alert-008",
+      "title": "Data Exfiltration Attempt",
+      "description": "Large volume of data transferred to external IP during non-business hours.",
+      "severity": "critical",
+      "category": "exfiltration",
+      "status": "escalated",
+      "source": "detection_engine",
+      "rule_id": "anomaly-data-exfil",
+      "events": [],
+      "mitre_techniques": ["T1041"],
+      "mitre_tactics": ["exfiltration"],
+      "created_at": "2024-01-15T03:30:00.000Z",
+      "enrichments": {
+        "anomaly": {
+          "baseline_bytes": 1000000,
+          "actual_bytes": 500000000,
+          "deviation": 500
+        }
+      }
+    }
+  ]
+}

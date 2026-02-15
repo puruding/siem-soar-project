@@ -1,0 +1,53 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: siem-platform-staging
+  namespace: argocd
+  labels:
+    environment: staging
+    app.kubernetes.io/part-of: siem-soar-platform
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: siem-platform
+
+  source:
+    repoURL: https://github.com/siem-soar-platform/siem-soar-platform.git
+    targetRevision: release/*
+    path: infra/helm/siem-platform
+    helm:
+      releaseName: siem-platform-staging
+      valueFiles:
+        - values.yaml
+        - values-staging.yaml
+      parameters:
+        - name: global.environment
+          value: staging
+        - name: global.ingress.domain
+          value: staging.siem-soar.example.com
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: siem-services
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+
+  revisionHistoryLimit: 10

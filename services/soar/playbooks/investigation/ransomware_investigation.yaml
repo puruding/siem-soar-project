@@ -1,0 +1,18 @@
+name: ransomware_investigation
+version: "1.0"
+description: Investigate ransomware infection
+category: investigation
+severity: critical
+steps:
+  - id: identify_ransomware_variant
+    action: malware.identify_variant
+  - id: find_infection_vector
+    action: forensics.analyze_infection
+  - id: identify_encrypted_files
+    action: filesystem.get_encrypted_files
+  - id: check_backup_integrity
+    action: backup.verify_backups
+  - id: identify_spread_mechanism
+    action: network.trace_infection
+  - id: check_decryption_options
+    action: ti.check_decryption_tools

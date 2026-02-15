@@ -1,0 +1,14 @@
+name: privilege_escalation
+version: "1.0"
+description: Investigate privilege escalation attempts
+category: investigation
+severity: high
+steps:
+  - id: identify_privilege_changes
+    action: ad.get_privilege_changes
+  - id: review_elevation_logs
+    action: audit.query_elevation_events
+  - id: identify_exploited_vulnerability
+    action: vuln_scan.correlate_exploits
+  - id: check_unauthorized_admin_access
+    action: ad.check_admin_group

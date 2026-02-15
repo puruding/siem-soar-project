@@ -1,0 +1,60 @@
+# Threat Intelligence Engine Configuration
+replicaCount: 2
+
+image:
+  repository: ghcr.io/siem-soar-platform/ti
+  pullPolicy: IfNotPresent
+  tag: ""
+
+service:
+  type: ClusterIP
+  grpcPort: 9000
+  metricsPort: 9090
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 4Gi
+  requests:
+    cpu: 200m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+nodeSelector:
+  node-pool: compute
+
+config:
+  logLevel: info
+  grpcPort: 9000
+  metricsPort: 9090
+
+  # TI Feeds
+  feeds:
+    - name: misp
+      type: misp
+      url: https://misp.example.com
+      pollInterval: 15m
+      enabled: true
+    - name: alienvault
+      type: otx
+      pollInterval: 30m
+      enabled: true
+    - name: kisa
+      type: kisa
+      pollInterval: 1h
+      enabled: true
+
+  # IOC Matching
+  ioc:
+    bloomFilterSize: 10000000
+    bloomFilterFPR: 0.001
+    matchWorkers: 4
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

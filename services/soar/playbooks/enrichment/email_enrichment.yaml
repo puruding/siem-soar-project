@@ -1,0 +1,333 @@
+# Email Enrichment Playbook
+# Enriches email addresses with reputation and breach data
+
+id: email_enrichment
+name: Email Address Enrichment
+display_name: Email Address Enrichment
+description: |
+  Enriches email addresses with comprehensive data:
+  - Email reputation and validity checks
+  - Breach database lookups
+  - Domain reputation
+  - SPF/DKIM/DMARC verification
+  - Social media presence
+
+version: 1
+category: enrichment
+author: SIEM-SOAR Platform
+tags:
+  - enrichment
+  - email
+  - reputation
+  - breach
+enabled: true
+
+trigger:
+  type: alert
+  conditions:
+    - field: entity_type
+      operator: equals
+      value: email
+
+inputs:
+  - name: email
+    type: string
+    required: true
+    description: Email address to enrich
+    validation:
+      pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+  - name: check_breaches
+    type: bool
+    required: false
+    default: true
+  - name: check_social
+    type: bool
+    required: false
+    default: false
+
+outputs:
+  - name: enrichment_results
+    type: object
+    source: steps.aggregate_results.output.results
+  - name: risk_score
+    type: int
+    source: steps.calculate_risk.output.score
+  - name: is_compromised
+    type: bool
+    source: steps.calculate_risk.output.is_compromised
+
+steps:
+  - id: parse_email
+    name: Parse Email Address
+    type: script
+    script:
+      language: python
+      code: |
+        email = inputs['email'].lower().strip()
+        parts = email.split('@')
+
+        if len(parts) != 2:
+            raise Exception(f"Invalid email format: {email}")
+
+        local_part = parts[0]
+        domain = parts[1]
+
+        # Check for disposable email patterns
+        disposable_domains = [
+            'tempmail.com', 'throwaway.email', 'guerrillamail.com',
+            'mailinator.com', '10minutemail.com', 'temp-mail.org'
+        ]
+
+        return {
+            'email': email,
+            'local_part': local_part,
+            'domain': domain,
+            'is_disposable': domain in disposable_domains
+        }
+      inputs:
+        email: $inputs.email
+
+  - id: parallel_enrichment
+    name: Parallel Email Enrichment
+    type: parallel
+    parallel:
+      branches:
+        - id: email_validation
+          name: Email Validation
+          steps:
+            - id: validate_email
+              name: Validate Email Address
+              type: action
+              action:
+                connector: email_verification
+                action: verify
+                parameters:
+                  email: $inputs.email
+              continue_on_error: true
+
+        - id: breach_lookup
+          name: Breach Database Lookup
+          steps:
+            - id: hibp_check
+              name: Check Have I Been Pwned
+              type: action
+              skip_condition:
+                field: $inputs.check_breaches
+                operator: equals
+                value: false
+              action:
+                connector: threat_intel
+                action: check_email_breach
+                parameters:
+                  email: $inputs.email
+              continue_on_error: true
+
+        - id: domain_reputation
+          name: Domain Reputation Check
+          steps:
+            - id: domain_check
+              name: Check Domain Reputation
+              type: action
+              action:
+                connector: threat_intel
+                action: check_domain_reputation
+                parameters:
+                  domain: $steps.parse_email.output.domain
+              continue_on_error: true
+
+        - id: mx_lookup
+          name: MX Record Lookup
+          steps:
+            - id: mx_records
+              name: Get MX Records
+              type: action
+              action:
+                connector: dns
+                action: lookup
+                parameters:
+                  domain: $steps.parse_email.output.domain
+                  record_types: [MX, TXT]
+              continue_on_error: true
+
+        - id: social_lookup
+          name: Social Media Lookup
+          steps:
+            - id: social_check
+              name: Check Social Media
+              type: action
+              skip_condition:
+                field: $inputs.check_social
+                operator: equals
+                value: false
+              action:
+                connector: osint
+                action: email_social_lookup
+                parameters:
+                  email: $inputs.email
+              continue_on_error: true
+
+      fail_fast: false
+      max_concurrent: 5
+
+  - id: aggregate_results
+    name: Aggregate Email Enrichment
+    type: script
+    script:
+      language: python
+      code: |
+        from datetime import datetime
+
+        results = {
+            'email': inputs['email_info']['email'],
+            'domain': inputs['email_info']['domain'],
+            'enrichment_timestamp': str(datetime.now()),
+            'validation': {},
+            'breaches': {},
+            'domain_info': {},
+            'email_security': {},
+            'social': {}
+        }
+
+        # Email validation
+        if validation := inputs.get('validate_email'):
+            results['validation'] = {
+                'is_valid': validation.get('is_valid', False),
+                'is_deliverable': validation.get('is_deliverable', False),
+                'is_disposable': validation.get('is_disposable', False),
+                'is_role_account': validation.get('is_role', False),
+                'smtp_check': validation.get('smtp_valid', False),
+                'score': validation.get('score', 0)
+            }
+        else:
+            results['validation']['is_disposable'] = inputs['email_info'].get('is_disposable', False)
+
+        # Breach data
+        if breach := inputs.get('hibp_check'):
+            results['breaches'] = {
+                'is_breached': breach.get('is_breached', False),
+                'breach_count': breach.get('breach_count', 0),
+                'breaches': breach.get('breaches', []),
+                'most_recent_breach': breach.get('most_recent'),
+                'data_classes_exposed': breach.get('data_classes', [])
+            }
+
+        # Domain reputation
+        if domain_rep := inputs.get('domain_check'):
+            results['domain_info'] = {
+                'reputation_score': domain_rep.get('score', 0),
+                'category': domain_rep.get('category'),
+                'is_suspicious': domain_rep.get('is_suspicious', False),
+                'is_spam_source': domain_rep.get('is_spam', False)
+            }
+
+        # Email security (SPF, DKIM, DMARC)
+        if mx := inputs.get('mx_records'):
+            txt_records = mx.get('TXT', [])
+            results['email_security'] = {
+                'mx_records': mx.get('MX', []),
+                'has_spf': any('v=spf1' in r for r in txt_records),
+                'has_dmarc': any('v=DMARC1' in r for r in txt_records),
+                'spf_record': next((r for r in txt_records if 'v=spf1' in r), None),
+                'dmarc_record': next((r for r in txt_records if 'v=DMARC1' in r), None)
+            }
+
+        # Social media
+        if social := inputs.get('social_check'):
+            results['social'] = {
+                'profiles_found': social.get('profiles', []),
+                'platforms': social.get('platforms', [])
+            }
+
+        return {'results': results}
+      inputs:
+        email_info: $steps.parse_email.output
+        validate_email: $steps.parallel_enrichment.email_validation.validate_email.output
+        hibp_check: $steps.parallel_enrichment.breach_lookup.hibp_check.output
+        domain_check: $steps.parallel_enrichment.domain_reputation.domain_check.output
+        mx_records: $steps.parallel_enrichment.mx_lookup.mx_records.output
+        social_check: $steps.parallel_enrichment.social_lookup.social_check.output
+
+  - id: calculate_risk
+    name: Calculate Email Risk Score
+    type: script
+    script:
+      language: python
+      code: |
+        results = inputs['results']
+        score = 0
+        factors = []
+
+        # Validation risks
+        validation = results.get('validation', {})
+        if validation.get('is_disposable'):
+            score += 25
+            factors.append("Disposable email address")
+        if not validation.get('is_deliverable', True):
+            score += 15
+            factors.append("Email not deliverable")
+        if validation.get('is_role_account'):
+            score += 5
+            factors.append("Role-based email account")
+
+        # Breach risks
+        breaches = results.get('breaches', {})
+        if breaches.get('is_breached'):
+            breach_count = breaches.get('breach_count', 0)
+            score += min(breach_count * 5, 30)
+            factors.append(f"Found in {breach_count} data breaches")
+
+        # Domain risks
+        domain_info = results.get('domain_info', {})
+        if domain_info.get('is_suspicious'):
+            score += 20
+            factors.append("Suspicious domain")
+        if domain_info.get('is_spam_source'):
+            score += 25
+            factors.append("Known spam source")
+
+        # Email security risks
+        security = results.get('email_security', {})
+        if not security.get('has_spf'):
+            score += 5
+            factors.append("No SPF record")
+        if not security.get('has_dmarc'):
+            score += 5
+            factors.append("No DMARC record")
+
+        score = min(score, 100)
+        is_compromised = breaches.get('is_breached', False)
+
+        return {
+            'score': score,
+            'is_compromised': is_compromised,
+            'risk_level': 'critical' if score >= 80 else 'high' if score >= 60 else 'medium' if score >= 40 else 'low',
+            'risk_factors': factors
+        }
+      inputs:
+        results: $steps.aggregate_results.output.results
+
+  - id: update_case
+    name: Update Case with Enrichment
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.case_id
+          operator: exists
+      then:
+        - id: add_enrichment
+          name: Add Email Enrichment to Case
+          type: action
+          action:
+            connector: case_management
+            action: add_evidence
+            parameters:
+              case_id: $inputs.case_id
+              evidence_type: enrichment
+              name: "Email Enrichment - ${inputs.email}"
+              data: $steps.aggregate_results.output.results
+              tags: [email_enrichment, reputation]
+
+timeout: 5m
+retry_policy:
+  max_attempts: 2
+  initial_interval: 10s

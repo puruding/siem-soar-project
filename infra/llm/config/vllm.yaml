@@ -1,0 +1,124 @@
+# vLLM Server Configuration
+# For SIEM/SOAR AI Copilot Service
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+  # API settings
+  api_key_enabled: true
+  cors_allow_origins: ["*"]
+
+  # Request limits
+  max_num_batched_tokens: 32768
+  max_num_seqs: 256
+  max_model_len: 4096
+
+  # Logging
+  log_level: "INFO"
+  access_log: true
+
+engine:
+  # Model configuration
+  model: "/models/solar-10.7b-instruct"
+  tokenizer: "/models/solar-10.7b-instruct"
+  trust_remote_code: true
+
+  # Quantization
+  dtype: "half"  # float16
+  quantization: null  # or "awq", "gptq", "squeezellm"
+
+  # Parallelism
+  tensor_parallel_size: 1
+  pipeline_parallel_size: 1
+
+  # Memory optimization
+  gpu_memory_utilization: 0.90
+  swap_space: 4  # GB
+
+  # KV Cache
+  block_size: 16
+  enable_prefix_caching: true
+
+  # Performance
+  disable_custom_all_reduce: false
+  enforce_eager: false  # Set true for debugging
+
+scheduler:
+  # Scheduling policy
+  policy: "fcfs"  # first-come-first-served
+
+  # Continuous batching
+  max_num_batched_tokens: 32768
+  max_paddings: 256
+
+  # Preemption
+  preemption_mode: "swap"
+
+serving:
+  # Chat/Completion templates
+  chat_template: |
+    {% for message in messages %}
+    {% if message['role'] == 'system' %}
+    ### System:
+    {{ message['content'] }}
+    {% elif message['role'] == 'user' %}
+    ### User:
+    {{ message['content'] }}
+    {% elif message['role'] == 'assistant' %}
+    ### Assistant:
+    {{ message['content'] }}
+    {% endif %}
+    {% endfor %}
+    ### Assistant:
+
+  # Response settings
+  response_role: "assistant"
+
+  # Special tokens
+  stop_token_ids: []
+  skip_special_tokens: true
+
+# Multi-model configuration (for model registry)
+models:
+  - name: "solar-10.7b"
+    path: "/models/solar-10.7b-instruct"
+    max_model_len: 4096
+    tensor_parallel_size: 1
+    dtype: "half"
+
+  - name: "solar-ko"
+    path: "/models/solar-10.7b-instruct-ko"
+    max_model_len: 4096
+    tensor_parallel_size: 1
+    dtype: "half"
+
+  - name: "codellama-13b"
+    path: "/models/codellama-13b-instruct"
+    max_model_len: 8192
+    tensor_parallel_size: 1
+    dtype: "half"
+
+# Observability
+observability:
+  # Prometheus metrics
+  metrics_port: 9090
+  enable_metrics: true
+
+  # OpenTelemetry tracing
+  tracing_enabled: false
+  otlp_endpoint: "http://otel-collector:4317"
+
+  # Logging
+  log_format: "json"
+  log_requests: true
+  log_stats: true
+  stats_interval: 10  # seconds
+
+# Security
+security:
+  api_key_header: "Authorization"
+  disable_log_requests_in_response: false
+  allowed_origins: ["*"]
+  allowed_methods: ["GET", "POST", "OPTIONS"]
+  allowed_headers: ["*"]

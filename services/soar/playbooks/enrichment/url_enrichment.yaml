@@ -1,0 +1,375 @@
+# URL Enrichment Playbook
+# Enriches URLs with threat intelligence and reputation data
+
+id: url_enrichment
+name: URL Enrichment
+display_name: URL Enrichment
+description: |
+  Enriches URLs with comprehensive security analysis:
+  - URL scanning and reputation checks
+  - Phishing detection
+  - Malware hosting detection
+  - Screenshot capture
+  - Domain correlation
+
+version: 1
+category: enrichment
+author: SIEM-SOAR Platform
+tags:
+  - enrichment
+  - url
+  - phishing
+  - malware
+  - threat_intel
+enabled: true
+
+trigger:
+  type: alert
+  conditions:
+    - field: entity_type
+      operator: equals
+      value: url
+
+inputs:
+  - name: url
+    type: string
+    required: true
+    description: URL to analyze
+  - name: capture_screenshot
+    type: bool
+    required: false
+    default: true
+  - name: follow_redirects
+    type: bool
+    required: false
+    default: true
+
+outputs:
+  - name: enrichment_results
+    type: object
+    source: steps.aggregate_results.output.results
+  - name: risk_score
+    type: int
+    source: steps.calculate_risk.output.score
+  - name: is_malicious
+    type: bool
+    source: steps.calculate_risk.output.is_malicious
+
+steps:
+  - id: parse_url
+    name: Parse URL Components
+    type: script
+    script:
+      language: python
+      code: |
+        from urllib.parse import urlparse
+
+        url = inputs['url']
+        parsed = urlparse(url)
+
+        return {
+            'original_url': url,
+            'scheme': parsed.scheme,
+            'domain': parsed.netloc.split(':')[0],
+            'port': parsed.port,
+            'path': parsed.path,
+            'query': parsed.query,
+            'fragment': parsed.fragment,
+            'is_ip': all(c.isdigit() or c == '.' for c in parsed.netloc.split(':')[0])
+        }
+      inputs:
+        url: $inputs.url
+
+  - id: parallel_analysis
+    name: Parallel URL Analysis
+    type: parallel
+    parallel:
+      branches:
+        - id: virustotal
+          name: VirusTotal URL Scan
+          steps:
+            - id: vt_scan
+              name: Scan URL with VirusTotal
+              type: action
+              action:
+                connector: threat_intel
+                action: scan_url
+                parameters:
+                  url: $inputs.url
+                  source: virustotal
+              continue_on_error: true
+
+        - id: urlhaus
+          name: URLhaus Lookup
+          steps:
+            - id: urlhaus_query
+              name: Query URLhaus
+              type: action
+              action:
+                connector: threat_intel
+                action: lookup_url
+                parameters:
+                  url: $inputs.url
+                  source: urlhaus
+              continue_on_error: true
+
+        - id: phishtank
+          name: PhishTank Check
+          steps:
+            - id: phishtank_query
+              name: Check PhishTank
+              type: action
+              action:
+                connector: threat_intel
+                action: check_phishing
+                parameters:
+                  url: $inputs.url
+              continue_on_error: true
+
+        - id: google_safebrowsing
+          name: Google Safe Browsing
+          steps:
+            - id: gsb_query
+              name: Check Safe Browsing
+              type: action
+              action:
+                connector: threat_intel
+                action: safe_browsing_lookup
+                parameters:
+                  url: $inputs.url
+              continue_on_error: true
+
+        - id: screenshot
+          name: Capture Screenshot
+          steps:
+            - id: capture
+              name: Capture URL Screenshot
+              type: action
+              skip_condition:
+                field: $inputs.capture_screenshot
+                operator: equals
+                value: false
+              action:
+                connector: urlscan
+                action: screenshot
+                parameters:
+                  url: $inputs.url
+                  wait_time: 5000
+              continue_on_error: true
+
+        - id: domain_enrichment
+          name: Enrich Domain
+          steps:
+            - id: domain_lookup
+              name: Lookup Domain Info
+              type: action
+              action:
+                connector: dns
+                action: lookup
+                parameters:
+                  domain: $steps.parse_url.output.domain
+                  record_types: [A, CNAME]
+              continue_on_error: true
+
+      fail_fast: false
+      max_concurrent: 6
+
+  - id: check_redirects
+    name: Check URL Redirects
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.follow_redirects
+          operator: equals
+          value: true
+      then:
+        - id: follow_redirects
+          name: Follow Redirect Chain
+          type: action
+          action:
+            connector: http
+            action: trace_redirects
+            parameters:
+              url: $inputs.url
+              max_redirects: 10
+          continue_on_error: true
+
+  - id: aggregate_results
+    name: Aggregate URL Analysis
+    type: script
+    script:
+      language: python
+      code: |
+        from datetime import datetime
+
+        results = {
+            'url': inputs['url_info']['original_url'],
+            'domain': inputs['url_info']['domain'],
+            'url_components': inputs['url_info'],
+            'enrichment_timestamp': str(datetime.now()),
+            'threat_intel': {},
+            'phishing': {},
+            'safe_browsing': {},
+            'redirects': [],
+            'screenshot': None,
+            'dns_info': {}
+        }
+
+        # VirusTotal
+        if vt := inputs.get('vt_scan'):
+            results['threat_intel']['virustotal'] = {
+                'malicious': vt.get('malicious', 0),
+                'suspicious': vt.get('suspicious', 0),
+                'harmless': vt.get('harmless', 0),
+                'undetected': vt.get('undetected', 0),
+                'categories': vt.get('categories', []),
+                'scan_date': vt.get('scan_date')
+            }
+
+        # URLhaus
+        if urlhaus := inputs.get('urlhaus_query'):
+            if urlhaus.get('found'):
+                results['threat_intel']['urlhaus'] = {
+                    'threat_type': urlhaus.get('threat_type'),
+                    'tags': urlhaus.get('tags', []),
+                    'first_seen': urlhaus.get('first_seen'),
+                    'status': urlhaus.get('status')
+                }
+
+        # PhishTank
+        if phish := inputs.get('phishtank_query'):
+            results['phishing'] = {
+                'is_phishing': phish.get('is_phishing', False),
+                'verified': phish.get('verified', False),
+                'target': phish.get('target'),
+                'submitted_date': phish.get('submitted_date')
+            }
+
+        # Google Safe Browsing
+        if gsb := inputs.get('gsb_query'):
+            results['safe_browsing'] = {
+                'is_safe': gsb.get('is_safe', True),
+                'threats': gsb.get('threats', []),
+                'platform_types': gsb.get('platform_types', []),
+                'threat_types': gsb.get('threat_types', [])
+            }
+
+        # Redirects
+        if redirects := inputs.get('redirects'):
+            results['redirects'] = redirects.get('chain', [])
+            results['final_url'] = redirects.get('final_url')
+
+        # Screenshot
+        if screenshot := inputs.get('screenshot'):
+            results['screenshot'] = {
+                'url': screenshot.get('screenshot_url'),
+                'timestamp': screenshot.get('timestamp')
+            }
+
+        # DNS
+        if dns := inputs.get('domain_lookup'):
+            results['dns_info'] = {
+                'a_records': dns.get('A', []),
+                'cname_records': dns.get('CNAME', [])
+            }
+
+        return {'results': results}
+      inputs:
+        url_info: $steps.parse_url.output
+        vt_scan: $steps.parallel_analysis.virustotal.vt_scan.output
+        urlhaus_query: $steps.parallel_analysis.urlhaus.urlhaus_query.output
+        phishtank_query: $steps.parallel_analysis.phishtank.phishtank_query.output
+        gsb_query: $steps.parallel_analysis.google_safebrowsing.gsb_query.output
+        screenshot: $steps.parallel_analysis.screenshot.capture.output
+        domain_lookup: $steps.parallel_analysis.domain_enrichment.domain_lookup.output
+        redirects: $steps.check_redirects.follow_redirects.output
+
+  - id: calculate_risk
+    name: Calculate URL Risk Score
+    type: script
+    script:
+      language: python
+      code: |
+        results = inputs['results']
+        score = 0
+        factors = []
+
+        # VirusTotal
+        vt = results.get('threat_intel', {}).get('virustotal', {})
+        if vt:
+            malicious = vt.get('malicious', 0)
+            suspicious = vt.get('suspicious', 0)
+            if malicious > 0:
+                score += min(malicious * 10, 40)
+                factors.append(f"VT: {malicious} malicious detections")
+            if suspicious > 0:
+                score += min(suspicious * 5, 15)
+                factors.append(f"VT: {suspicious} suspicious detections")
+
+        # URLhaus
+        if results.get('threat_intel', {}).get('urlhaus'):
+            score += 30
+            threat_type = results['threat_intel']['urlhaus'].get('threat_type', 'unknown')
+            factors.append(f"URLhaus: {threat_type}")
+
+        # PhishTank
+        if results.get('phishing', {}).get('is_phishing'):
+            score += 40
+            target = results['phishing'].get('target', 'unknown')
+            factors.append(f"Phishing: targeting {target}")
+
+        # Google Safe Browsing
+        if not results.get('safe_browsing', {}).get('is_safe', True):
+            score += 35
+            threats = results['safe_browsing'].get('threat_types', [])
+            factors.append(f"Safe Browsing: {', '.join(threats)}")
+
+        # URL patterns
+        url_info = results.get('url_components', {})
+        if url_info.get('is_ip'):
+            score += 10
+            factors.append("URL uses IP address instead of domain")
+
+        # Long redirect chain
+        redirects = results.get('redirects', [])
+        if len(redirects) > 3:
+            score += 10
+            factors.append(f"Long redirect chain: {len(redirects)} hops")
+
+        score = min(score, 100)
+        is_malicious = score >= 60
+
+        return {
+            'score': score,
+            'is_malicious': is_malicious,
+            'risk_level': 'critical' if score >= 80 else 'high' if score >= 60 else 'medium' if score >= 40 else 'low',
+            'risk_factors': factors
+        }
+      inputs:
+        results: $steps.aggregate_results.output.results
+
+  - id: update_case
+    name: Update Case with Enrichment
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.case_id
+          operator: exists
+      then:
+        - id: add_enrichment
+          name: Add URL Enrichment to Case
+          type: action
+          action:
+            connector: case_management
+            action: add_evidence
+            parameters:
+              case_id: $inputs.case_id
+              evidence_type: enrichment
+              name: "URL Enrichment - ${inputs.url}"
+              data: $steps.aggregate_results.output.results
+              tags: [url_enrichment, threat_intel]
+
+timeout: 5m
+retry_policy:
+  max_attempts: 2
+  initial_interval: 10s

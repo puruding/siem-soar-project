@@ -1,0 +1,50 @@
+# Vector Configuration for SIEM Pipeline (Simplified for Debugging)
+data_dir = "/var/lib/vector"
+
+[api]
+enabled = true
+address = "0.0.0.0:8686"
+
+# Source: Kafka Raw Logs
+[sources.kafka_raw]
+type = "kafka"
+# Use internal listener port 29092
+bootstrap_servers = "${KAFKA_BROKERS:-kafka:29092}"
+group_id = "vector-raw-logs"
+topics = ["raw-logs"]
+auto_offset_reset = "latest"
+
+[sources.kafka_raw.decoding]
+codec = "json"
+
+# Sink: Console (Debug)
+[sinks.console_debug]
+type = "console"
+inputs = ["kafka_raw"]
+target = "stdout"
+encoding.codec = "json"
+
+# Sink: ClickHouse
+[sinks.clickhouse]
+type = "clickhouse"
+inputs = ["kafka_raw"]
+endpoint = "${CLICKHOUSE_ENDPOINT:-http://clickhouse:8123}"
+database = "siem"
+table = "events"
+skip_unknown_fields = true
+compression = "gzip"
+date_time_best_effort = true
+
+[sinks.clickhouse.auth]
+strategy = "basic"
+user = "${CLICKHOUSE_USER:-siem}"
+password = "${CLICKHOUSE_PASSWORD:-siem_dev_password}"
+
+[sinks.clickhouse.batch]
+max_events = 10000
+timeout_secs = 1
+
+[sinks.clickhouse.buffer]
+type = "memory"
+max_events = 10000
+when_full = "block"

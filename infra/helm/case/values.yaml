@@ -1,0 +1,38 @@
+# Case Management Service Configuration
+replicaCount: 2
+
+image:
+  repository: ghcr.io/siem-soar-platform/case
+  pullPolicy: IfNotPresent
+  tag: ""
+
+service:
+  type: ClusterIP
+  grpcPort: 9000
+  metricsPort: 9090
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+nodeSelector:
+  node-pool: compute
+
+config:
+  logLevel: info
+  grpcPort: 9000
+  metricsPort: 9090
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

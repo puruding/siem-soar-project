@@ -1,0 +1,108 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: siem-platform
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: SIEM-SOAR Platform Project
+
+  # Source repositories
+  sourceRepos:
+    - https://github.com/siem-soar-platform/siem-soar-platform.git
+    - https://charts.bitnami.com/bitnami
+    - https://prometheus-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+
+  # Destination clusters and namespaces
+  destinations:
+    - namespace: siem-system
+      server: https://kubernetes.default.svc
+    - namespace: siem-services
+      server: https://kubernetes.default.svc
+    - namespace: siem-data
+      server: https://kubernetes.default.svc
+    - namespace: siem-ai
+      server: https://kubernetes.default.svc
+    - namespace: siem-monitoring
+      server: https://kubernetes.default.svc
+    - namespace: siem-ingress
+      server: https://kubernetes.default.svc
+
+  # Cluster resource whitelist
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    - group: networking.k8s.io
+      kind: IngressClass
+    - group: scheduling.k8s.io
+      kind: PriorityClass
+    - group: storage.k8s.io
+      kind: StorageClass
+
+  # Namespace resource blacklist (sensitive resources)
+  namespaceResourceBlacklist:
+    - group: ''
+      kind: LimitRange
+    - group: ''
+      kind: NetworkPolicy
+
+  # Roles
+  roles:
+    - name: admin
+      description: Full access to SIEM platform
+      policies:
+        - p, proj:siem-platform:admin, applications, *, siem-platform/*, allow
+        - p, proj:siem-platform:admin, clusters, get, siem-platform/*, allow
+        - p, proj:siem-platform:admin, repositories, get, siem-platform/*, allow
+        - p, proj:siem-platform:admin, logs, get, siem-platform/*, allow
+      groups:
+        - siem-admins
+
+    - name: developer
+      description: Read and sync access
+      policies:
+        - p, proj:siem-platform:developer, applications, get, siem-platform/*, allow
+        - p, proj:siem-platform:developer, applications, sync, siem-platform/*, allow
+        - p, proj:siem-platform:developer, logs, get, siem-platform/*, allow
+      groups:
+        - siem-developers
+
+    - name: viewer
+      description: Read-only access
+      policies:
+        - p, proj:siem-platform:viewer, applications, get, siem-platform/*, allow
+        - p, proj:siem-platform:viewer, logs, get, siem-platform/*, allow
+      groups:
+        - siem-viewers
+
+  # Sync windows (maintenance windows)
+  syncWindows:
+    - kind: deny
+      schedule: '0 22 * * *'  # 10 PM daily
+      duration: 2h
+      applications:
+        - '*-prod'
+      namespaces:
+        - '*'
+    - kind: allow
+      schedule: '0 2 * * 0'  # 2 AM Sunday
+      duration: 4h
+      applications:
+        - '*-prod'
+      namespaces:
+        - '*'
+      manualSync: true
+
+  # Orphaned resources monitoring
+  orphanedResources:
+    warn: true
+    ignore:
+      - group: ''
+        kind: ConfigMap
+        name: kube-root-ca.crt

@@ -1,0 +1,245 @@
+# Model Registry for SIEM/SOAR AI Services
+# Defines available models and their configurations
+
+version: "1.0"
+
+registry:
+  # Registry metadata
+  name: "siem-soar-models"
+  description: "Model registry for Security AI Copilot"
+  updated_at: "2024-01-15"
+
+# LLM Models for Text Generation
+llm_models:
+  # Primary: SOLAR 10.7B - Korean-optimized
+  solar-10.7b:
+    name: "SOLAR 10.7B Instruct"
+    hf_repo: "upstage/SOLAR-10.7B-Instruct-v1.0"
+    description: "Korean-English bilingual instruction-tuned model"
+    type: "causal-lm"
+    parameters: 10.7B
+    context_length: 4096
+    languages: ["en", "ko"]
+    license: "apache-2.0"
+    capabilities:
+      - "text-generation"
+      - "instruction-following"
+      - "code-generation"
+      - "summarization"
+    quantization_available:
+      - "none"
+      - "gptq-4bit"
+      - "awq-4bit"
+    recommended_gpu_memory: "24GB"
+    tags:
+      - "korean"
+      - "production"
+      - "primary"
+
+  # Fine-tuned for Korean Security Domain
+  solar-10.7b-security-ko:
+    name: "SOLAR Security Korean"
+    hf_repo: "internal/solar-10.7b-security-ko"
+    base_model: "upstage/SOLAR-10.7B-Instruct-v1.0"
+    description: "Fine-tuned for Korean security domain terminology"
+    type: "causal-lm"
+    parameters: 10.7B
+    context_length: 4096
+    languages: ["ko", "en"]
+    capabilities:
+      - "text-generation"
+      - "security-analysis"
+      - "incident-summary"
+      - "korean-security-terms"
+    fine_tuning:
+      method: "qlora"
+      dataset: "internal/security-ko-dataset"
+      epochs: 3
+      lora_rank: 64
+    tags:
+      - "korean"
+      - "security"
+      - "fine-tuned"
+
+  # Code Generation: CodeLlama 13B
+  codellama-13b:
+    name: "CodeLlama 13B Instruct"
+    hf_repo: "codellama/CodeLlama-13b-Instruct-hf"
+    description: "Code generation and SQL synthesis"
+    type: "causal-lm"
+    parameters: 13B
+    context_length: 8192
+    languages: ["en"]
+    capabilities:
+      - "code-generation"
+      - "sql-generation"
+      - "code-explanation"
+    recommended_gpu_memory: "32GB"
+    tags:
+      - "code"
+      - "sql"
+
+  # Lightweight: Phi-3 Mini for quick responses
+  phi-3-mini:
+    name: "Phi-3 Mini 4K Instruct"
+    hf_repo: "microsoft/Phi-3-mini-4k-instruct"
+    description: "Small but capable model for simple tasks"
+    type: "causal-lm"
+    parameters: 3.8B
+    context_length: 4096
+    languages: ["en"]
+    capabilities:
+      - "text-generation"
+      - "simple-qa"
+      - "classification"
+    recommended_gpu_memory: "8GB"
+    tags:
+      - "lightweight"
+      - "fast"
+
+# Embedding Models
+embedding_models:
+  # Primary: BGE-M3 (Multilingual)
+  bge-m3:
+    name: "BGE-M3"
+    hf_repo: "BAAI/bge-m3"
+    description: "Multilingual embedding with dense, sparse, and multi-vector"
+    type: "embedding"
+    dimension: 1024
+    max_length: 8192
+    languages: ["multilingual"]
+    capabilities:
+      - "dense-retrieval"
+      - "sparse-retrieval"
+      - "multi-vector"
+    tags:
+      - "multilingual"
+      - "production"
+      - "primary"
+
+  # Korean Optimized
+  ko-sroberta:
+    name: "KoSRoBERTa"
+    hf_repo: "jhgan/ko-sroberta-multitask"
+    description: "Korean sentence embedding model"
+    type: "embedding"
+    dimension: 768
+    max_length: 512
+    languages: ["ko"]
+    capabilities:
+      - "dense-retrieval"
+      - "semantic-similarity"
+    tags:
+      - "korean"
+      - "lightweight"
+
+  # Code Embedding
+  codebert:
+    name: "CodeBERT"
+    hf_repo: "microsoft/codebert-base"
+    description: "Code and SQL embedding"
+    type: "embedding"
+    dimension: 768
+    max_length: 512
+    languages: ["code"]
+    capabilities:
+      - "code-similarity"
+      - "code-search"
+    tags:
+      - "code"
+
+# Reranker Models
+reranker_models:
+  # Primary: BGE Reranker v2
+  bge-reranker-v2-m3:
+    name: "BGE Reranker v2 M3"
+    hf_repo: "BAAI/bge-reranker-v2-m3"
+    description: "Multilingual cross-encoder reranker"
+    type: "reranker"
+    max_length: 1024
+    languages: ["multilingual"]
+    capabilities:
+      - "reranking"
+      - "relevance-scoring"
+    tags:
+      - "production"
+      - "primary"
+
+  # Lightweight alternative
+  ms-marco-minilm:
+    name: "MS MARCO MiniLM"
+    hf_repo: "cross-encoder/ms-marco-MiniLM-L-12-v2"
+    description: "Fast English reranker"
+    type: "reranker"
+    max_length: 512
+    languages: ["en"]
+    capabilities:
+      - "reranking"
+    tags:
+      - "lightweight"
+      - "fast"
+
+# Model Routing Configuration
+routing:
+  # Default models by task
+  defaults:
+    text_generation: "solar-10.7b"
+    nl2sql: "solar-10.7b"
+    summarization: "solar-10.7b"
+    code_generation: "codellama-13b"
+    embedding: "bge-m3"
+    reranking: "bge-reranker-v2-m3"
+
+  # Language-specific routing
+  by_language:
+    ko:
+      text_generation: "solar-10.7b-security-ko"
+      embedding: "bge-m3"
+    en:
+      text_generation: "solar-10.7b"
+      embedding: "bge-m3"
+
+  # Task-specific overrides
+  by_task:
+    incident_summary:
+      model: "solar-10.7b-security-ko"
+      max_tokens: 1024
+      temperature: 0.3
+
+    nl2sql:
+      model: "solar-10.7b"
+      max_tokens: 512
+      temperature: 0.0
+
+    playbook_recommendation:
+      model: "solar-10.7b-security-ko"
+      max_tokens: 2048
+      temperature: 0.5
+
+    quick_answer:
+      model: "phi-3-mini"
+      max_tokens: 256
+      temperature: 0.1
+
+# Deployment Profiles
+profiles:
+  # Minimal: Single GPU, essential models only
+  minimal:
+    llm: ["solar-10.7b"]
+    embedding: ["bge-m3"]
+    reranker: []
+    gpu_memory: "24GB"
+
+  # Standard: Primary + backup models
+  standard:
+    llm: ["solar-10.7b", "phi-3-mini"]
+    embedding: ["bge-m3"]
+    reranker: ["bge-reranker-v2-m3"]
+    gpu_memory: "48GB"
+
+  # Full: All models including fine-tuned
+  full:
+    llm: ["solar-10.7b", "solar-10.7b-security-ko", "codellama-13b", "phi-3-mini"]
+    embedding: ["bge-m3", "ko-sroberta", "codebert"]
+    reranker: ["bge-reranker-v2-m3", "ms-marco-minilm"]
+    gpu_memory: "80GB+"

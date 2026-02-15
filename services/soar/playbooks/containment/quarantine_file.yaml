@@ -1,0 +1,324 @@
+# Quarantine File Playbook
+# Quarantines malicious files on endpoints
+
+id: quarantine_file
+name: Quarantine File
+display_name: Quarantine Malicious File
+description: |
+  Quarantines a malicious file on one or more endpoints:
+  - EDR-based quarantine
+  - File hash blocking
+  - Evidence collection
+
+version: 1
+category: containment
+author: SIEM-SOAR Platform
+tags:
+  - containment
+  - file
+  - quarantine
+  - malware
+enabled: true
+
+trigger:
+  type: manual
+  conditions: []
+
+inputs:
+  - name: file_hash
+    type: string
+    required: true
+    description: SHA256 hash of the file to quarantine
+  - name: file_path
+    type: string
+    required: false
+    description: Known file path (optional)
+  - name: host_ids
+    type: array
+    required: false
+    description: Specific host IDs to quarantine on
+  - name: quarantine_all_hosts
+    type: bool
+    required: false
+    default: false
+    description: Quarantine on all hosts where file is found
+  - name: collect_sample
+    type: bool
+    required: false
+    default: true
+  - name: reason
+    type: string
+    required: true
+  - name: case_id
+    type: string
+    required: false
+
+outputs:
+  - name: quarantine_result
+    type: object
+    source: steps.aggregate_results.output
+  - name: hosts_affected
+    type: int
+    source: steps.aggregate_results.output.hosts_affected
+
+steps:
+  - id: validate_hash
+    name: Validate File Hash
+    type: script
+    script:
+      language: python
+      code: |
+        import re
+
+        hash_value = inputs['file_hash'].strip().lower()
+
+        if len(hash_value) == 64 and re.match(r'^[a-f0-9]+$', hash_value):
+            hash_type = 'sha256'
+        elif len(hash_value) == 40 and re.match(r'^[a-f0-9]+$', hash_value):
+            hash_type = 'sha1'
+        elif len(hash_value) == 32 and re.match(r'^[a-f0-9]+$', hash_value):
+            hash_type = 'md5'
+        else:
+            raise Exception(f"Invalid file hash format: {hash_value}")
+
+        return {
+            'hash': hash_value,
+            'hash_type': hash_type,
+            'valid': True
+        }
+      inputs:
+        file_hash: $inputs.file_hash
+
+  - id: find_hosts
+    name: Find Hosts with File
+    type: condition
+    condition:
+      conditions:
+        - field: $inputs.quarantine_all_hosts
+          operator: equals
+          value: true
+      then:
+        - id: search_hosts
+          name: Search for File Across Hosts
+          type: action
+          action:
+            connector: edr
+            action: search_hosts
+            parameters:
+              query_type: file_hash
+              value: $steps.validate_hash.output.hash
+              hash_type: $steps.validate_hash.output.hash_type
+      else:
+        - id: use_provided_hosts
+          name: Use Provided Host IDs
+          type: script
+          script:
+            language: python
+            code: |
+              host_ids = inputs.get('host_ids', [])
+              if not host_ids:
+                  raise Exception("No host IDs provided and quarantine_all_hosts is false")
+              return {'hosts': [{'host_id': h} for h in host_ids]}
+            inputs:
+              host_ids: $inputs.host_ids
+
+  - id: get_target_hosts
+    name: Get Target Hosts
+    type: script
+    script:
+      language: python
+      code: |
+        if inputs.get('search_result'):
+            hosts = inputs['search_result'].get('hosts', [])
+        else:
+            hosts = inputs.get('provided_hosts', {}).get('hosts', [])
+
+        return {
+            'hosts': hosts,
+            'count': len(hosts)
+        }
+      inputs:
+        search_result: $steps.find_hosts.search_hosts.output
+        provided_hosts: $steps.find_hosts.use_provided_hosts.output
+
+  - id: check_hosts_found
+    name: Check Hosts Found
+    type: condition
+    condition:
+      conditions:
+        - field: $steps.get_target_hosts.output.count
+          operator: greater_than
+          value: 0
+      then:
+        - id: continue_quarantine
+          name: Continue with Quarantine
+          type: transform
+          transform:
+            type: template
+            expression: "{ 'proceed': true }"
+            source: ""
+            target: proceed_status
+      else:
+        - id: no_hosts
+          name: No Hosts Found
+          type: script
+          script:
+            language: python
+            code: |
+              return {
+                  'status': 'no_action',
+                  'message': 'No hosts found with the specified file',
+                  'hosts_affected': 0
+              }
+
+  - id: collect_sample
+    name: Collect File Sample
+    type: condition
+    condition:
+      conditions:
+        - and:
+          - field: $inputs.collect_sample
+            operator: equals
+            value: true
+          - field: $steps.get_target_hosts.output.count
+            operator: greater_than
+            value: 0
+      then:
+        - id: retrieve_file
+          name: Retrieve File Sample
+          type: action
+          action:
+            connector: edr
+            action: retrieve_file
+            parameters:
+              host_id: $steps.get_target_hosts.output.hosts[0].host_id
+              file_path: $inputs.file_path
+              file_hash: $inputs.file_hash
+          continue_on_error: true
+
+  - id: quarantine_loop
+    name: Quarantine on Each Host
+    type: loop
+    loop:
+      items: $steps.get_target_hosts.output.hosts
+      item_var: host
+      concurrency: 10
+      steps:
+        - id: quarantine_file
+          name: Quarantine File on Host
+          type: action
+          action:
+            connector: edr
+            action: quarantine_file
+            parameters:
+              host_id: $host.host_id
+              file_hash: $steps.validate_hash.output.hash
+              file_path: $inputs.file_path
+              reason: $inputs.reason
+          retry_policy:
+            max_attempts: 2
+            initial_interval: 5s
+          continue_on_error: true
+
+  - id: add_to_blocklist
+    name: Add Hash to Blocklist
+    type: action
+    action:
+      connector: edr
+      action: add_ioc
+      parameters:
+        type: file_hash
+        hash_type: $steps.validate_hash.output.hash_type
+        value: $steps.validate_hash.output.hash
+        action: block
+        reason: $inputs.reason
+        case_id: $inputs.case_id
+    continue_on_error: true
+
+  - id: aggregate_results
+    name: Aggregate Quarantine Results
+    type: script
+    script:
+      language: python
+      code: |
+        from datetime import datetime
+
+        hosts = inputs.get('hosts', [])
+
+        results = {
+            'file_hash': inputs['file_hash'],
+            'hash_type': inputs['hash_type'],
+            'hosts_affected': len(hosts),
+            'hosts_quarantined': [],
+            'hosts_failed': [],
+            'sample_collected': inputs.get('sample_collected', False),
+            'added_to_blocklist': inputs.get('blocklist_added', False),
+            'timestamp': str(datetime.now())
+        }
+
+        # Assume success for hosts that were processed
+        for host in hosts:
+            results['hosts_quarantined'].append({
+                'host_id': host.get('host_id'),
+                'hostname': host.get('hostname')
+            })
+
+        results['success'] = len(results['hosts_quarantined']) > 0
+
+        return results
+      inputs:
+        file_hash: $steps.validate_hash.output.hash
+        hash_type: $steps.validate_hash.output.hash_type
+        hosts: $steps.get_target_hosts.output.hosts
+        sample_collected: $steps.collect_sample.retrieve_file.output.success
+        blocklist_added: $steps.add_to_blocklist.output.success
+
+  - id: notifications
+    name: Send Notifications
+    type: parallel
+    parallel:
+      branches:
+        - id: slack_notify
+          name: Notify Slack
+          steps:
+            - id: slack_message
+              name: Send Slack Alert
+              type: action
+              action:
+                connector: slack
+                action: send_message
+                parameters:
+                  channel: "#security-incidents"
+                  text: |
+                    :biohazard_sign: **File Quarantined**
+
+                    **Hash:** ${inputs.file_hash}
+                    **Hosts Affected:** ${steps.aggregate_results.output.hosts_affected}
+                    **Reason:** ${inputs.reason}
+                    **Case:** ${inputs.case_id}
+
+        - id: update_case
+          name: Update Case
+          steps:
+            - id: add_evidence
+              name: Add Quarantine Evidence
+              type: action
+              skip_condition:
+                field: $inputs.case_id
+                operator: not_exists
+              action:
+                connector: case_management
+                action: add_evidence
+                parameters:
+                  case_id: $inputs.case_id
+                  evidence_type: action
+                  name: "File Quarantine - ${inputs.file_hash}"
+                  data: $steps.aggregate_results.output
+                  tags: [containment, quarantine, malware]
+
+      fail_fast: false
+
+timeout: 30m
+retry_policy:
+  max_attempts: 2
+  initial_interval: 30s

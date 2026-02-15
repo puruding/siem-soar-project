@@ -1,0 +1,323 @@
+{
+  "alerts": [
+    {
+      "id": "alert-001-ssh-brute-force",
+      "title": "SSH Brute Force Attack Detected",
+      "description": "Multiple failed SSH login attempts detected from external IP address targeting production server",
+      "severity": "high",
+      "status": "new",
+      "source": "detection_engine",
+      "rule_id": "rule-ssh-brute-force-001",
+      "timestamp": "2024-01-15T10:30:00Z",
+      "source_ip": "203.0.113.50",
+      "destination_ip": "10.0.0.100",
+      "destination_port": 22,
+      "protocol": "SSH",
+      "event_count": 150,
+      "time_window_minutes": 5,
+      "indicators": {
+        "source_ip": "203.0.113.50",
+        "target_host": "prod-server-01",
+        "target_user": "root",
+        "attempt_count": 150,
+        "source_country": "Unknown",
+        "source_asn": "AS12345"
+      },
+      "mitre_tactics": ["TA0001"],
+      "mitre_techniques": ["T1110.001"],
+      "tags": ["ssh", "brute-force", "authentication", "external"],
+      "metadata": {
+        "rule_version": "1.0",
+        "confidence": 0.95,
+        "risk_score": 85
+      }
+    },
+    {
+      "id": "alert-002-malware-detected",
+      "title": "Malware Detected on Endpoint",
+      "description": "EDR detected malicious file execution on workstation with known ransomware signature",
+      "severity": "critical",
+      "status": "new",
+      "source": "edr",
+      "rule_id": "rule-malware-001",
+      "timestamp": "2024-01-15T11:15:00Z",
+      "hostname": "WORKSTATION-042",
+      "file_path": "C:\\Users\\john.doe\\Downloads\\invoice.exe",
+      "file_hash": "sha256:7d8a4c5b2e1f3a6b9c0d8e7f4a5b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b",
+      "process_name": "invoice.exe",
+      "parent_process": "explorer.exe",
+      "indicators": {
+        "file_hash": "sha256:7d8a4c5b2e1f3a6b9c0d8e7f4a5b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b",
+        "malware_family": "Ransomware.Generic",
+        "affected_user": "CORP\\john.doe",
+        "c2_domains": ["malicious.example.com"],
+        "file_name": "invoice.exe",
+        "file_size": 245760
+      },
+      "mitre_tactics": ["TA0002", "TA0040"],
+      "mitre_techniques": ["T1204.002", "T1486"],
+      "tags": ["malware", "ransomware", "endpoint", "critical"],
+      "metadata": {
+        "av_engine": "CrowdStrike",
+        "signature_id": "Win.Ransomware.Generic",
+        "confidence": 0.99,
+        "risk_score": 100
+      }
+    },
+    {
+      "id": "alert-003-data-exfiltration",
+      "title": "Potential Data Exfiltration Detected",
+      "description": "Unusual large outbound data transfer to external IP detected from database server",
+      "severity": "high",
+      "status": "investigating",
+      "source": "network_monitor",
+      "rule_id": "rule-data-exfil-001",
+      "timestamp": "2024-01-15T09:45:00Z",
+      "source_ip": "10.0.1.50",
+      "destination_ip": "198.51.100.100",
+      "destination_port": 443,
+      "protocol": "HTTPS",
+      "bytes_transferred": 5368709120,
+      "duration_minutes": 45,
+      "indicators": {
+        "source_host": "db-server-01",
+        "destination_ip": "198.51.100.100",
+        "destination_country": "Unknown",
+        "data_volume_gb": 5,
+        "connection_duration_minutes": 45,
+        "anomaly_score": 0.92
+      },
+      "mitre_tactics": ["TA0010"],
+      "mitre_techniques": ["T1048.002"],
+      "tags": ["data-exfiltration", "network", "database", "high-volume"],
+      "metadata": {
+        "baseline_daily_gb": 0.5,
+        "deviation_factor": 10,
+        "confidence": 0.88,
+        "risk_score": 90
+      }
+    },
+    {
+      "id": "alert-004-phishing",
+      "title": "Phishing Email Detected",
+      "description": "User clicked link in suspected phishing email impersonating IT department",
+      "severity": "medium",
+      "status": "new",
+      "source": "email_security",
+      "rule_id": "rule-phishing-001",
+      "timestamp": "2024-01-15T08:30:00Z",
+      "recipient": "jane.smith@example.com",
+      "sender": "it-support@examp1e.com",
+      "subject": "Urgent: Password Reset Required",
+      "indicators": {
+        "sender_domain": "examp1e.com",
+        "spoofed_domain": "example.com",
+        "malicious_url": "https://fake-login.malicious.com/reset",
+        "attachment_name": null,
+        "clicked": true,
+        "credentials_entered": false
+      },
+      "mitre_tactics": ["TA0001"],
+      "mitre_techniques": ["T1566.002"],
+      "tags": ["phishing", "email", "social-engineering"],
+      "metadata": {
+        "email_id": "msg-123456",
+        "confidence": 0.85,
+        "risk_score": 65
+      }
+    },
+    {
+      "id": "alert-005-privilege-escalation",
+      "title": "Privilege Escalation Attempt",
+      "description": "User attempted to escalate privileges using known exploit technique",
+      "severity": "high",
+      "status": "new",
+      "source": "detection_engine",
+      "rule_id": "rule-priv-esc-001",
+      "timestamp": "2024-01-15T12:00:00Z",
+      "hostname": "WORKSTATION-015",
+      "username": "CORP\\bob.wilson",
+      "process_name": "cmd.exe",
+      "command_line": "net localgroup administrators bob.wilson /add",
+      "indicators": {
+        "source_user": "CORP\\bob.wilson",
+        "target_group": "Administrators",
+        "technique": "Local Group Modification",
+        "success": false,
+        "blocked_by": "endpoint_protection"
+      },
+      "mitre_tactics": ["TA0004"],
+      "mitre_techniques": ["T1078.002"],
+      "tags": ["privilege-escalation", "lateral-movement", "blocked"],
+      "metadata": {
+        "user_department": "Marketing",
+        "user_risk_score": 25,
+        "confidence": 0.95,
+        "risk_score": 80
+      }
+    },
+    {
+      "id": "alert-006-dns-tunneling",
+      "title": "DNS Tunneling Detected",
+      "description": "Suspicious DNS query patterns indicative of DNS tunneling for data exfiltration",
+      "severity": "medium",
+      "status": "new",
+      "source": "dns_monitor",
+      "rule_id": "rule-dns-tunnel-001",
+      "timestamp": "2024-01-15T13:30:00Z",
+      "source_ip": "10.0.2.100",
+      "query_domain": "aGVsbG8gd29ybGQ.data.malicious-tunnel.com",
+      "query_type": "TXT",
+      "query_count": 500,
+      "time_window_minutes": 10,
+      "indicators": {
+        "source_host": "WORKSTATION-077",
+        "suspicious_domain": "malicious-tunnel.com",
+        "query_entropy": 0.95,
+        "query_rate_per_minute": 50,
+        "encoded_data_detected": true
+      },
+      "mitre_tactics": ["TA0011"],
+      "mitre_techniques": ["T1071.004"],
+      "tags": ["dns", "tunneling", "c2", "data-exfiltration"],
+      "metadata": {
+        "confidence": 0.82,
+        "risk_score": 70
+      }
+    },
+    {
+      "id": "alert-007-lateral-movement",
+      "title": "Lateral Movement via RDP",
+      "description": "Unusual RDP connection from compromised host to sensitive server",
+      "severity": "high",
+      "status": "new",
+      "source": "detection_engine",
+      "rule_id": "rule-lateral-001",
+      "timestamp": "2024-01-15T14:00:00Z",
+      "source_ip": "10.0.2.50",
+      "destination_ip": "10.0.1.100",
+      "destination_port": 3389,
+      "protocol": "RDP",
+      "username": "CORP\\svc_backup",
+      "indicators": {
+        "source_host": "WORKSTATION-042",
+        "destination_host": "DC-01",
+        "service_account_used": true,
+        "first_time_connection": true,
+        "outside_business_hours": true
+      },
+      "mitre_tactics": ["TA0008"],
+      "mitre_techniques": ["T1021.001"],
+      "tags": ["lateral-movement", "rdp", "service-account"],
+      "metadata": {
+        "related_alerts": ["alert-002-malware-detected"],
+        "confidence": 0.90,
+        "risk_score": 85
+      }
+    },
+    {
+      "id": "alert-008-suspicious-login",
+      "title": "Impossible Travel Login",
+      "description": "User login detected from geographically impossible location within short time",
+      "severity": "medium",
+      "status": "new",
+      "source": "identity_provider",
+      "rule_id": "rule-impossible-travel-001",
+      "timestamp": "2024-01-15T15:30:00Z",
+      "username": "alice.johnson@example.com",
+      "previous_location": "New York, USA",
+      "current_location": "Tokyo, Japan",
+      "time_difference_minutes": 30,
+      "indicators": {
+        "user_email": "alice.johnson@example.com",
+        "previous_ip": "203.0.113.100",
+        "current_ip": "198.51.100.200",
+        "distance_km": 10850,
+        "travel_speed_required_kmh": 21700,
+        "vpn_detected": false
+      },
+      "mitre_tactics": ["TA0001"],
+      "mitre_techniques": ["T1078"],
+      "tags": ["impossible-travel", "authentication", "account-compromise"],
+      "metadata": {
+        "user_typical_locations": ["New York, USA", "Boston, USA"],
+        "confidence": 0.88,
+        "risk_score": 75
+      }
+    },
+    {
+      "id": "alert-009-web-attack",
+      "title": "SQL Injection Attempt",
+      "description": "SQL injection attack detected against web application",
+      "severity": "high",
+      "status": "blocked",
+      "source": "waf",
+      "rule_id": "rule-sqli-001",
+      "timestamp": "2024-01-15T16:00:00Z",
+      "source_ip": "203.0.113.200",
+      "destination_ip": "10.0.3.50",
+      "destination_port": 443,
+      "url": "/api/users?id=1' OR '1'='1",
+      "method": "GET",
+      "indicators": {
+        "attack_type": "SQL Injection",
+        "payload": "1' OR '1'='1",
+        "target_application": "customer-portal",
+        "waf_action": "blocked",
+        "attack_signature": "SQLI-001"
+      },
+      "mitre_tactics": ["TA0001"],
+      "mitre_techniques": ["T1190"],
+      "tags": ["web-attack", "sqli", "waf", "blocked"],
+      "metadata": {
+        "request_count": 50,
+        "unique_payloads": 15,
+        "confidence": 0.99,
+        "risk_score": 85
+      }
+    },
+    {
+      "id": "alert-010-cryptomining",
+      "title": "Cryptocurrency Mining Activity",
+      "description": "Unusual CPU usage pattern consistent with cryptocurrency mining detected",
+      "severity": "low",
+      "status": "new",
+      "source": "edr",
+      "rule_id": "rule-cryptominer-001",
+      "timestamp": "2024-01-15T17:00:00Z",
+      "hostname": "SERVER-WEB-03",
+      "process_name": "systemd-worker",
+      "cpu_usage_percent": 95,
+      "indicators": {
+        "affected_host": "SERVER-WEB-03",
+        "suspicious_process": "systemd-worker",
+        "cpu_baseline_percent": 30,
+        "network_connections_to_mining_pools": 3,
+        "mining_pool_domains": [
+          "pool.minexmr.com",
+          "xmr.nanopool.org"
+        ]
+      },
+      "mitre_tactics": ["TA0040"],
+      "mitre_techniques": ["T1496"],
+      "tags": ["cryptomining", "resource-hijacking", "server"],
+      "metadata": {
+        "duration_hours": 48,
+        "estimated_cost_usd": 150,
+        "confidence": 0.92,
+        "risk_score": 40
+      }
+    }
+  ],
+  "metadata": {
+    "generated_at": "2024-01-15T18:00:00Z",
+    "version": "1.0",
+    "total_alerts": 10,
+    "severity_distribution": {
+      "critical": 1,
+      "high": 5,
+      "medium": 3,
+      "low": 1
+    }
+  }
+}

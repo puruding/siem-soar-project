@@ -1,0 +1,16 @@
+name: certificate_renewal
+version: "1.0"
+description: Renew expiring or compromised certificates
+category: remediation
+severity: medium
+steps:
+  - id: revoke_old_certificate
+    action: pki.revoke_cert
+  - id: generate_csr
+    action: pki.generate_csr
+  - id: request_new_certificate
+    action: pki.request_cert
+  - id: install_certificate
+    action: pki.install_cert
+  - id: verify_installation
+    action: pki.verify_cert

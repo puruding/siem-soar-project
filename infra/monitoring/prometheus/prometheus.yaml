@@ -1,0 +1,192 @@
+# Prometheus Configuration for SIEM-SOAR Platform
+# Uses kube-prometheus-stack Helm chart values
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+# AlertManager configuration
+alertmanager:
+  enabled: true
+  config:
+    route:
+      group_by: ['alertname', 'namespace', 'service']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'default-receiver'
+      routes:
+        - match:
+            severity: critical
+          receiver: 'critical-receiver'
+          continue: true
+        - match:
+            severity: warning
+          receiver: 'warning-receiver'
+
+    receivers:
+      - name: 'default-receiver'
+        slack_configs:
+          - api_url: 'https://hooks.slack.com/services/xxx/xxx/xxx'
+            channel: '#siem-alerts'
+            send_resolved: true
+
+      - name: 'critical-receiver'
+        slack_configs:
+          - api_url: 'https://hooks.slack.com/services/xxx/xxx/xxx'
+            channel: '#siem-critical'
+            send_resolved: true
+        pagerduty_configs:
+          - service_key: 'xxx'
+
+      - name: 'warning-receiver'
+        slack_configs:
+          - api_url: 'https://hooks.slack.com/services/xxx/xxx/xxx'
+            channel: '#siem-warnings'
+            send_resolved: true
+
+# Prometheus configuration
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    retentionSize: 50GB
+    resources:
+      requests:
+        memory: 4Gi
+        cpu: 1000m
+      limits:
+        memory: 8Gi
+        cpu: 2000m
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ssd
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 100Gi
+
+    # Additional scrape configs for SIEM services
+    additionalScrapeConfigs:
+      # Go services
+      - job_name: 'siem-go-services'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - siem-services
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: (.+)
+            replacement: ${1}:9090
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+
+      # Python AI services
+      - job_name: 'siem-ai-services'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - siem-ai
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: (.+)
+            replacement: ${1}:9090
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+
+      # ClickHouse
+      - job_name: 'clickhouse'
+        static_configs:
+          - targets:
+              - clickhouse-0.clickhouse.siem-data.svc.cluster.local:9363
+              - clickhouse-1.clickhouse.siem-data.svc.cluster.local:9363
+              - clickhouse-2.clickhouse.siem-data.svc.cluster.local:9363
+
+      # Kafka
+      - job_name: 'kafka'
+        static_configs:
+          - targets:
+              - kafka-0.kafka.siem-data.svc.cluster.local:9308
+              - kafka-1.kafka.siem-data.svc.cluster.local:9308
+              - kafka-2.kafka.siem-data.svc.cluster.local:9308
+
+      # Redis
+      - job_name: 'redis'
+        static_configs:
+          - targets:
+              - redis.siem-data.svc.cluster.local:9121
+
+# Grafana configuration
+grafana:
+  enabled: true
+  adminPassword: "changeme"
+  persistence:
+    enabled: true
+    size: 10Gi
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'siem-dashboards'
+          orgId: 1
+          folder: 'SIEM'
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/siem
+  dashboards:
+    siem:
+      siem-overview:
+        file: dashboards/siem-overview.json
+      go-services:
+        file: dashboards/go-services.json
+      ai-services:
+        file: dashboards/ai-services.json
+      clickhouse:
+        file: dashboards/clickhouse.json
+      kafka:
+        file: dashboards/kafka.json
+
+# ServiceMonitors
+additionalServiceMonitors:
+  - name: siem-go-services
+    selector:
+      matchLabels:
+        app.kubernetes.io/part-of: siem-soar-platform
+    namespaceSelector:
+      matchNames:
+        - siem-services
+    endpoints:
+      - port: metrics
+        interval: 15s
+        path: /metrics
+
+  - name: siem-ai-services
+    selector:
+      matchLabels:
+        app.kubernetes.io/part-of: siem-soar-platform
+    namespaceSelector:
+      matchNames:
+        - siem-ai
+    endpoints:
+      - port: metrics
+        interval: 30s
+        path: /metrics

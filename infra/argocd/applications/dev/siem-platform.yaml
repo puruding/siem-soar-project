@@ -1,0 +1,61 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: siem-platform-dev
+  namespace: argocd
+  labels:
+    environment: dev
+    app.kubernetes.io/part-of: siem-soar-platform
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: siem-platform
+
+  source:
+    repoURL: https://github.com/siem-soar-platform/siem-soar-platform.git
+    targetRevision: develop
+    path: infra/helm/siem-platform
+    helm:
+      releaseName: siem-platform-dev
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+      parameters:
+        - name: global.environment
+          value: dev
+        - name: global.ingress.domain
+          value: dev.siem-soar.example.com
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: siem-services
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # Health checks
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /spec/minReplicas
+        - /spec/maxReplicas
+
+  revisionHistoryLimit: 5

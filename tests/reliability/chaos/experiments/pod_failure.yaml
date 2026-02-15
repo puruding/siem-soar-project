@@ -1,0 +1,247 @@
+# Pod Failure Experiments for SIEM/SOAR Platform
+# Tests system resilience to pod failures across all services
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: gateway-pod-failure
+  namespace: chaos-testing
+  labels:
+    experiment-type: pod-failure
+    target-service: gateway
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: gateway
+  duration: "60s"
+  gracePeriod: 0
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: detection-pod-failure
+  namespace: chaos-testing
+  labels:
+    experiment-type: pod-failure
+    target-service: detection
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: detection-engine
+  duration: "60s"
+  gracePeriod: 0
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: soar-pod-failure
+  namespace: chaos-testing
+  labels:
+    experiment-type: pod-failure
+    target-service: soar
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: soar
+  duration: "60s"
+  gracePeriod: 0
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: query-pod-failure
+  namespace: chaos-testing
+  labels:
+    experiment-type: pod-failure
+    target-service: query
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: query-service
+  duration: "60s"
+  gracePeriod: 0
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pipeline-pod-failure
+  namespace: chaos-testing
+  labels:
+    experiment-type: pod-failure
+    target-service: pipeline
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: pipeline
+  duration: "60s"
+  gracePeriod: 0
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: collector-pod-failure
+  namespace: chaos-testing
+  labels:
+    experiment-type: pod-failure
+    target-service: collector
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: collector
+  duration: "60s"
+  gracePeriod: 0
+
+---
+# Pod Kill Experiments (more aggressive than failure)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: gateway-pod-kill
+  namespace: chaos-testing
+  labels:
+    experiment-type: pod-kill
+    target-service: gateway
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: gateway
+  gracePeriod: 0
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: detection-pod-kill
+  namespace: chaos-testing
+  labels:
+    experiment-type: pod-kill
+    target-service: detection
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: detection-engine
+  gracePeriod: 0
+
+---
+# Container Kill (kills specific container in multi-container pod)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: ai-copilot-container-kill
+  namespace: chaos-testing
+  labels:
+    experiment-type: container-kill
+    target-service: ai-copilot
+spec:
+  action: container-kill
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: ai-copilot
+  containerNames:
+    - copilot
+  gracePeriod: 0
+
+---
+# Multi-pod failure (tests quorum loss)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: clickhouse-multi-pod-failure
+  namespace: chaos-testing
+  labels:
+    experiment-type: multi-pod-failure
+    target-service: clickhouse
+spec:
+  action: pod-failure
+  mode: fixed
+  value: "2"  # Kill 2 pods
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: clickhouse
+  duration: "120s"
+  gracePeriod: 10
+
+---
+# Random pod failure across all services
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: random-pod-failure
+  namespace: chaos-testing
+  labels:
+    experiment-type: random-failure
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app.kubernetes.io/part-of: siem-platform
+  duration: "30s"
+  gracePeriod: 0
+
+---
+# Scheduled pod failure workflow
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Schedule
+metadata:
+  name: scheduled-pod-failure
+  namespace: chaos-testing
+spec:
+  schedule: "0 */4 * * *"  # Every 4 hours
+  type: PodChaos
+  historyLimit: 3
+  concurrencyPolicy: Forbid
+  podChaos:
+    action: pod-failure
+    mode: one
+    selector:
+      namespaces:
+        - siem-production
+      labelSelectors:
+        app.kubernetes.io/part-of: siem-platform
+    duration: "60s"
+    gracePeriod: 0

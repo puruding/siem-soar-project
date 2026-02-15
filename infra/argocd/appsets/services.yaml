@@ -1,0 +1,153 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: siem-services
+  namespace: argocd
+spec:
+  generators:
+    # Matrix generator: environments x services
+    - matrix:
+        generators:
+          # Environments
+          - list:
+              elements:
+                - environment: dev
+                  targetRevision: develop
+                  autoSync: true
+                  namespace: siem-services
+                - environment: staging
+                  targetRevision: release/*
+                  autoSync: true
+                  namespace: siem-services
+                - environment: prod
+                  targetRevision: main
+                  autoSync: false
+                  namespace: siem-services
+          # Services
+          - list:
+              elements:
+                - service: gateway
+                  path: infra/helm/gateway
+                  nodePool: compute
+                - service: detection
+                  path: infra/helm/detection
+                  nodePool: compute
+                - service: soar
+                  path: infra/helm/soar
+                  nodePool: compute
+                - service: ti
+                  path: infra/helm/ti
+                  nodePool: compute
+                - service: query
+                  path: infra/helm/query
+                  nodePool: compute
+                - service: case
+                  path: infra/helm/case
+                  nodePool: compute
+                - service: collector
+                  path: infra/helm/collector
+                  nodePool: compute
+                - service: pipeline
+                  path: infra/helm/pipeline
+                  nodePool: compute
+
+  template:
+    metadata:
+      name: '{{service}}-{{environment}}'
+      namespace: argocd
+      labels:
+        environment: '{{environment}}'
+        service: '{{service}}'
+        app.kubernetes.io/part-of: siem-soar-platform
+    spec:
+      project: siem-platform
+      source:
+        repoURL: https://github.com/siem-soar-platform/siem-soar-platform.git
+        targetRevision: '{{targetRevision}}'
+        path: '{{path}}'
+        helm:
+          releaseName: '{{service}}-{{environment}}'
+          valueFiles:
+            - values.yaml
+            - 'values-{{environment}}.yaml'
+          parameters:
+            - name: global.environment
+              value: '{{environment}}'
+            - name: nodeSelector.node-pool
+              value: '{{nodePool}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{namespace}}'
+      syncPolicy:
+        automated:
+          prune: '{{autoSync}}'
+          selfHeal: '{{autoSync}}'
+        syncOptions:
+          - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: siem-ai-services
+  namespace: argocd
+spec:
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - environment: dev
+                  targetRevision: develop
+                  autoSync: true
+                - environment: staging
+                  targetRevision: release/*
+                  autoSync: true
+                - environment: prod
+                  targetRevision: main
+                  autoSync: false
+          - list:
+              elements:
+                - service: ai-triage
+                  path: infra/helm/ai-triage
+                  enabled: true
+                - service: ai-copilot
+                  path: infra/helm/ai-copilot
+                  enabled: false  # Enable after Phase 10
+                - service: ai-agentic
+                  path: infra/helm/ai-agentic
+                  enabled: false  # Enable after Phase 11
+
+  template:
+    metadata:
+      name: '{{service}}-{{environment}}'
+      namespace: argocd
+      labels:
+        environment: '{{environment}}'
+        service: '{{service}}'
+        app.kubernetes.io/part-of: siem-soar-platform
+        tier: ai
+    spec:
+      project: siem-platform
+      source:
+        repoURL: https://github.com/siem-soar-platform/siem-soar-platform.git
+        targetRevision: '{{targetRevision}}'
+        path: '{{path}}'
+        helm:
+          releaseName: '{{service}}-{{environment}}'
+          valueFiles:
+            - values.yaml
+            - 'values-{{environment}}.yaml'
+          parameters:
+            - name: global.environment
+              value: '{{environment}}'
+            - name: nodeSelector.node-pool
+              value: ai
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: siem-ai
+      syncPolicy:
+        automated:
+          prune: '{{autoSync}}'
+          selfHeal: '{{autoSync}}'
+        syncOptions:
+          - CreateNamespace=true

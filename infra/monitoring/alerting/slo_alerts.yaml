@@ -1,0 +1,306 @@
+# SLO-Based Alert Rules
+# Service Level Objective monitoring and alerting
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: siem-soar-slo-alerts
+  namespace: siem-soar
+  labels:
+    app: siem-soar
+    type: slo
+spec:
+  groups:
+    - name: slo.availability
+      interval: 1m
+      rules:
+        # API Availability SLO (99.9%)
+        - record: slo:api_availability:ratio_rate5m
+          expr: |
+            sum(rate(http_requests_total{job="api",status!~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="api"}[5m]))
+
+        - record: slo:api_availability:ratio_rate30m
+          expr: |
+            sum(rate(http_requests_total{job="api",status!~"5.."}[30m]))
+            /
+            sum(rate(http_requests_total{job="api"}[30m]))
+
+        - record: slo:api_availability:error_budget_remaining
+          expr: |
+            1 - (
+              (1 - slo:api_availability:ratio_rate30m)
+              /
+              (1 - 0.999)
+            )
+
+        - alert: APIAvailabilitySLOBreach
+          expr: |
+            slo:api_availability:ratio_rate5m < 0.999
+          for: 5m
+          labels:
+            severity: critical
+            component: slo
+            team: backend
+          annotations:
+            summary: "API availability SLO breach"
+            description: "API availability is {{ $value | humanizePercentage }} (SLO: 99.9%)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/slo-availability"
+            pagerduty: "true"
+
+        - alert: APIAvailabilityErrorBudgetBurning
+          expr: |
+            slo:api_availability:error_budget_remaining < 0.1
+          for: 15m
+          labels:
+            severity: warning
+            component: slo
+            team: backend
+          annotations:
+            summary: "API error budget burning fast"
+            description: "Only {{ $value | humanizePercentage }} error budget remaining"
+            runbook_url: "https://docs.siem-soar.io/runbooks/error-budget"
+
+    - name: slo.latency
+      interval: 1m
+      rules:
+        # API Latency SLO (p99 < 1s)
+        - record: slo:api_latency:p99_5m
+          expr: |
+            histogram_quantile(0.99,
+              rate(http_request_duration_seconds_bucket{job="api"}[5m])
+            )
+
+        - record: slo:api_latency:p99_30m
+          expr: |
+            histogram_quantile(0.99,
+              rate(http_request_duration_seconds_bucket{job="api"}[30m])
+            )
+
+        - record: slo:api_latency:slo_compliance
+          expr: |
+            sum(rate(http_request_duration_seconds_bucket{job="api",le="1.0"}[5m]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="api"}[5m]))
+
+        - alert: APILatencySLOBreach
+          expr: |
+            slo:api_latency:p99_5m > 1.0
+          for: 10m
+          labels:
+            severity: critical
+            component: slo
+            team: backend
+          annotations:
+            summary: "API latency SLO breach"
+            description: "API p99 latency is {{ $value }}s (SLO: 1s)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/slo-latency"
+
+        - alert: APILatencyBudgetBurning
+          expr: |
+            slo:api_latency:slo_compliance < 0.99
+          for: 15m
+          labels:
+            severity: warning
+            component: slo
+            team: backend
+          annotations:
+            summary: "API latency budget burning"
+            description: "Only {{ $value | humanizePercentage }} requests meet latency SLO"
+            runbook_url: "https://docs.siem-soar.io/runbooks/latency-budget"
+
+    - name: slo.alert_timeliness
+      interval: 1m
+      rules:
+        # Alert Processing Timeliness SLO (95% < 60s)
+        - record: slo:alert_timeliness:p95_5m
+          expr: |
+            histogram_quantile(0.95,
+              rate(alert_processing_duration_seconds_bucket[5m])
+            )
+
+        - record: slo:alert_timeliness:slo_compliance
+          expr: |
+            sum(rate(alert_processing_duration_seconds_bucket{le="60"}[5m]))
+            /
+            sum(rate(alert_processing_duration_seconds_count[5m]))
+
+        - alert: AlertTimelinessSLOBreach
+          expr: |
+            slo:alert_timeliness:p95_5m > 60
+          for: 10m
+          labels:
+            severity: critical
+            component: slo
+            team: security
+          annotations:
+            summary: "Alert timeliness SLO breach"
+            description: "Alert p95 processing time is {{ $value }}s (SLO: 60s)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/slo-alert-time"
+            pagerduty: "true"
+
+        - alert: AlertTimelinessComplianceLow
+          expr: |
+            slo:alert_timeliness:slo_compliance < 0.95
+          for: 15m
+          labels:
+            severity: warning
+            component: slo
+            team: security
+          annotations:
+            summary: "Alert timeliness compliance low"
+            description: "Only {{ $value | humanizePercentage }} alerts meet SLO"
+            runbook_url: "https://docs.siem-soar.io/runbooks/alert-compliance"
+
+    - name: slo.data_freshness
+      interval: 1m
+      rules:
+        # Data Freshness SLO (p95 < 30s)
+        - record: slo:data_freshness:p95_5m
+          expr: |
+            histogram_quantile(0.95,
+              rate(event_ingestion_delay_seconds_bucket[5m])
+            )
+
+        - record: slo:data_freshness:slo_compliance
+          expr: |
+            sum(rate(event_ingestion_delay_seconds_bucket{le="30"}[5m]))
+            /
+            sum(rate(event_ingestion_delay_seconds_count[5m]))
+
+        - alert: DataFreshnessSLOBreach
+          expr: |
+            slo:data_freshness:p95_5m > 30
+          for: 10m
+          labels:
+            severity: critical
+            component: slo
+            team: data-pipeline
+          annotations:
+            summary: "Data freshness SLO breach"
+            description: "Event ingestion p95 delay is {{ $value }}s (SLO: 30s)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/slo-data-freshness"
+
+        - alert: DataFreshnessComplianceLow
+          expr: |
+            slo:data_freshness:slo_compliance < 0.95
+          for: 15m
+          labels:
+            severity: warning
+            component: slo
+            team: data-pipeline
+          annotations:
+            summary: "Data freshness compliance low"
+            description: "Only {{ $value | humanizePercentage }} events meet freshness SLO"
+            runbook_url: "https://docs.siem-soar.io/runbooks/freshness-compliance"
+
+    - name: slo.playbook_success
+      interval: 1m
+      rules:
+        # Playbook Success Rate SLO (95%)
+        - record: slo:playbook_success:ratio_5m
+          expr: |
+            sum(rate(playbook_execution_total{status="success"}[5m]))
+            /
+            sum(rate(playbook_execution_total[5m]))
+
+        - record: slo:playbook_success:ratio_1h
+          expr: |
+            sum(rate(playbook_execution_total{status="success"}[1h]))
+            /
+            sum(rate(playbook_execution_total[1h]))
+
+        - alert: PlaybookSuccessSLOBreach
+          expr: |
+            slo:playbook_success:ratio_5m < 0.95
+          for: 15m
+          labels:
+            severity: critical
+            component: slo
+            team: security
+          annotations:
+            summary: "Playbook success rate SLO breach"
+            description: "Playbook success rate is {{ $value | humanizePercentage }} (SLO: 95%)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/slo-playbook"
+
+    - name: slo.detection_accuracy
+      interval: 5m
+      rules:
+        # Detection Accuracy SLO (False Positive Rate < 5%)
+        - record: slo:detection:false_positive_rate_1h
+          expr: |
+            sum(rate(alert_false_positive_total[1h]))
+            /
+            sum(rate(alert_generated_total[1h]))
+
+        - record: slo:detection:precision_1h
+          expr: |
+            1 - slo:detection:false_positive_rate_1h
+
+        - alert: DetectionFalsePositiveRateHigh
+          expr: |
+            slo:detection:false_positive_rate_1h > 0.05
+          for: 30m
+          labels:
+            severity: warning
+            component: slo
+            team: security
+          annotations:
+            summary: "High false positive rate"
+            description: "False positive rate is {{ $value | humanizePercentage }} (SLO: <5%)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/false-positives"
+
+    - name: slo.recovery_time
+      interval: 1m
+      rules:
+        # Mean Time to Recover (MTTR) SLO (< 15 minutes)
+        - record: slo:mttr:15m
+          expr: |
+            avg(alert_resolution_duration_seconds{status="resolved"})
+            / 60
+
+        - alert: MTTRExceedsSLO
+          expr: |
+            slo:mttr:15m > 15
+          for: 1h
+          labels:
+            severity: warning
+            component: slo
+            team: security
+          annotations:
+            summary: "Mean time to recover exceeds SLO"
+            description: "MTTR is {{ $value }} minutes (SLO: 15 minutes)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/mttr"
+
+    - name: slo.burn_rate
+      interval: 1m
+      rules:
+        # Fast burn rate (consuming 5% error budget in 1 hour)
+        - alert: FastErrorBudgetBurn
+          expr: |
+            (1 - slo:api_availability:ratio_rate5m) / (1 - 0.999) > 14.4
+          for: 5m
+          labels:
+            severity: critical
+            component: slo
+            team: backend
+          annotations:
+            summary: "Fast error budget burn detected"
+            description: "Error budget burning at {{ $value }}x normal rate"
+            runbook_url: "https://docs.siem-soar.io/runbooks/fast-burn"
+            pagerduty: "true"
+
+        # Slow burn rate (consuming 10% error budget in 3 days)
+        - alert: SlowErrorBudgetBurn
+          expr: |
+            (1 - slo:api_availability:ratio_rate30m) / (1 - 0.999) > 2.0
+          for: 30m
+          labels:
+            severity: warning
+            component: slo
+            team: backend
+          annotations:
+            summary: "Slow error budget burn detected"
+            description: "Error budget burning at {{ $value }}x normal rate"
+            runbook_url: "https://docs.siem-soar.io/runbooks/slow-burn"

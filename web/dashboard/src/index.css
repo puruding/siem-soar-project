@@ -1,0 +1,341 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Splunk Dark Theme - Primary Colors */
+    --background: 210 17% 10%;           /* #171D21 */
+    --foreground: 0 0% 100%;             /* #FFFFFF */
+
+    --card: 210 13% 12%;                 /* #1F2527 */
+    --card-foreground: 0 0% 100%;        /* #FFFFFF */
+
+    --popover: 210 13% 12%;              /* #1F2527 */
+    --popover-foreground: 0 0% 100%;     /* #FFFFFF */
+
+    --primary: 181 100% 32%;             /* #00A4A6 - Splunk Teal */
+    --primary-foreground: 0 0% 100%;     /* #FFFFFF */
+
+    --secondary: 210 10% 17%;            /* #2D3339 */
+    --secondary-foreground: 0 0% 100%;   /* #FFFFFF */
+
+    --muted: 210 10% 20%;                /* #2D3339 */
+    --muted-foreground: 210 15% 68%;     /* #9BA7B4 */
+
+    --accent: 181 100% 32%;              /* #00A4A6 */
+    --accent-foreground: 0 0% 100%;      /* #FFFFFF */
+
+    --destructive: 5 71% 55%;            /* #DC4E41 */
+    --destructive-foreground: 0 0% 100%; /* #FFFFFF */
+
+    --success: 120 47% 56%;              /* #5CC05C */
+    --success-foreground: 0 0% 100%;     /* #FFFFFF */
+
+    --warning: 30 94% 60%;               /* #F79836 */
+    --warning-foreground: 0 0% 100%;     /* #FFFFFF */
+
+    --info: 181 100% 32%;                /* #00A4A6 */
+    --info-foreground: 0 0% 100%;        /* #FFFFFF */
+
+    --border: 210 10% 17%;               /* #2D3339 */
+    --input: 210 10% 17%;                /* #2D3339 */
+    --ring: 181 100% 32%;                /* #00A4A6 */
+
+    /* Splunk Chart Colors */
+    --chart-1: 181 100% 32%;             /* #00A4A6 - Teal */
+    --chart-2: 30 94% 60%;               /* #F79836 - Orange */
+    --chart-3: 5 71% 55%;                /* #DC4E41 - Red */
+    --chart-4: 120 47% 56%;              /* #5CC05C - Green */
+    --chart-5: 253 100% 69%;             /* #7B61FF - Purple */
+
+    /* Splunk standard border radius */
+    --radius: 0.375rem;                  /* 6px */
+  }
+
+  .light {
+    /* Splunk Light Theme */
+    --background: 0 0% 98%;              /* #FAFAFA */
+    --foreground: 210 17% 10%;           /* #171D21 */
+
+    --card: 0 0% 100%;                   /* #FFFFFF */
+    --card-foreground: 210 17% 10%;      /* #171D21 */
+
+    --popover: 0 0% 100%;                /* #FFFFFF */
+    --popover-foreground: 210 17% 10%;   /* #171D21 */
+
+    --primary: 181 100% 28%;             /* #008C8E - Darker Teal */
+    --primary-foreground: 0 0% 100%;     /* #FFFFFF */
+
+    --secondary: 210 15% 90%;            /* #E5E8EB */
+    --secondary-foreground: 210 17% 10%; /* #171D21 */
+
+    --muted: 210 15% 93%;                /* #EDF0F2 */
+    --muted-foreground: 210 15% 40%;     /* #5A6872 */
+
+    --accent: 181 100% 28%;              /* #008C8E */
+    --accent-foreground: 0 0% 100%;      /* #FFFFFF */
+
+    --destructive: 5 71% 50%;            /* #D43728 */
+    --destructive-foreground: 0 0% 100%; /* #FFFFFF */
+
+    --success: 120 47% 45%;              /* #3FA83F */
+    --success-foreground: 0 0% 100%;     /* #FFFFFF */
+
+    --warning: 30 94% 50%;               /* #F57F23 */
+    --warning-foreground: 0 0% 100%;     /* #FFFFFF */
+
+    --info: 181 100% 28%;                /* #008C8E */
+    --info-foreground: 0 0% 100%;        /* #FFFFFF */
+
+    --border: 210 15% 85%;               /* #D1D7DC */
+    --input: 210 15% 85%;                /* #D1D7DC */
+    --ring: 181 100% 28%;                /* #008C8E */
+
+    /* Chart colors remain the same */
+    --chart-1: 181 100% 28%;
+    --chart-2: 30 94% 50%;
+    --chart-3: 5 71% 50%;
+    --chart-4: 120 47% 45%;
+    --chart-5: 253 100% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: 'liga' 1, 'kern' 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Splunk-style subtle scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-background;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted rounded;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground;
+  }
+
+  /* Selection color */
+  ::selection {
+    @apply bg-primary/20 text-foreground;
+  }
+}
+
+@layer components {
+  /* Status indicator pulse (kept minimal) */
+  .status-pulse {
+    @apply relative;
+  }
+
+  .status-pulse::before {
+    content: '';
+    @apply absolute inset-0 rounded-full animate-ping opacity-30;
+    background: inherit;
+  }
+
+  /* Data table row hover */
+  .data-row {
+    @apply transition-colors duration-150;
+  }
+
+  .data-row:hover {
+    @apply bg-muted/50;
+  }
+
+  /* Threat level badges (Splunk colors) */
+  .threat-critical {
+    @apply bg-threat-critical/15 text-threat-critical border border-threat-critical/30;
+  }
+
+  .threat-high {
+    @apply bg-threat-high/15 text-threat-high border border-threat-high/30;
+  }
+
+  .threat-medium {
+    @apply bg-threat-medium/15 text-threat-medium border border-threat-medium/30;
+  }
+
+  .threat-low {
+    @apply bg-threat-low/15 text-threat-low border border-threat-low/30;
+  }
+
+  .threat-info {
+    @apply bg-threat-info/15 text-threat-info border border-threat-info/30;
+  }
+
+  /* Metric card styles (Splunk clean design) */
+  .metric-card {
+    @apply bg-card border border-border rounded-lg p-4 transition-shadow hover:shadow-md;
+  }
+
+  /* Timeline connector */
+  .timeline-connector {
+    @apply absolute left-4 top-8 bottom-0 w-px bg-border;
+  }
+
+  .timeline-dot {
+    @apply absolute left-2.5 top-2 w-3 h-3 rounded-full border-2 border-primary bg-background;
+  }
+
+  /* Panel spacing (Splunk standard 15px) */
+  .panel-spacing {
+    @apply space-y-15;
+  }
+
+  /* Card with subtle elevation */
+  .elevated-card {
+    @apply bg-card border border-border rounded-lg shadow-sm hover:shadow-md transition-shadow;
+  }
+}
+
+@layer utilities {
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Truncate with ellipsis */
+  .truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .truncate-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Text utilities */
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* React Flow customizations (Splunk style) */
+.react-flow__node {
+  @apply bg-card border border-border rounded-lg shadow-sm;
+  font-family: 'Roboto', 'Inter', system-ui, sans-serif;
+}
+
+.react-flow__node:hover {
+  @apply shadow-md;
+}
+
+.react-flow__node.selected {
+  @apply border-primary shadow-md;
+}
+
+.react-flow__edge-path {
+  stroke: hsl(var(--border));
+  stroke-width: 2;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: hsl(var(--primary));
+  stroke-width: 2.5;
+}
+
+.react-flow__handle {
+  @apply bg-primary border-2 border-background;
+  width: 8px;
+  height: 8px;
+}
+
+.react-flow__handle:hover {
+  @apply scale-125;
+}
+
+/* CodeMirror customizations (Splunk style) */
+.cm-editor {
+  @apply bg-card rounded-lg border border-border;
+  font-family: 'Roboto Mono', 'JetBrains Mono', monospace;
+}
+
+.cm-editor.cm-focused {
+  @apply ring-1 ring-primary outline-none border-primary;
+}
+
+.cm-scroller {
+  @apply text-sm;
+}
+
+.cm-gutters {
+  @apply bg-muted/30 border-r border-border;
+}
+
+.cm-activeLineGutter {
+  @apply bg-muted;
+}
+
+.cm-activeLine {
+  @apply bg-muted/20;
+}
+
+.cm-selectionBackground {
+  @apply bg-primary/20;
+}
+
+.cm-cursor {
+  border-left-color: hsl(var(--primary));
+}
+
+/* Button variants (Splunk style) */
+.btn-primary {
+  @apply bg-primary text-primary-foreground hover:bg-primary/90 transition-colors;
+}
+
+.btn-secondary {
+  @apply bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors;
+}
+
+.btn-destructive {
+  @apply bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors;
+}
+
+/* Input focus styles */
+input:focus,
+textarea:focus,
+select:focus {
+  @apply ring-1 ring-primary outline-none border-primary;
+}
+
+/* Card hover effect */
+.card-hover {
+  @apply transition-all duration-200 hover:shadow-md hover:border-primary/50;
+}
+
+/* Splunk-style subtle dividers */
+.divider {
+  @apply border-t border-border my-4;
+}
+
+.divider-vertical {
+  @apply border-l border-border mx-4;
+}

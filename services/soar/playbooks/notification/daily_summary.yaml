@@ -1,0 +1,17 @@
+name: daily_summary
+version: "1.0"
+description: Send daily security summary reports
+category: notification
+trigger:
+  type: schedule
+  cron: "0 9 * * *"
+steps:
+  - id: collect_stats
+    action: metrics.aggregate
+    params:
+      period: last_24h
+  - id: generate_summary
+    action: report.generate
+    template: daily_summary
+  - id: send_email
+    action: email.send

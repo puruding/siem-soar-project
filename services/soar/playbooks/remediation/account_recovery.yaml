@@ -1,0 +1,20 @@
+name: account_recovery
+version: "1.0"
+description: Recover compromised user accounts
+category: remediation
+severity: high
+steps:
+  - id: disable_account
+    action: ad.disable_user
+  - id: reset_password
+    action: ad.reset_password
+  - id: revoke_sessions
+    action: auth.revoke_all_sessions
+  - id: revoke_tokens
+    action: auth.revoke_tokens
+  - id: enable_mfa
+    action: auth.enforce_mfa
+  - id: notify_user
+    action: email.send
+  - id: re_enable_account
+    action: ad.enable_user

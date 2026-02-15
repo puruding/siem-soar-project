@@ -1,0 +1,328 @@
+# Network Delay/Latency Experiments for SIEM/SOAR Platform
+# Tests system behavior under network degradation
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: gateway-network-delay
+  namespace: chaos-testing
+  labels:
+    experiment-type: network-delay
+    target-service: gateway
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: gateway
+  delay:
+    latency: "100ms"
+    correlation: "50"
+    jitter: "30ms"
+  duration: "300s"
+  direction: both
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: database-network-delay
+  namespace: chaos-testing
+  labels:
+    experiment-type: network-delay
+    target-service: clickhouse
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: clickhouse
+  delay:
+    latency: "200ms"
+    correlation: "25"
+    jitter: "50ms"
+  duration: "180s"
+  direction: both
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: kafka-network-delay
+  namespace: chaos-testing
+  labels:
+    experiment-type: network-delay
+    target-service: kafka
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: kafka
+  delay:
+    latency: "150ms"
+    correlation: "30"
+    jitter: "40ms"
+  duration: "240s"
+  direction: both
+
+---
+# Network Packet Loss
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: gateway-packet-loss
+  namespace: chaos-testing
+  labels:
+    experiment-type: packet-loss
+    target-service: gateway
+spec:
+  action: loss
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: gateway
+  loss:
+    loss: "10"  # 10% packet loss
+    correlation: "25"
+  duration: "120s"
+  direction: both
+
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: collector-packet-loss
+  namespace: chaos-testing
+  labels:
+    experiment-type: packet-loss
+    target-service: collector
+spec:
+  action: loss
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: collector
+  loss:
+    loss: "5"  # 5% packet loss
+    correlation: "25"
+  duration: "180s"
+  direction: both
+
+---
+# Network Packet Corruption
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: gateway-packet-corrupt
+  namespace: chaos-testing
+  labels:
+    experiment-type: packet-corrupt
+    target-service: gateway
+spec:
+  action: corrupt
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: gateway
+  corrupt:
+    corrupt: "5"  # 5% corruption
+    correlation: "25"
+  duration: "120s"
+  direction: both
+
+---
+# Network Packet Duplication
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: collector-packet-duplicate
+  namespace: chaos-testing
+  labels:
+    experiment-type: packet-duplicate
+    target-service: collector
+spec:
+  action: duplicate
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: collector
+  duplicate:
+    duplicate: "10"  # 10% duplication
+    correlation: "25"
+  duration: "120s"
+  direction: both
+
+---
+# Network Partition (complete isolation)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: clickhouse-network-partition
+  namespace: chaos-testing
+  labels:
+    experiment-type: network-partition
+    target-service: clickhouse
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: clickhouse
+  direction: both
+  duration: "60s"
+
+---
+# Bandwidth Limitation
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: gateway-bandwidth-limit
+  namespace: chaos-testing
+  labels:
+    experiment-type: bandwidth-limit
+    target-service: gateway
+spec:
+  action: bandwidth
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: gateway
+  bandwidth:
+    rate: "10mbps"
+    limit: 1000
+    buffer: 1000
+  duration: "300s"
+  direction: both
+
+---
+# Inter-service network delay
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: detection-to-clickhouse-delay
+  namespace: chaos-testing
+  labels:
+    experiment-type: inter-service-delay
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - siem-production
+    labelSelectors:
+      app: detection-engine
+  target:
+    selector:
+      namespaces:
+        - siem-production
+      labelSelectors:
+        app: clickhouse
+    mode: all
+  delay:
+    latency: "500ms"
+    jitter: "100ms"
+  duration: "180s"
+  direction: to
+
+---
+# Progressive latency increase workflow
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: progressive-latency-test
+  namespace: chaos-testing
+spec:
+  entry: latency-stages
+  templates:
+    - name: latency-stages
+      templateType: Serial
+      deadline: 30m
+      children:
+        - low-latency
+        - medium-latency
+        - high-latency
+        - extreme-latency
+        - recovery
+
+    - name: low-latency
+      templateType: NetworkChaos
+      deadline: 5m
+      networkChaos:
+        action: delay
+        mode: all
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app.kubernetes.io/part-of: siem-platform
+        delay:
+          latency: "50ms"
+        duration: "3m"
+
+    - name: medium-latency
+      templateType: NetworkChaos
+      deadline: 5m
+      networkChaos:
+        action: delay
+        mode: all
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app.kubernetes.io/part-of: siem-platform
+        delay:
+          latency: "150ms"
+        duration: "3m"
+
+    - name: high-latency
+      templateType: NetworkChaos
+      deadline: 5m
+      networkChaos:
+        action: delay
+        mode: all
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app.kubernetes.io/part-of: siem-platform
+        delay:
+          latency: "500ms"
+        duration: "3m"
+
+    - name: extreme-latency
+      templateType: NetworkChaos
+      deadline: 5m
+      networkChaos:
+        action: delay
+        mode: all
+        selector:
+          namespaces:
+            - siem-production
+          labelSelectors:
+            app.kubernetes.io/part-of: siem-platform
+        delay:
+          latency: "1000ms"
+        duration: "2m"
+
+    - name: recovery
+      templateType: Suspend
+      deadline: 5m

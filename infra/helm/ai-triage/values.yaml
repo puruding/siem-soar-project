@@ -1,0 +1,88 @@
+# AI Alert Triage Service Configuration
+replicaCount: 2
+
+image:
+  repository: ghcr.io/siem-soar-platform/ai-triage
+  pullPolicy: IfNotPresent
+  tag: ""
+
+service:
+  type: ClusterIP
+  httpPort: 8000
+  grpcPort: 9000
+  metricsPort: 9090
+
+resources:
+  limits:
+    cpu: 4000m
+    memory: 8Gi
+    nvidia.com/gpu: 1
+  requests:
+    cpu: 1000m
+    memory: 4Gi
+    nvidia.com/gpu: 1
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+# GPU node affinity
+nodeSelector:
+  node-pool: ai
+
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Equal
+    value: present
+    effect: NoSchedule
+  - key: workload-type
+    operator: Equal
+    value: ai
+    effect: NoSchedule
+
+config:
+  logLevel: info
+  httpPort: 8000
+  grpcPort: 9000
+  metricsPort: 9090
+
+  # Model configuration
+  model:
+    path: /models/alert-classifier
+    version: v1
+    batchSize: 32
+    maxBatchDelay: 100ms
+    deviceType: cuda
+    numWorkers: 2
+
+  # Inference configuration
+  inference:
+    timeout: 5s
+    maxConcurrentRequests: 100
+    warmupRequests: 10
+
+  # Feature extraction
+  features:
+    textEncoder: sentence-transformers/all-MiniLM-L6-v2
+    maxSequenceLength: 512
+
+  # Kafka consumer for real-time triage
+  kafka:
+    enabled: true
+    consumerGroup: ai-triage
+    topics:
+      - alerts
+    batchSize: 100
+    batchTimeout: 1s
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Model volume for pre-downloaded models
+modelVolume:
+  enabled: true
+  storageClass: ssd
+  size: 10Gi

@@ -1,0 +1,17 @@
+name: sox_audit
+version: "1.0"
+description: SOX compliance audit response
+category: compliance
+severity: medium
+steps:
+  - id: collect_access_logs
+    action: audit.collect_logs
+    params:
+      retention_period: 7_years
+  - id: verify_segregation_of_duties
+    action: compliance.check_sod
+  - id: verify_change_management
+    action: compliance.check_change_logs
+  - id: generate_audit_report
+    action: report.generate
+    template: sox_audit

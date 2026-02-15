@@ -1,0 +1,277 @@
+# Critical Alert Rules
+# These alerts require immediate response (PagerDuty/SMS)
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: siem-soar-critical-alerts
+  namespace: siem-soar
+  labels:
+    app: siem-soar
+    severity: critical
+spec:
+  groups:
+    - name: critical.infrastructure
+      interval: 30s
+      rules:
+        # Service Down
+        - alert: ServiceDown
+          expr: up{job=~"api|worker|collector"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: infrastructure
+            team: platform
+          annotations:
+            summary: "Service {{ $labels.job }} is down"
+            description: "Service {{ $labels.job }} on {{ $labels.instance }} has been down for more than 2 minutes"
+            runbook_url: "https://docs.siem-soar.io/runbooks/service-down"
+            pagerduty: "true"
+
+        # High Pod Restart Rate
+        - alert: HighPodRestartRate
+          expr: rate(kube_pod_container_status_restarts_total[15m]) > 0.1
+          for: 5m
+          labels:
+            severity: critical
+            component: kubernetes
+            team: platform
+          annotations:
+            summary: "High pod restart rate in {{ $labels.namespace }}"
+            description: "Pod {{ $labels.pod }} is restarting frequently ({{ $value }} restarts/min)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/pod-restarts"
+
+        # Database Connection Failures
+        - alert: DatabaseConnectionFailure
+          expr: |
+            rate(postgres_connection_errors_total[5m]) > 10
+            or
+            rate(clickhouse_connection_errors_total[5m]) > 10
+          for: 2m
+          labels:
+            severity: critical
+            component: database
+            team: data
+          annotations:
+            summary: "Database connection failures detected"
+            description: "{{ $labels.database }} is experiencing connection failures ({{ $value }} errors/sec)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/database-connection"
+            pagerduty: "true"
+
+        # API High Error Rate
+        - alert: APIHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{status=~"5.."}[5m])) by (job)
+            /
+            sum(rate(http_requests_total[5m])) by (job)
+            > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            component: api
+            team: backend
+          annotations:
+            summary: "High API error rate"
+            description: "API error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/api-errors"
+            pagerduty: "true"
+
+        # Kafka Consumer Lag Critical
+        - alert: KafkaConsumerLagCritical
+          expr: kafka_consumer_lag > 100000
+          for: 10m
+          labels:
+            severity: critical
+            component: kafka
+            team: data-pipeline
+          annotations:
+            summary: "Critical Kafka consumer lag"
+            description: "Consumer {{ $labels.consumer_group }} lag is {{ $value }} messages behind"
+            runbook_url: "https://docs.siem-soar.io/runbooks/kafka-lag"
+
+    - name: critical.performance
+      interval: 30s
+      rules:
+        # API Latency Critical
+        - alert: APILatencyCritical
+          expr: |
+            histogram_quantile(0.99,
+              rate(http_request_duration_seconds_bucket[5m])
+            ) > 5.0
+          for: 10m
+          labels:
+            severity: critical
+            component: api
+            team: backend
+          annotations:
+            summary: "Critical API latency"
+            description: "API p99 latency is {{ $value }}s (threshold: 5s)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/high-latency"
+
+        # Alert Processing Delay Critical
+        - alert: AlertProcessingDelayCritical
+          expr: alert_processing_delay_seconds > 300
+          for: 5m
+          labels:
+            severity: critical
+            component: alerting
+            team: security
+          annotations:
+            summary: "Critical alert processing delay"
+            description: "Alerts are delayed by {{ $value }}s (threshold: 300s)"
+            runbook_url: "https://docs.siem-soar.io/runbooks/alert-delay"
+            pagerduty: "true"
+
+    - name: critical.resources
+      interval: 30s
+      rules:
+        # Out of Memory
+        - alert: PodOutOfMemory
+          expr: |
+            container_memory_usage_bytes
+            /
+            container_spec_memory_limit_bytes
+            > 0.95
+          for: 2m
+          labels:
+            severity: critical
+            component: resources
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.pod }} is out of memory"
+            description: "Memory usage is {{ $value | humanizePercentage }} of limit"
+            runbook_url: "https://docs.siem-soar.io/runbooks/oom"
+            pagerduty: "true"
+
+        # Disk Space Critical
+        - alert: DiskSpaceCritical
+          expr: |
+            (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.05
+          for: 5m
+          labels:
+            severity: critical
+            component: storage
+            team: platform
+          annotations:
+            summary: "Critical disk space on {{ $labels.instance }}"
+            description: "Only {{ $value | humanizePercentage }} disk space remaining"
+            runbook_url: "https://docs.siem-soar.io/runbooks/disk-full"
+            pagerduty: "true"
+
+        # Database Storage Critical
+        - alert: DatabaseStorageCritical
+          expr: |
+            (
+              postgres_data_disk_free_bytes
+              or
+              clickhouse_data_disk_free_bytes
+            ) < 10737418240  # 10GB
+          for: 10m
+          labels:
+            severity: critical
+            component: database
+            team: data
+          annotations:
+            summary: "Critical database storage"
+            description: "{{ $labels.database }} has only {{ $value | humanize1024 }}B free"
+            runbook_url: "https://docs.siem-soar.io/runbooks/database-storage"
+            pagerduty: "true"
+
+    - name: critical.security
+      interval: 30s
+      rules:
+        # Multiple Failed Login Attempts
+        - alert: MultipleFailedLogins
+          expr: |
+            sum(increase(auth_failed_login_total[5m])) by (username)
+            > 10
+          for: 1m
+          labels:
+            severity: critical
+            component: security
+            team: security
+          annotations:
+            summary: "Multiple failed login attempts"
+            description: "User {{ $labels.username }} has {{ $value }} failed logins in 5 minutes"
+            runbook_url: "https://docs.siem-soar.io/runbooks/brute-force"
+            pagerduty: "true"
+
+        # Privilege Escalation Attempt
+        - alert: PrivilegeEscalationAttempt
+          expr: |
+            increase(auth_privilege_escalation_attempts_total[5m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+            component: security
+            team: security
+          annotations:
+            summary: "Privilege escalation attempt detected"
+            description: "{{ $value }} privilege escalation attempts from {{ $labels.user }}"
+            runbook_url: "https://docs.siem-soar.io/runbooks/privilege-escalation"
+            pagerduty: "true"
+
+        # Anomalous Data Access Pattern
+        - alert: AnomalousDataAccess
+          expr: |
+            rate(data_access_anomaly_score[5m]) > 0.9
+          for: 5m
+          labels:
+            severity: critical
+            component: security
+            team: security
+          annotations:
+            summary: "Anomalous data access pattern"
+            description: "User {{ $labels.user }} showing anomalous behavior (score: {{ $value }})"
+            runbook_url: "https://docs.siem-soar.io/runbooks/anomalous-access"
+
+    - name: critical.data
+      interval: 30s
+      rules:
+        # Data Pipeline Stalled
+        - alert: DataPipelineStalled
+          expr: |
+            rate(events_processed_total[10m]) == 0
+            and
+            rate(events_received_total[10m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: pipeline
+            team: data-pipeline
+          annotations:
+            summary: "Data pipeline has stalled"
+            description: "Events are being received but not processed"
+            runbook_url: "https://docs.siem-soar.io/runbooks/pipeline-stall"
+            pagerduty: "true"
+
+        # Data Loss Detected
+        - alert: DataLossDetected
+          expr: |
+            increase(data_loss_events_total[5m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+            component: data-integrity
+            team: data
+          annotations:
+            summary: "Data loss detected"
+            description: "{{ $value }} data loss events in the last 5 minutes"
+            runbook_url: "https://docs.siem-soar.io/runbooks/data-loss"
+            pagerduty: "true"
+
+        # Replication Lag Critical
+        - alert: ReplicationLagCritical
+          expr: |
+            postgres_replication_lag_seconds > 300
+            or
+            clickhouse_replication_lag_seconds > 600
+          for: 5m
+          labels:
+            severity: critical
+            component: database
+            team: data
+          annotations:
+            summary: "Critical replication lag"
+            description: "{{ $labels.database }} replication lag is {{ $value }}s"
+            runbook_url: "https://docs.siem-soar.io/runbooks/replication-lag"

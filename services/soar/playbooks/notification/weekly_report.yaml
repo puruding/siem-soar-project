@@ -1,0 +1,20 @@
+name: weekly_report
+version: "1.0"
+description: Weekly security metrics and trends report
+category: notification
+trigger:
+  type: schedule
+  cron: "0 9 * * 1"
+steps:
+  - id: aggregate_metrics
+    action: metrics.aggregate
+    params:
+      period: last_7d
+  - id: identify_trends
+    action: analytics.detect_trends
+  - id: generate_report
+    action: report.generate
+  - id: distribute_report
+    action: email.send
+    params:
+      to: ["security-team@company.com"]

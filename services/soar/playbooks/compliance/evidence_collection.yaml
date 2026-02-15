@@ -1,0 +1,16 @@
+name: evidence_collection
+version: "1.0"
+description: Collect and preserve digital evidence
+category: compliance
+severity: high
+steps:
+  - id: identify_evidence_sources
+    action: forensics.identify_sources
+  - id: create_forensic_image
+    action: forensics.create_image
+  - id: calculate_evidence_hash
+    action: crypto.hash_file
+  - id: document_chain_of_custody
+    action: forensics.document_custody
+  - id: store_evidence_securely
+    action: storage.store_evidence

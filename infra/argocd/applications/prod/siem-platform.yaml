@@ -1,0 +1,61 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: siem-platform-prod
+  namespace: argocd
+  labels:
+    environment: prod
+    app.kubernetes.io/part-of: siem-soar-platform
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: siem-alerts
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: siem-alerts
+    notifications.argoproj.io/subscribe.on-health-degraded.slack: siem-alerts
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: siem-platform
+
+  source:
+    repoURL: https://github.com/siem-soar-platform/siem-soar-platform.git
+    targetRevision: main
+    path: infra/helm/siem-platform
+    helm:
+      releaseName: siem-platform-prod
+      valueFiles:
+        - values.yaml
+        - values-prod.yaml
+      parameters:
+        - name: global.environment
+          value: prod
+        - name: global.ingress.domain
+          value: siem-soar.example.com
+        - name: gateway.replicaCount
+          value: "5"
+        - name: detection.replicaCount
+          value: "10"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: siem-services
+
+  # Production requires manual sync
+  syncPolicy:
+    automated: null  # Disabled for production
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+      - Validate=true
+    retry:
+      limit: 2
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m
+
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+
+  revisionHistoryLimit: 20

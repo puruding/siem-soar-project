@@ -1,0 +1,389 @@
+{
+  "dashboard": {
+    "title": "SIEM-SOAR SLO Dashboard",
+    "tags": ["siem-soar", "slo", "reliability"],
+    "timezone": "browser",
+    "schemaVersion": 30,
+    "version": 1,
+    "refresh": "1m",
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "API Availability SLO (99.9%)",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "slo:api_availability:ratio_rate30m",
+            "legendFormat": "Current"
+          }
+        ],
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area",
+          "textMode": "value_and_name"
+        },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "red"},
+            {"value": 0.995, "color": "yellow"},
+            {"value": 0.999, "color": "green"}
+          ]
+        },
+        "unit": "percentunit"
+      },
+      {
+        "id": 2,
+        "title": "Error Budget Remaining",
+        "type": "gauge",
+        "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+        "targets": [
+          {
+            "expr": "slo:api_availability:error_budget_remaining"
+          }
+        ],
+        "options": {
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "red"},
+            {"value": 0.25, "color": "orange"},
+            {"value": 0.5, "color": "yellow"},
+            {"value": 0.75, "color": "green"}
+          ]
+        },
+        "unit": "percentunit"
+      },
+      {
+        "id": 3,
+        "title": "API Latency SLO (p99 < 1s)",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 6, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "slo:api_latency:p99_5m"
+          }
+        ],
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area"
+        },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "green"},
+            {"value": 0.8, "color": "yellow"},
+            {"value": 1.0, "color": "red"}
+          ]
+        },
+        "unit": "s"
+      },
+      {
+        "id": 4,
+        "title": "Latency SLO Compliance",
+        "type": "gauge",
+        "gridPos": {"h": 6, "w": 6, "x": 18, "y": 0},
+        "targets": [
+          {
+            "expr": "slo:api_latency:slo_compliance"
+          }
+        ],
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "red"},
+            {"value": 0.95, "color": "yellow"},
+            {"value": 0.99, "color": "green"}
+          ]
+        },
+        "unit": "percentunit"
+      },
+      {
+        "id": 5,
+        "title": "Availability Over Time",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+        "targets": [
+          {
+            "expr": "slo:api_availability:ratio_rate5m",
+            "legendFormat": "5m rolling"
+          },
+          {
+            "expr": "slo:api_availability:ratio_rate30m",
+            "legendFormat": "30m rolling"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "percentunit",
+            "label": "Availability",
+            "min": 0.995,
+            "max": 1.0
+          },
+          {"format": "short"}
+        ],
+        "thresholds": [
+          {
+            "value": 0.999,
+            "colorMode": "critical",
+            "op": "lt",
+            "fill": true,
+            "line": true
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Error Budget Burn Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+        "targets": [
+          {
+            "expr": "(1 - slo:api_availability:ratio_rate5m) / (1 - 0.999)",
+            "legendFormat": "Current burn rate"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Burn Rate (x)"},
+          {"format": "short"}
+        ],
+        "thresholds": [
+          {
+            "value": 1,
+            "colorMode": "custom",
+            "op": "gt",
+            "fill": false,
+            "line": true,
+            "lineColor": "yellow"
+          },
+          {
+            "value": 14.4,
+            "colorMode": "critical",
+            "op": "gt",
+            "fill": true,
+            "line": true
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Alert Processing Timeliness (p95 < 60s)",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 6, "x": 0, "y": 14},
+        "targets": [
+          {
+            "expr": "slo:alert_timeliness:p95_5m"
+          }
+        ],
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area"
+        },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "green"},
+            {"value": 50, "color": "yellow"},
+            {"value": 60, "color": "red"}
+          ]
+        },
+        "unit": "s"
+      },
+      {
+        "id": 8,
+        "title": "Alert Timeliness Compliance",
+        "type": "gauge",
+        "gridPos": {"h": 6, "w": 6, "x": 6, "y": 14},
+        "targets": [
+          {
+            "expr": "slo:alert_timeliness:slo_compliance"
+          }
+        ],
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "red"},
+            {"value": 0.90, "color": "yellow"},
+            {"value": 0.95, "color": "green"}
+          ]
+        },
+        "unit": "percentunit"
+      },
+      {
+        "id": 9,
+        "title": "Data Freshness (p95 < 30s)",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 6, "x": 12, "y": 14},
+        "targets": [
+          {
+            "expr": "slo:data_freshness:p95_5m"
+          }
+        ],
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area"
+        },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "green"},
+            {"value": 25, "color": "yellow"},
+            {"value": 30, "color": "red"}
+          ]
+        },
+        "unit": "s"
+      },
+      {
+        "id": 10,
+        "title": "Data Freshness Compliance",
+        "type": "gauge",
+        "gridPos": {"h": 6, "w": 6, "x": 18, "y": 14},
+        "targets": [
+          {
+            "expr": "slo:data_freshness:slo_compliance"
+          }
+        ],
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "red"},
+            {"value": 0.90, "color": "yellow"},
+            {"value": 0.95, "color": "green"}
+          ]
+        },
+        "unit": "percentunit"
+      },
+      {
+        "id": 11,
+        "title": "Playbook Success Rate (95%)",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 6, "x": 0, "y": 20},
+        "targets": [
+          {
+            "expr": "slo:playbook_success:ratio_5m"
+          }
+        ],
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area"
+        },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "red"},
+            {"value": 0.90, "color": "yellow"},
+            {"value": 0.95, "color": "green"}
+          ]
+        },
+        "unit": "percentunit"
+      },
+      {
+        "id": 12,
+        "title": "Detection False Positive Rate (< 5%)",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 6, "x": 6, "y": 20},
+        "targets": [
+          {
+            "expr": "slo:detection:false_positive_rate_1h"
+          }
+        ],
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area"
+        },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "green"},
+            {"value": 0.03, "color": "yellow"},
+            {"value": 0.05, "color": "red"}
+          ]
+        },
+        "unit": "percentunit"
+      },
+      {
+        "id": 13,
+        "title": "Mean Time to Recover (< 15min)",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 6, "x": 12, "y": 20},
+        "targets": [
+          {
+            "expr": "slo:mttr:15m"
+          }
+        ],
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area"
+        },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "green"},
+            {"value": 12, "color": "yellow"},
+            {"value": 15, "color": "red"}
+          ]
+        },
+        "unit": "m"
+      },
+      {
+        "id": 14,
+        "title": "SLO Summary Table",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 26},
+        "targets": [
+          {
+            "expr": "slo:api_availability:ratio_rate30m",
+            "format": "table",
+            "instant": true,
+            "legendFormat": "API Availability"
+          },
+          {
+            "expr": "slo:api_latency:slo_compliance",
+            "format": "table",
+            "instant": true,
+            "legendFormat": "API Latency"
+          },
+          {
+            "expr": "slo:alert_timeliness:slo_compliance",
+            "format": "table",
+            "instant": true,
+            "legendFormat": "Alert Timeliness"
+          },
+          {
+            "expr": "slo:data_freshness:slo_compliance",
+            "format": "table",
+            "instant": true,
+            "legendFormat": "Data Freshness"
+          },
+          {
+            "expr": "slo:playbook_success:ratio_1h",
+            "format": "table",
+            "instant": true,
+            "legendFormat": "Playbook Success"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {"Time": true},
+              "indexByName": {},
+              "renameByName": {}
+            }
+          }
+        ],
+        "options": {
+          "showHeader": true
+        }
+      }
+    ]
+  }
+}

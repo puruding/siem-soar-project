@@ -1,0 +1,201 @@
+# SIEM-SOAR Platform Node Pool Design
+# Three-tier architecture: data, compute, ai
+---
+# Node Pool Configuration Document
+# This YAML describes the intended node pool design for GKE/EKS
+# Actual provisioning is done via Terraform
+
+# =============================================================================
+# DATA NODE POOL
+# Purpose: ClickHouse, Kafka, Redis, PostgreSQL
+# Characteristics: High IOPS SSD, High Memory, Moderate CPU
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nodepool-data-spec
+  namespace: siem-system
+data:
+  description: |
+    Data Node Pool for stateful workloads
+    - ClickHouse: Requires high IOPS NVMe SSD for OLAP queries
+    - Kafka: Needs balanced I/O for streaming
+    - Redis: Memory-optimized for caching
+    - PostgreSQL: Reliable SSD storage for OLTP
+
+  gcp_machine_type: "n2-highmem-16"
+  aws_instance_type: "r6i.4xlarge"
+
+  min_nodes: "3"
+  max_nodes: "10"
+
+  resources: |
+    vCPUs: 16
+    Memory: 128 GB
+    Local SSD: 2 x 375 GB NVMe (GCP) / gp3 EBS (AWS)
+
+  labels: |
+    node-pool: data
+    workload-type: stateful
+    storage-class: ssd
+
+  taints: |
+    - key: workload-type
+      value: data
+      effect: NoSchedule
+
+---
+# =============================================================================
+# COMPUTE NODE POOL
+# Purpose: Go services, web frontend, API gateway
+# Characteristics: Balanced CPU/Memory, Cost-effective
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nodepool-compute-spec
+  namespace: siem-system
+data:
+  description: |
+    Compute Node Pool for stateless workloads
+    - Go Services: CPU-efficient, low memory footprint
+    - Web Frontend: Serves static assets and API requests
+    - Batch Jobs: Scheduled tasks and cron jobs
+
+  gcp_machine_type: "n2-standard-8"
+  aws_instance_type: "m6i.2xlarge"
+
+  min_nodes: "3"
+  max_nodes: "20"
+
+  resources: |
+    vCPUs: 8
+    Memory: 32 GB
+    Storage: 100 GB SSD boot disk
+
+  labels: |
+    node-pool: compute
+    workload-type: stateless
+    scaling: enabled
+
+  taints: |
+    # No taints - general purpose pool
+
+---
+# =============================================================================
+# AI NODE POOL
+# Purpose: ML models, LLM inference, GPU workloads
+# Characteristics: GPU-enabled, High Memory
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nodepool-ai-spec
+  namespace: siem-system
+data:
+  description: |
+    AI Node Pool for ML/LLM workloads
+    - Alert Triage: PyTorch inference
+    - LLM Copilot: vLLM serving
+    - Agentic AI: LangGraph agents with GPU acceleration
+
+  gcp_machine_type: "n1-highmem-16"
+  gcp_accelerator: "nvidia-tesla-t4"
+  gcp_accelerator_count: "2"
+
+  aws_instance_type: "g4dn.4xlarge"
+
+  min_nodes: "1"
+  max_nodes: "8"
+
+  resources: |
+    vCPUs: 16
+    Memory: 104 GB (GCP) / 64 GB (AWS)
+    GPU: 2 x NVIDIA T4 (16 GB VRAM each)
+    Storage: 200 GB SSD boot disk
+
+  labels: |
+    node-pool: ai
+    workload-type: ml
+    gpu: nvidia-t4
+    accelerator: cuda
+
+  taints: |
+    - key: nvidia.com/gpu
+      value: present
+      effect: NoSchedule
+    - key: workload-type
+      value: ai
+      effect: NoSchedule
+
+---
+# Pod Affinity Rules
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pod-affinity-rules
+  namespace: siem-system
+data:
+  data-workloads: |
+    # Schedule data workloads only on data nodes
+    nodeSelector:
+      node-pool: data
+    tolerations:
+      - key: workload-type
+        value: data
+        effect: NoSchedule
+
+  compute-workloads: |
+    # Schedule compute workloads on compute nodes
+    nodeSelector:
+      node-pool: compute
+    # No tolerations needed - default pool
+
+  ai-workloads: |
+    # Schedule AI workloads only on GPU nodes
+    nodeSelector:
+      node-pool: ai
+    tolerations:
+      - key: nvidia.com/gpu
+        value: present
+        effect: NoSchedule
+      - key: workload-type
+        value: ai
+        effect: NoSchedule
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+
+---
+# Priority Classes for workload scheduling
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: siem-critical
+value: 1000000
+globalDefault: false
+description: "Critical SIEM infrastructure (ClickHouse, Kafka)"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: siem-high
+value: 100000
+globalDefault: false
+description: "High priority services (Detection, Gateway)"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: siem-normal
+value: 10000
+globalDefault: true
+description: "Normal priority workloads"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: siem-low
+value: 1000
+globalDefault: false
+description: "Low priority batch jobs"
