@@ -13,6 +13,10 @@ import {
   Circle,
   Activity,
   Zap,
+  Package,
+  FileCode,
+  Server,
+  ShieldAlert,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -60,6 +64,30 @@ const navItems = [
     icon: Bot,
     href: '/copilot',
     description: 'AI assistant',
+  },
+  {
+    title: 'Products',
+    icon: Package,
+    href: '/products',
+    description: 'Product management',
+  },
+  {
+    title: 'Parsers',
+    icon: FileCode,
+    href: '/parsers',
+    description: 'Log parsers',
+  },
+  {
+    title: 'Assets',
+    icon: Server,
+    href: '/assets',
+    description: 'Asset inventory',
+  },
+  {
+    title: 'Rules',
+    icon: ShieldAlert,
+    href: '/rules',
+    description: 'Detection rules',
   },
 ];
 

@@ -8,6 +8,10 @@ import { CaseDetail } from '@/features/cases/components/CaseDetail';
 import { QueryConsole } from '@/features/query/components/QueryConsole';
 import { PlaybookList } from '@/features/playbooks/components/PlaybookList';
 import { PlaybookEditor } from '@/features/playbooks/components/PlaybookEditor';
+import { ProductList } from '@/features/products';
+import { ParsersPage } from '@/features/parsers';
+import { AssetList } from '@/features/assets';
+import { RulesPage } from '@/features/rules';
 import { useThemeStore } from '@/stores/themeStore';
 import { useEffect } from 'react';
 
@@ -32,6 +36,10 @@ function App() {
           <Route path="playbooks" element={<PlaybookList />} />
           <Route path="playbooks/:id" element={<PlaybookEditor />} />
           <Route path="playbooks/new" element={<PlaybookEditor />} />
+          <Route path="products" element={<ProductList />} />
+          <Route path="parsers" element={<ParsersPage />} />
+          <Route path="assets" element={<AssetList />} />
+          <Route path="rules" element={<RulesPage />} />
         </Route>
       </Routes>
       <Toaster />

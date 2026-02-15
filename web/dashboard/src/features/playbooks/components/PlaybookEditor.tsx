@@ -67,6 +67,8 @@ import {
   Info,
   StopCircle,
   RotateCcw,
+  Variable,
+  Rocket,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -75,12 +77,21 @@ import {
   ActionNode,
   DecisionNode,
   IntegrationNode,
+  LoopNode,
+  ParallelNode,
+  WaitNode,
   TriggerNodeData,
   ActionNodeData,
   DecisionNodeData,
   IntegrationNodeData,
+  LoopNodeData,
+  ParallelNodeData,
+  WaitNodeData,
 } from './nodes';
 import { LabeledEdge } from './edges';
+import { NodePalette } from './NodePalette';
+import { ExecutionHistory, ExecutionRun, ExecutionLog } from './ExecutionHistory';
+import { VariablePanel, PlaybookVariable } from './VariablePanel';
 
 // Node type configuration
 const nodeTypes = {
@@ -88,133 +99,88 @@ const nodeTypes = {
   action: ActionNode,
   decision: DecisionNode,
   integration: IntegrationNode,
+  loop: LoopNode,
+  parallel: ParallelNode,
+  wait: WaitNode,
 } as any;
 
 const edgeTypes = {
   labeled: LabeledEdge,
 } as any;
 
-// Node palette configuration
-const nodePalette = [
+// Sample execution history data
+const sampleExecutions: ExecutionRun[] = [
   {
-    category: 'Triggers',
-    color: '#5CC05C',
-    items: [
-      {
-        type: 'trigger',
-        label: 'Alert Trigger',
-        icon: Zap,
-        data: { triggerType: 'alert' },
-      },
-      {
-        type: 'trigger',
-        label: 'Schedule',
-        icon: Clock,
-        data: { triggerType: 'schedule' },
-      },
-      {
-        type: 'trigger',
-        label: 'Webhook',
-        icon: Webhook,
-        data: { triggerType: 'webhook' },
-      },
-      {
-        type: 'trigger',
-        label: 'Manual',
-        icon: Play,
-        data: { triggerType: 'manual' },
-      },
+    id: 'exec-001-abc123',
+    status: 'success',
+    startedAt: new Date(Date.now() - 3600000),
+    completedAt: new Date(Date.now() - 3480000),
+    duration: 120000,
+    triggeredBy: 'system',
+    nodesExecuted: 6,
+    totalNodes: 6,
+    logs: [
+      { nodeId: '1', nodeName: 'Malware Alert', status: 'success', message: 'Trigger activated', timestamp: new Date(Date.now() - 3600000), duration: 50 },
+      { nodeId: '2', nodeName: 'Enrich IOCs', status: 'success', message: 'Enrichment completed', timestamp: new Date(Date.now() - 3590000), duration: 1500 },
+      { nodeId: '3', nodeName: 'Severity Check', status: 'success', message: 'Condition: true', timestamp: new Date(Date.now() - 3570000), duration: 100 },
+      { nodeId: '4', nodeName: 'Isolate Endpoint', status: 'success', message: 'Endpoint isolated', timestamp: new Date(Date.now() - 3550000), duration: 2000 },
+      { nodeId: '6', nodeName: 'Notify SOC', status: 'success', message: 'Notification sent', timestamp: new Date(Date.now() - 3500000), duration: 500 },
     ],
   },
   {
-    category: 'Actions',
-    color: '#00A4A6',
-    items: [
-      {
-        type: 'action',
-        label: 'Send Email',
-        icon: Mail,
-        data: { actionType: 'email' },
-      },
-      {
-        type: 'action',
-        label: 'Slack Alert',
-        icon: Bell,
-        data: { actionType: 'slack' },
-      },
-      {
-        type: 'action',
-        label: 'Block IP',
-        icon: Shield,
-        data: { actionType: 'block_ip' },
-      },
-      {
-        type: 'action',
-        label: 'Isolate Host',
-        icon: Shield,
-        data: { actionType: 'isolate' },
-      },
-      {
-        type: 'action',
-        label: 'Create Ticket',
-        icon: Database,
-        data: { actionType: 'jira' },
-      },
-      {
-        type: 'action',
-        label: 'Run Script',
-        icon: Terminal,
-        data: { actionType: 'custom' },
-      },
+    id: 'exec-002-def456',
+    status: 'failed',
+    startedAt: new Date(Date.now() - 7200000),
+    completedAt: new Date(Date.now() - 7140000),
+    duration: 60000,
+    triggeredBy: 'analyst',
+    nodesExecuted: 3,
+    totalNodes: 6,
+    errorMessage: 'Failed to connect to EDR system',
+    logs: [
+      { nodeId: '1', nodeName: 'Malware Alert', status: 'success', message: 'Trigger activated', timestamp: new Date(Date.now() - 7200000), duration: 45 },
+      { nodeId: '2', nodeName: 'Enrich IOCs', status: 'success', message: 'Enrichment completed', timestamp: new Date(Date.now() - 7190000), duration: 1200 },
+      { nodeId: '3', nodeName: 'Severity Check', status: 'success', message: 'Condition: true', timestamp: new Date(Date.now() - 7170000), duration: 80 },
+      { nodeId: '4', nodeName: 'Isolate Endpoint', status: 'failed', message: 'EDR connection timeout', timestamp: new Date(Date.now() - 7150000), duration: 30000 },
     ],
   },
   {
-    category: 'Logic',
-    color: '#F79836',
-    items: [
-      {
-        type: 'decision',
-        label: 'Condition',
-        icon: GitBranch,
-        data: { condition: 'severity >= high' },
-      },
-    ],
+    id: 'exec-003-ghi789',
+    status: 'success',
+    startedAt: new Date(Date.now() - 86400000),
+    completedAt: new Date(Date.now() - 86280000),
+    duration: 120000,
+    triggeredBy: 'schedule',
+    nodesExecuted: 6,
+    totalNodes: 6,
+  },
+];
+
+// Sample variables
+const sampleVariables: PlaybookVariable[] = [
+  {
+    id: 'var-1',
+    name: 'severity_threshold',
+    type: 'string',
+    scope: 'global',
+    value: 'high',
+    description: 'Minimum severity to trigger response',
   },
   {
-    category: 'Integrations',
-    color: '#7B61FF',
-    items: [
-      {
-        type: 'integration',
-        label: 'SIEM',
-        icon: Shield,
-        data: { integrationType: 'siem' },
-      },
-      {
-        type: 'integration',
-        label: 'EDR',
-        icon: Shield,
-        data: { integrationType: 'edr' },
-      },
-      {
-        type: 'integration',
-        label: 'Firewall',
-        icon: Shield,
-        data: { integrationType: 'firewall' },
-      },
-      {
-        type: 'integration',
-        label: 'Ticketing',
-        icon: Ticket,
-        data: { integrationType: 'ticketing' },
-      },
-      {
-        type: 'integration',
-        label: 'Custom API',
-        icon: Plug,
-        data: { integrationType: 'custom' },
-      },
-    ],
+    id: 'var-2',
+    name: 'max_retries',
+    type: 'number',
+    scope: 'global',
+    value: 3,
+    description: 'Maximum retry attempts for actions',
+  },
+  {
+    id: 'var-3',
+    name: 'alert_recipients',
+    type: 'array',
+    scope: 'global',
+    value: ['soc@example.com', 'security@example.com'],
+    description: 'Email recipients for alerts',
   },
 ];
 
@@ -349,6 +315,13 @@ export function PlaybookEditor() {
   );
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [propertiesTab, setPropertiesTab] = useState<'node' | 'variables'>('node');
+
+  // Variables state
+  const [variables, setVariables] = useState<PlaybookVariable[]>(sampleVariables);
+
+  // Execution history state
+  const [executionHistory, setExecutionHistory] = useState<ExecutionRun[]>(sampleExecutions);
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
@@ -395,6 +368,13 @@ export function PlaybookEditor() {
         edgeColor = params.sourceHandle === 'yes' ? '#5CC05C' : '#DC4E41';
       } else if (sourceNode?.type === 'integration') {
         edgeColor = '#7B61FF';
+      } else if (sourceNode?.type === 'loop') {
+        edgeColor = params.sourceHandle === 'loop' ? '#F79836' : '#F79836';
+        animated = params.sourceHandle === 'loop';
+      } else if (sourceNode?.type === 'parallel') {
+        edgeColor = '#9B59B6';
+      } else if (sourceNode?.type === 'wait') {
+        edgeColor = '#3498DB';
       }
 
       const newEdge: Edge = {
@@ -724,6 +704,31 @@ export function PlaybookEditor() {
     [setNodes]
   );
 
+  // Variable handlers
+  const handleAddVariable = useCallback((variable: Omit<PlaybookVariable, 'id'>) => {
+    const newVariable: PlaybookVariable = {
+      ...variable,
+      id: `var-${Date.now()}`,
+    };
+    setVariables((prev) => [...prev, newVariable]);
+  }, []);
+
+  const handleUpdateVariable = useCallback((id: string, updates: Partial<PlaybookVariable>) => {
+    setVariables((prev) =>
+      prev.map((v) => (v.id === id ? { ...v, ...updates } : v))
+    );
+  }, []);
+
+  const handleDeleteVariable = useCallback((id: string) => {
+    setVariables((prev) => prev.filter((v) => v.id !== id));
+  }, []);
+
+  // Handle execution selection for highlighting nodes
+  const handleSelectExecution = useCallback((execution: ExecutionRun) => {
+    // Could highlight nodes based on execution logs
+    console.log('Selected execution:', execution.id);
+  }, []);
+
   return (
     <div
       className={cn(
@@ -778,9 +783,13 @@ export function PlaybookEditor() {
             <Play className="w-4 h-4 mr-2" />
             Test Run
           </Button>
-          <Button>
+          <Button variant="outline">
             <Save className="w-4 h-4 mr-2" />
             Save
+          </Button>
+          <Button>
+            <Rocket className="w-4 h-4 mr-2" />
+            Deploy
           </Button>
           <Button
             variant="ghost"
@@ -805,155 +814,8 @@ export function PlaybookEditor() {
               Components
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="Triggers" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-4">
-                <TabsTrigger value="Triggers" className="text-xs">
-                  Triggers
-                </TabsTrigger>
-                <TabsTrigger value="Actions" className="text-xs">
-                  Actions
-                </TabsTrigger>
-              </TabsList>
-              <ScrollArea className="h-[calc(100vh-320px)]">
-                <div className="space-y-4">
-                  {nodePalette.map((category) => (
-                    <TabsContent
-                      key={category.category}
-                      value={category.category}
-                      className="mt-0"
-                    >
-                      <div className="space-y-2">
-                        {category.items.map((item) => {
-                          const Icon = item.icon;
-                          return (
-                            <div
-                              key={item.label}
-                              draggable
-                              onDragStart={(event) => {
-                                event.dataTransfer.setData(
-                                  'application/reactflow-type',
-                                  item.type
-                                );
-                                event.dataTransfer.setData(
-                                  'application/reactflow-label',
-                                  item.label
-                                );
-                                event.dataTransfer.setData(
-                                  'application/reactflow-data',
-                                  JSON.stringify(item.data)
-                                );
-                                event.dataTransfer.effectAllowed = 'move';
-                              }}
-                              className={cn(
-                                'flex items-center gap-3 p-3 rounded-xl cursor-move',
-                                'border-2 border-transparent transition-all duration-300',
-                                'hover:border-current hover:scale-105 hover:shadow-lg',
-                                'bg-gradient-to-br from-muted/30 to-muted/10'
-                              )}
-                              style={{ color: category.color }}
-                            >
-                              <div
-                                className="p-2 rounded-lg bg-current/20"
-                                style={{
-                                  backgroundColor: `${category.color}20`,
-                                }}
-                              >
-                                <Icon
-                                  className="w-4 h-4"
-                                  style={{ color: category.color }}
-                                />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium text-foreground truncate">
-                                  {item.label}
-                                </div>
-                                <div
-                                  className="text-2xs font-medium uppercase tracking-wide"
-                                  style={{ color: category.color }}
-                                >
-                                  {category.category}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </TabsContent>
-                  ))}
-
-                  {/* Logic and Integrations */}
-                  {nodePalette
-                    .filter((c) => c.category === 'Logic' || c.category === 'Integrations')
-                    .map((category) => (
-                      <div key={category.category}>
-                        <h4
-                          className="text-xs font-semibold uppercase tracking-wider mb-2 px-1"
-                          style={{ color: category.color }}
-                        >
-                          {category.category}
-                        </h4>
-                        <div className="space-y-2">
-                          {category.items.map((item) => {
-                            const Icon = item.icon;
-                            return (
-                              <div
-                                key={item.label}
-                                draggable
-                                onDragStart={(event) => {
-                                  event.dataTransfer.setData(
-                                    'application/reactflow-type',
-                                    item.type
-                                  );
-                                  event.dataTransfer.setData(
-                                    'application/reactflow-label',
-                                    item.label
-                                  );
-                                  event.dataTransfer.setData(
-                                    'application/reactflow-data',
-                                    JSON.stringify(item.data)
-                                  );
-                                  event.dataTransfer.effectAllowed = 'move';
-                                }}
-                                className={cn(
-                                  'flex items-center gap-3 p-3 rounded-xl cursor-move',
-                                  'border-2 border-transparent transition-all duration-300',
-                                  'hover:border-current hover:scale-105 hover:shadow-lg',
-                                  'bg-gradient-to-br from-muted/30 to-muted/10'
-                                )}
-                                style={{ color: category.color }}
-                              >
-                                <div
-                                  className="p-2 rounded-lg"
-                                  style={{
-                                    backgroundColor: `${category.color}20`,
-                                  }}
-                                >
-                                  <Icon
-                                    className="w-4 h-4"
-                                    style={{ color: category.color }}
-                                  />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="text-sm font-medium text-foreground truncate">
-                                    {item.label}
-                                  </div>
-                                  <div
-                                    className="text-2xs font-medium uppercase tracking-wide"
-                                    style={{ color: category.color }}
-                                  >
-                                    {category.category}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </ScrollArea>
-            </Tabs>
+          <CardContent className="h-[calc(100vh-320px)]">
+            <NodePalette />
           </CardContent>
         </Card>
 
@@ -1009,6 +871,12 @@ export function PlaybookEditor() {
                     return '#F79836';
                   case 'integration':
                     return '#7B61FF';
+                  case 'loop':
+                    return '#F79836';
+                  case 'parallel':
+                    return '#9B59B6';
+                  case 'wait':
+                    return '#3498DB';
                   default:
                     return '#64748b';
                 }
@@ -1032,13 +900,31 @@ export function PlaybookEditor() {
         </div>
 
         {/* Properties Panel */}
-        {selectedNode && (
-          <Card className="w-80 shrink-0 border-border/50 bg-card/50 backdrop-blur-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Node Properties</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[calc(100vh-320px)]">
+        <Card className="w-80 shrink-0 border-border/50 bg-card/50 backdrop-blur-sm">
+          <CardHeader className="pb-3">
+            <Tabs value={propertiesTab} onValueChange={(v) => setPropertiesTab(v as 'node' | 'variables')}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="node" className="text-xs">
+                  <Zap className="w-3 h-3 mr-1" />
+                  Node
+                </TabsTrigger>
+                <TabsTrigger value="variables" className="text-xs">
+                  <Variable className="w-3 h-3 mr-1" />
+                  Variables
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </CardHeader>
+          <CardContent className="h-[calc(100vh-360px)]">
+            {propertiesTab === 'variables' ? (
+              <VariablePanel
+                variables={variables}
+                onAddVariable={handleAddVariable}
+                onUpdateVariable={handleUpdateVariable}
+                onDeleteVariable={handleDeleteVariable}
+              />
+            ) : selectedNode ? (
+              <ScrollArea className="h-full">
                 <div className="space-y-4">
                   <div>
                     <label className="text-xs text-muted-foreground uppercase tracking-wide">
@@ -1819,6 +1705,266 @@ export function PlaybookEditor() {
                     </>
                   )}
 
+                  {/* LoopNode settings */}
+                  {selectedNode.type === 'loop' && (
+                    <>
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Description
+                        </label>
+                        <Textarea
+                          value={(selectedNode.data.description as string) || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              description: e.target.value,
+                            })
+                          }
+                          rows={2}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Loop Type
+                        </label>
+                        <Select
+                          value={(selectedNode.data as any).loopType || 'forEach'}
+                          onValueChange={(value) =>
+                            updateNodeData(selectedNode.id, { loopType: value })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="forEach">For Each</SelectItem>
+                            <SelectItem value="while">While</SelectItem>
+                            <SelectItem value="times">Times</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {(selectedNode.data as any).loopType === 'forEach' && (
+                        <div>
+                          <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                            Source Array
+                          </label>
+                          <Input
+                            value={(selectedNode.data as any).sourceArray || ''}
+                            onChange={(e) =>
+                              updateNodeData(selectedNode.id, {
+                                sourceArray: e.target.value,
+                              })
+                            }
+                            placeholder="{{items}}"
+                            className="font-mono text-sm"
+                          />
+                        </div>
+                      )}
+
+                      {(selectedNode.data as any).loopType === 'while' && (
+                        <div>
+                          <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                            Condition
+                          </label>
+                          <Input
+                            value={(selectedNode.data as any).condition || ''}
+                            onChange={(e) =>
+                              updateNodeData(selectedNode.id, {
+                                condition: e.target.value,
+                              })
+                            }
+                            placeholder="count < 10"
+                            className="font-mono text-sm"
+                          />
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Max Iterations
+                        </label>
+                        <Input
+                          type="number"
+                          value={(selectedNode.data as any).maxIterations || 10}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              maxIterations: parseInt(e.target.value) || 10,
+                            })
+                          }
+                          min={1}
+                          max={1000}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {/* ParallelNode settings */}
+                  {selectedNode.type === 'parallel' && (
+                    <>
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Description
+                        </label>
+                        <Textarea
+                          value={(selectedNode.data.description as string) || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              description: e.target.value,
+                            })
+                          }
+                          rows={2}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Number of Branches
+                        </label>
+                        <Input
+                          type="number"
+                          value={(selectedNode.data as any).branches || 2}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              branches: Math.max(2, Math.min(5, parseInt(e.target.value) || 2)),
+                            })
+                          }
+                          min={2}
+                          max={5}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide">
+                          Wait for All
+                        </label>
+                        <Select
+                          value={(selectedNode.data as any).waitForAll ? 'true' : 'false'}
+                          onValueChange={(value) =>
+                            updateNodeData(selectedNode.id, {
+                              waitForAll: value === 'true',
+                            })
+                          }
+                        >
+                          <SelectTrigger className="w-24">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="true">Yes</SelectItem>
+                            <SelectItem value="false">No</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Timeout (seconds)
+                        </label>
+                        <Input
+                          type="number"
+                          value={(selectedNode.data as any).timeout || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              timeout: parseInt(e.target.value) || undefined,
+                            })
+                          }
+                          placeholder="No timeout"
+                          min={1}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {/* WaitNode settings */}
+                  {selectedNode.type === 'wait' && (
+                    <>
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Description
+                        </label>
+                        <Textarea
+                          value={(selectedNode.data.description as string) || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              description: e.target.value,
+                            })
+                          }
+                          rows={2}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Wait Type
+                        </label>
+                        <Select
+                          value={(selectedNode.data as any).waitType || 'duration'}
+                          onValueChange={(value) =>
+                            updateNodeData(selectedNode.id, { waitType: value })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="duration">Duration</SelectItem>
+                            <SelectItem value="until">Until Condition</SelectItem>
+                            <SelectItem value="webhook">Webhook</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {(selectedNode.data as any).waitType === 'duration' && (
+                        <div>
+                          <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                            Duration (seconds)
+                          </label>
+                          <Input
+                            type="number"
+                            value={(selectedNode.data as any).duration || 60}
+                            onChange={(e) =>
+                              updateNodeData(selectedNode.id, {
+                                duration: parseInt(e.target.value) || 60,
+                              })
+                            }
+                            min={1}
+                          />
+                        </div>
+                      )}
+
+                      {(selectedNode.data as any).waitType === 'until' && (
+                        <div>
+                          <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                            Until Condition
+                          </label>
+                          <Input
+                            value={(selectedNode.data as any).untilCondition || ''}
+                            onChange={(e) =>
+                              updateNodeData(selectedNode.id, {
+                                untilCondition: e.target.value,
+                              })
+                            }
+                            placeholder="{{status}} === 'completed'"
+                            className="font-mono text-sm"
+                          />
+                        </div>
+                      )}
+
+                      {(selectedNode.data as any).waitType === 'webhook' && (
+                        <div>
+                          <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                            Webhook ID
+                          </label>
+                          <Input
+                            value={(selectedNode.data as any).webhookId || selectedNode.id}
+                            readOnly
+                            className="font-mono text-sm"
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+
                   <div className="pt-4">
                     <Button
                       variant="destructive"
@@ -1840,10 +1986,21 @@ export function PlaybookEditor() {
                   </div>
                 </div>
               </ScrollArea>
-            </CardContent>
-          </Card>
-        )}
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
+                <Zap className="w-8 h-8 mb-2 opacity-50" />
+                <p className="text-sm">Select a node to edit its properties</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Execution History Panel */}
+      <ExecutionHistory
+        executions={executionHistory}
+        onSelectExecution={handleSelectExecution}
+      />
 
       {/* Test Run Panel */}
       <Sheet open={isTestRunPanelOpen} onOpenChange={setIsTestRunPanelOpen}>
