@@ -39,6 +39,7 @@
     "@radix-ui/react-tooltip": "^1.1.6",
     "@tanstack/react-query": "^5.62.0",
     "@tanstack/react-table": "^8.20.6",
+    "@tanstack/react-virtual": "^3.13.18",
     "@uiw/react-codemirror": "^4.23.6",
     "@xyflow/react": "^12.3.6",
     "class-variance-authority": "^0.7.1",

@@ -92,24 +92,33 @@ class ModelLoader:
 
     def _load_dga_model(self) -> None:
         """Load DGA detection model."""
+        import asyncio
         from models.dga.config import DGAConfig
         from models.dga.model import DGADetector
 
         # Load from checkpoint if exists
         model_path = self.model_dir / "dga" / "best_model.pt"
+        model_path_str = str(model_path) if model_path.exists() else None
 
-        if model_path.exists():
-            checkpoint = torch.load(model_path, map_location=self.device)
-            config = DGAConfig(**checkpoint.get("config", {}))
-            model = DGADetector(config)
-            model.load_checkpoint(str(model_path))
-        else:
-            # Initialize with default config
-            config = DGAConfig()
-            model = DGADetector(config)
+        # Initialize with config
+        config = DGAConfig()
+        model = DGADetector(
+            model_path=model_path_str,
+            config=config,
+            device=self.device,
+        )
 
-        model.model.to(self.device)
-        model.model.eval()
+        # Load model (DGADetector.load_model is async)
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(model.load_model())
+        finally:
+            loop.close()
+
+        # Access internal model for device placement
+        if model._model is not None:
+            model._model.to(self.device)
+            model._model.eval()
 
         self._models[ModelType.DGA] = model
         self._model_configs[ModelType.DGA] = config.model_dump() if hasattr(config, 'model_dump') else vars(config)

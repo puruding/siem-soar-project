@@ -1,10 +1,4 @@
 import { useState, useCallback } from 'react';
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from '@/components/ui/resizable';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -82,9 +76,9 @@ export function ParsersPage() {
   );
 
   return (
-    <div className="h-full flex flex-col animate-fade-in">
+    <div className="h-[calc(100vh-140px)] flex flex-col animate-fade-in">
       {/* Page header */}
-      <div className="flex items-center justify-between mb-4 flex-shrink-0">
+      <div className="flex items-center justify-between pb-4 flex-shrink-0">
         <div>
           <h1 className="text-2xl font-display font-bold tracking-tight">
             Parser Management
@@ -114,75 +108,68 @@ export function ParsersPage() {
         </div>
       </div>
 
-      {/* Main Layout */}
-      <Card className="flex-1 min-h-0 border-border/50 bg-card/50 overflow-hidden">
-        <ResizablePanelGroup direction="horizontal">
-          {/* Parser List Panel */}
-          {!isListCollapsed && (
-            <>
-              <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
-                <ParserList
-                  parsers={parsers}
-                  selectedParser={selectedParser}
-                  onSelect={setSelectedParser}
-                  onCreate={() => setShowCreateDialog(true)}
-                />
-              </ResizablePanel>
-              <ResizableHandle withHandle />
-            </>
+      {/* Main Layout - Using flex instead of ResizablePanelGroup */}
+      <div className="flex-1 min-h-0 flex rounded-lg border border-border/50 bg-card/50 overflow-hidden">
+        {/* Parser List Panel */}
+        {!isListCollapsed && (
+          <div className="w-64 shrink-0 border-r border-border/50">
+            <ParserList
+              parsers={parsers}
+              selectedParser={selectedParser}
+              onSelect={setSelectedParser}
+              onCreate={() => setShowCreateDialog(true)}
+            />
+          </div>
+        )}
+
+        {/* Editor Panel */}
+        <div className="flex-1 min-w-0 border-r border-border/50">
+          {selectedParser ? (
+            <ParserEditor
+              key={selectedParser.id}
+              parser={selectedParser}
+              onSave={handleSaveParser}
+              onDelete={handleDeleteParser}
+            />
+          ) : (
+            <div className="h-full flex items-center justify-center text-muted-foreground">
+              <div className="text-center">
+                <FileCode2 className="w-16 h-16 mx-auto mb-4 opacity-20" />
+                <p className="text-lg font-medium mb-2">No Parser Selected</p>
+                <p className="text-sm">
+                  Select a parser from the list or create a new one
+                </p>
+                <Button
+                  variant="outline"
+                  className="mt-4"
+                  onClick={() => setShowCreateDialog(true)}
+                >
+                  Create Parser
+                </Button>
+              </div>
+            </div>
           )}
+        </div>
 
-          {/* Editor Panel */}
-          <ResizablePanel defaultSize={isListCollapsed ? 55 : 45} minSize={30}>
-            {selectedParser ? (
-              <ParserEditor
-                key={selectedParser.id}
-                parser={selectedParser}
-                onSave={handleSaveParser}
-                onDelete={handleDeleteParser}
-              />
-            ) : (
-              <div className="h-full flex items-center justify-center text-muted-foreground">
-                <div className="text-center">
-                  <FileCode2 className="w-16 h-16 mx-auto mb-4 opacity-20" />
-                  <p className="text-lg font-medium mb-2">No Parser Selected</p>
-                  <p className="text-sm">
-                    Select a parser from the list or create a new one
-                  </p>
-                  <Button
-                    variant="outline"
-                    className="mt-4"
-                    onClick={() => setShowCreateDialog(true)}
-                  >
-                    Create Parser
-                  </Button>
-                </div>
+        {/* Test Panel */}
+        <div className="w-[400px] shrink-0">
+          {selectedParser ? (
+            <GrokTestPanel
+              parser={selectedParser}
+              isRunning={isRunning}
+              result={result}
+              onTest={handleTest}
+              onClear={clearResult}
+            />
+          ) : (
+            <div className="h-full flex items-center justify-center text-muted-foreground">
+              <div className="text-center">
+                <p className="text-sm">Select a parser to test</p>
               </div>
-            )}
-          </ResizablePanel>
-
-          <ResizableHandle withHandle />
-
-          {/* Test Panel */}
-          <ResizablePanel defaultSize={35} minSize={25} maxSize={50}>
-            {selectedParser ? (
-              <GrokTestPanel
-                parser={selectedParser}
-                isRunning={isRunning}
-                result={result}
-                onTest={handleTest}
-                onClear={clearResult}
-              />
-            ) : (
-              <div className="h-full flex items-center justify-center text-muted-foreground">
-                <div className="text-center">
-                  <p className="text-sm">Select a parser to test</p>
-                </div>
-              </div>
-            )}
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </Card>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Create Parser Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>

@@ -12,6 +12,8 @@
 export { CopilotChat } from './CopilotChat';
 export type { CopilotConfig } from './CopilotChat';
 
+export { CopilotPage } from './CopilotPage';
+
 export { CopilotSidebar } from './CopilotSidebar';
 export type { ConversationHistoryItem, ContextItem, SavedQuery } from './CopilotSidebar';
 

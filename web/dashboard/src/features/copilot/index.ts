@@ -12,6 +12,7 @@
 // Components
 export {
   CopilotChat,
+  CopilotPage,
   CopilotSidebar,
   MessageBubble,
   SuggestionChips,

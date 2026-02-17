@@ -3,10 +3,10 @@ FROM golang:1.23-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
-WORKDIR /app
+WORKDIR /app/services/parser
 
 # Copy shared pkg directory first
-COPY pkg/ ./pkg/
+COPY pkg/ /app/pkg/
 
 # Copy service-specific files
 COPY services/parser/go.mod services/parser/go.sum* ./

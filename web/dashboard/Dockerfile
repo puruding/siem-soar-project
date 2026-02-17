@@ -14,6 +14,9 @@ RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 # Copy source code
 COPY . .
 
+# Set API URL for Docker environment (uses nginx proxy)
+ENV VITE_API_URL=/api/v1
+
 # Build the application
 RUN npm run build
 

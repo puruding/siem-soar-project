@@ -1,0 +1,29 @@
+title: Suspicious Encoded PowerShell Command
+id: sigma-001
+status: experimental
+description: Detects encoded PowerShell command execution
+author: SIEM-SOAR
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    process: 'powershell.exe'
+    command_line|contains:
+      - '-enc'
+      - '-EncodedCommand'
+      - '-e '
+  condition: selection
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.001
+
+# Alert Aggregation - groups alerts by hostname and user within 1 hour
+alert_aggregation:
+  group_by:
+    - principal.hostname
+    - principal.user.user_name
+  window: 1h
+  action: merge
+  max_count: 50

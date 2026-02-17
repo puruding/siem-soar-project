@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from ai.common.logging import LoggerMixin
+from common.logging import LoggerMixin
 
 
 @dataclass

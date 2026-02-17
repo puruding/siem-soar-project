@@ -105,6 +105,9 @@ type Rule struct {
 	Threshold    *ThresholdConfig    `json:"threshold,omitempty" yaml:"threshold"`
 	Aggregation  *AggregationConfig  `json:"aggregation,omitempty" yaml:"aggregation"`
 
+	// Alert Aggregation - controls how generated alerts are grouped/deduplicated
+	AlertAggregation *AlertAggregationConfig `json:"alert_aggregation,omitempty" yaml:"alert_aggregation,omitempty"`
+
 	// Correlation
 	Correlation *CorrelationConfig `json:"correlation,omitempty" yaml:"correlation"`
 
@@ -175,14 +178,114 @@ type ThresholdConfig struct {
 	TimeWindow time.Duration `json:"time_window"`
 }
 
+// AggregationAction defines the action to take for grouped alerts.
+type AggregationAction string
+
+const (
+	// ActionMerge merges duplicate alerts into a single alert with increased count.
+	ActionMerge AggregationAction = "merge"
+	// ActionGroup creates a group of related alerts under a parent alert.
+	ActionGroup AggregationAction = "group"
+	// ActionDrop drops duplicate alerts after the first one.
+	ActionDrop AggregationAction = "drop"
+)
+
 // AggregationConfig defines aggregation-based detection.
 type AggregationConfig struct {
 	Function   string        `json:"function"` // count, sum, avg, min, max, cardinality
 	Field      string        `json:"field,omitempty"`
-	GroupBy    []string      `json:"group_by,omitempty"`
+	GroupBy    []string      `json:"group_by,omitempty" yaml:"group_by,omitempty"`
 	Condition  string        `json:"condition"` // >, <, >=, <=, ==, !=
 	Value      float64       `json:"value"`
 	TimeWindow time.Duration `json:"time_window"`
+}
+
+// AlertAggregationConfig defines alert grouping configuration for Sigma rules.
+// This extends Sigma rules with deduplication/grouping behavior for generated alerts.
+type AlertAggregationConfig struct {
+	// GroupBy specifies UDM field paths used to group alerts.
+	// Examples: ["principal.ip", "target.hostname", "principal.user.user_name"]
+	GroupBy []string `json:"group_by,omitempty" yaml:"group_by,omitempty"`
+
+	// Window specifies the time window for grouping alerts.
+	// Format: "1h", "30m", "24h", etc.
+	Window string `json:"window,omitempty" yaml:"window,omitempty"`
+
+	// Action specifies what to do with grouped alerts.
+	// Options: "merge" (combine into one), "group" (create alert group), "drop" (discard duplicates)
+	Action AggregationAction `json:"action,omitempty" yaml:"action,omitempty"`
+
+	// MaxCount specifies the maximum number of alerts in a group before dropping.
+	MaxCount int `json:"max_count,omitempty" yaml:"max_count,omitempty"`
+
+	// Parsed fields (not serialized)
+	ParsedWindow time.Duration `json:"-" yaml:"-"`
+}
+
+// ParseWindow parses the Window string into a time.Duration and stores it in ParsedWindow.
+func (c *AlertAggregationConfig) ParseWindow() error {
+	if c.Window == "" {
+		c.ParsedWindow = 1 * time.Hour // Default to 1 hour
+		return nil
+	}
+
+	d, err := time.ParseDuration(c.Window)
+	if err != nil {
+		return fmt.Errorf("invalid window duration %q: %w", c.Window, err)
+	}
+	c.ParsedWindow = d
+	return nil
+}
+
+// Validate validates the AlertAggregationConfig.
+func (c *AlertAggregationConfig) Validate() error {
+	if len(c.GroupBy) == 0 {
+		return fmt.Errorf("alert_aggregation.group_by must have at least one field")
+	}
+
+	// Validate action
+	switch c.Action {
+	case ActionMerge, ActionGroup, ActionDrop, "":
+		// Valid actions (empty defaults to merge)
+	default:
+		return fmt.Errorf("invalid alert_aggregation.action: %s (must be merge, group, or drop)", c.Action)
+	}
+
+	// Parse and validate window
+	if err := c.ParseWindow(); err != nil {
+		return err
+	}
+
+	// Validate max_count if specified
+	if c.MaxCount < 0 {
+		return fmt.Errorf("alert_aggregation.max_count must be non-negative")
+	}
+
+	return nil
+}
+
+// GetAction returns the action, defaulting to ActionMerge if not set.
+func (c *AlertAggregationConfig) GetAction() AggregationAction {
+	if c.Action == "" {
+		return ActionMerge
+	}
+	return c.Action
+}
+
+// GetMaxCount returns the max count, defaulting to 100 if not set.
+func (c *AlertAggregationConfig) GetMaxCount() int {
+	if c.MaxCount <= 0 {
+		return 100
+	}
+	return c.MaxCount
+}
+
+// GetWindow returns the parsed window duration, defaulting to 1 hour.
+func (c *AlertAggregationConfig) GetWindow() time.Duration {
+	if c.ParsedWindow <= 0 {
+		return 1 * time.Hour
+	}
+	return c.ParsedWindow
 }
 
 // CorrelationConfig defines correlation-based detection.
@@ -240,6 +343,13 @@ func (r *Rule) Validate() error {
 	case TypeThreshold:
 		if r.Threshold == nil {
 			return fmt.Errorf("threshold rule must have threshold config")
+		}
+	}
+
+	// Validate alert aggregation if present
+	if r.AlertAggregation != nil {
+		if err := r.AlertAggregation.Validate(); err != nil {
+			return fmt.Errorf("invalid alert_aggregation: %w", err)
 		}
 	}
 

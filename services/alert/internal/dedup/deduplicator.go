@@ -56,6 +56,14 @@ func DefaultDedupConfig() DedupConfig {
 	}
 }
 
+// AlertAggregationConfig represents alert grouping configuration passed from rules.
+type AlertAggregationConfig struct {
+	GroupBy      []string      `json:"group_by,omitempty"`
+	Window       time.Duration `json:"window,omitempty"`
+	Action       DedupAction   `json:"action,omitempty"`
+	MaxCount     int           `json:"max_count,omitempty"`
+}
+
 // Alert interface for deduplication.
 type Alert interface {
 	GetID() string
@@ -68,6 +76,9 @@ type Alert interface {
 	SetGroupID(string)
 	IncrementEventCount(int)
 	SetUpdatedAt(time.Time)
+	// GetAggregationConfig returns the alert's aggregation configuration from the rule.
+	// Returns nil if no aggregation is configured.
+	GetAggregationConfig() *AlertAggregationConfig
 }
 
 // DedupEntry represents a deduplication entry.
@@ -135,9 +146,17 @@ func (d *Deduplicator) Stop() {
 }
 
 // Check checks if an alert is a duplicate.
+// If the alert has an aggregation config from the rule, it uses rule-specific settings.
 func (d *Deduplicator) Check(alert Alert) *DedupResult {
 	d.totalChecked.Add(1)
 
+	// Check if alert has rule-specific aggregation config
+	aggConfig := alert.GetAggregationConfig()
+	if aggConfig != nil {
+		return d.checkWithAggregationConfig(alert, aggConfig)
+	}
+
+	// Fall back to default deduplicator strategy
 	switch d.config.Strategy {
 	case StrategyExact:
 		return d.checkExact(alert)
@@ -149,6 +168,88 @@ func (d *Deduplicator) Check(alert Alert) *DedupResult {
 		return d.checkSimilarity(alert)
 	default:
 		return d.checkKey(alert)
+	}
+}
+
+// checkWithAggregationConfig checks for duplicates using rule-specific aggregation settings.
+// This allows each rule to define its own deduplication window, action, and max count.
+func (d *Deduplicator) checkWithAggregationConfig(alert Alert, aggConfig *AlertAggregationConfig) *DedupResult {
+	dedupKey := alert.GetDedupKey()
+	key := fmt.Sprintf("%s:%s", alert.GetTenantID(), dedupKey)
+
+	// Determine window duration
+	windowDuration := aggConfig.Window
+	if windowDuration <= 0 {
+		windowDuration = d.config.WindowDuration
+	}
+
+	// Determine max count
+	maxCount := aggConfig.MaxCount
+	if maxCount <= 0 {
+		maxCount = d.config.MaxGroupSize
+	}
+
+	// Determine action
+	action := aggConfig.Action
+	if action == "" {
+		action = d.config.Action
+	}
+
+	if entry, ok := d.entries.Load(key); ok {
+		e := entry.(*DedupEntry)
+		if time.Now().Before(e.ExpiresAt) {
+			d.totalDuplicates.Add(1)
+
+			// Update entry
+			e.Count++
+			e.LastSeen = time.Now()
+
+			// Determine action based on count
+			resultAction := action
+			if e.Count > maxCount {
+				resultAction = ActionDrop
+				d.totalDropped.Add(1)
+			} else if action == ActionMerge {
+				d.totalMerged.Add(1)
+			}
+
+			result := &DedupResult{
+				IsDuplicate:    true,
+				Action:         resultAction,
+				ExistingID:     e.AlertID,
+				DuplicateCount: e.Count,
+			}
+
+			// Handle grouping
+			if resultAction == ActionGroup {
+				groupID := d.getOrCreateGroup(e.AlertID)
+				d.addToGroup(groupID, alert.GetID())
+				result.GroupID = groupID
+			}
+
+			return result
+		}
+		// Entry expired, remove it
+		d.entries.Delete(key)
+	}
+
+	// Not a duplicate, add entry with rule-specific window
+	now := time.Now()
+	entry := &DedupEntry{
+		Key:         key,
+		Fingerprint: alert.GetFingerprint(),
+		AlertID:     alert.GetID(),
+		TenantID:    alert.GetTenantID(),
+		RuleID:      alert.GetRuleID(),
+		Count:       1,
+		FirstSeen:   now,
+		LastSeen:    now,
+		ExpiresAt:   now.Add(windowDuration),
+	}
+	d.entries.Store(key, entry)
+
+	return &DedupResult{
+		IsDuplicate: false,
 	}
 }
 

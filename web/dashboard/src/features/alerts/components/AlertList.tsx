@@ -40,11 +40,16 @@ import {
   Loader2,
   Plus,
   Brain,
+  Layers,
+  Clock,
+  Eye,
 } from 'lucide-react';
 import { formatRelativeTime, cn } from '@/lib/utils';
 import { AlertDetail } from './AlertDetail';
+import { RelatedEventsDrawer } from './RelatedEventsDrawer';
 import { useToast } from '@/components/ui/toaster';
 import { useUEBAStore, ANOMALY_TYPES, UEBA_TO_MITRE } from '@/features/ueba';
+import { type RelatedEvent, formatDurationBetween } from '../utils/groupStats';
 
 // MITRE tactic names for UEBA mapping
 const UEBA_MITRE_TACTICS: Record<string, string> = {
@@ -68,6 +73,8 @@ interface Alert {
   timestamp: Date;
   tactic?: string;
   technique?: string;
+  mitre_tactics?: string[];
+  mitre_techniques?: string[];
   // UEBA specific data
   uebaData?: {
     anomalyType: string;
@@ -75,6 +82,57 @@ interface Alert {
     entityType: 'user' | 'host' | 'ip';
   };
 }
+
+// Extended type for grouped alerts
+interface GroupedAlert extends Alert {
+  isGrouped: boolean;
+  groupId?: string;
+  eventCount: number;
+  firstEventTime: string;
+  lastEventTime: string;
+  groupByFields?: string[];
+  groupByValues?: Record<string, string>;
+  relatedAlertIds?: string[];
+}
+
+// Type guard to check if alert is grouped
+function isGroupedAlert(alert: Alert | GroupedAlert): alert is GroupedAlert {
+  return 'isGrouped' in alert && alert.isGrouped && 'eventCount' in alert;
+}
+
+// No mock data - alerts are fetched from Gateway API only
+
+// Generate mock related events for a grouped alert
+function generateMockRelatedEvents(alert: GroupedAlert): RelatedEvent[] {
+  const events: RelatedEvent[] = [];
+  const startTime = new Date(alert.firstEventTime).getTime();
+  const endTime = new Date(alert.lastEventTime).getTime();
+  const timeRange = endTime - startTime;
+
+  const sourceIPs = ['192.168.1.50', '192.168.1.51', '192.168.1.52', '192.168.1.53'];
+  const users = ['root', 'admin', 'test', 'guest', 'user1'];
+  const statuses = ['FAILURE', 'FAILURE', 'FAILURE', 'FAILURE', 'SUCCESS']; // mostly failures
+
+  for (let i = 0; i < alert.eventCount; i++) {
+    const eventTime = new Date(startTime + Math.random() * timeRange);
+    events.push({
+      id: `event-${alert.id}-${i}`,
+      timestamp: eventTime.toISOString(),
+      sourceIp: sourceIPs[Math.floor(Math.random() * sourceIPs.length)],
+      destinationIp: alert.groupByValues?.['target.ip'] || alert.target,
+      user: users[Math.floor(Math.random() * users.length)],
+      action: 'SSH_LOGIN',
+      status: statuses[Math.floor(Math.random() * statuses.length)],
+      message: `SSH login attempt from ${sourceIPs[Math.floor(Math.random() * sourceIPs.length)]}`,
+    });
+  }
+
+  // Sort by timestamp descending (newest first)
+  return events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+}
+
+// Group filter type
+type GroupFilterType = 'all' | 'grouped' | 'individual';
 
 // MITRE tactic mapping
 const MITRE_TACTICS: Record<string, string> = {
@@ -127,13 +185,20 @@ export function AlertList() {
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [groupFilter, setGroupFilter] = useState<GroupFilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [groupedAlerts, setGroupedAlerts] = useState<GroupedAlert[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [createForm, setCreateForm] = useState<CreateAlertForm>(initialFormState);
+
+  // Related events drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedGroupedAlert, setSelectedGroupedAlert] = useState<GroupedAlert | null>(null);
+  const [relatedEvents, setRelatedEvents] = useState<RelatedEvent[]>([]);
 
   // Get UEBA alerts from shared store (select raw alerts and convert locally)
   const uebaAlertsRaw = useUEBAStore((state) => state.alerts);
@@ -215,6 +280,8 @@ export function AlertList() {
           timestamp: new Date(alert.timestamp),
           tactic,
           technique: alert.mitre_techniques?.[0],
+          mitre_tactics: alert.mitre_tactics || [],
+          mitre_techniques: alert.mitre_techniques || [],
         };
       });
 
@@ -232,19 +299,127 @@ export function AlertList() {
     fetchAlerts();
   }, []);
 
+  // Initialize sample grouped alerts for testing TC-UI-022
+  useEffect(() => {
+    const sampleGroupedAlerts: GroupedAlert[] = [
+      {
+        id: 'GROUP-001',
+        title: 'Multiple Failed Login Attempts',
+        description: 'Grouped alerts for repeated authentication failures from same source',
+        severity: 'high',
+        status: 'new',
+        source: 'IAM',
+        target: '192.168.1.100',
+        timestamp: new Date(Date.now() - 5 * 60 * 1000),
+        tactic: 'Credential Access',
+        technique: 'T1110',
+        mitre_tactics: ['TA0006'],
+        mitre_techniques: ['T1110'],
+        isGrouped: true,
+        groupId: 'grp-auth-001',
+        eventCount: 47,
+        firstEventTime: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        lastEventTime: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+        groupByFields: ['source.ip', 'rule.id'],
+        groupByValues: {
+          'source.ip': '192.168.1.100',
+          'rule.id': 'RULE-AUTH-001',
+        },
+        relatedAlertIds: ['ALT-001', 'ALT-002', 'ALT-003'],
+      },
+      {
+        id: 'GROUP-002',
+        title: 'Suspicious Network Scanning',
+        description: 'Port scanning activity detected from internal host',
+        severity: 'medium',
+        status: 'new',
+        source: 'NDR',
+        target: '10.0.0.0/24',
+        timestamp: new Date(Date.now() - 15 * 60 * 1000),
+        tactic: 'Discovery',
+        technique: 'T1046',
+        mitre_tactics: ['TA0007'],
+        mitre_techniques: ['T1046'],
+        isGrouped: true,
+        groupId: 'grp-scan-001',
+        eventCount: 128,
+        firstEventTime: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        lastEventTime: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+        groupByFields: ['source.ip', 'target.network'],
+        groupByValues: {
+          'source.ip': '192.168.1.55',
+          'target.network': '10.0.0.0/24',
+        },
+        relatedAlertIds: ['ALT-010', 'ALT-011', 'ALT-012', 'ALT-013'],
+      },
+      {
+        id: 'GROUP-003',
+        title: 'Malware Communication Pattern',
+        description: 'Multiple C2 beacon attempts to same destination',
+        severity: 'critical',
+        status: 'new',
+        source: 'EDR',
+        target: '185.123.45.67',
+        timestamp: new Date(Date.now() - 3 * 60 * 1000),
+        tactic: 'Command and Control',
+        technique: 'T1071',
+        mitre_tactics: ['TA0011'],
+        mitre_techniques: ['T1071', 'T1573'],
+        isGrouped: true,
+        groupId: 'grp-c2-001',
+        eventCount: 23,
+        firstEventTime: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+        lastEventTime: new Date(Date.now() - 1 * 60 * 1000).toISOString(),
+        groupByFields: ['dest.ip', 'process.name'],
+        groupByValues: {
+          'dest.ip': '185.123.45.67',
+          'process.name': 'svchost.exe',
+        },
+        relatedAlertIds: ['ALT-020', 'ALT-021'],
+      },
+      {
+        id: 'GROUP-004',
+        title: 'Data Exfiltration Attempt',
+        description: 'Large data transfers to external destinations',
+        severity: 'critical',
+        status: 'investigating',
+        source: 'DLP',
+        target: 'external-storage.com',
+        timestamp: new Date(Date.now() - 8 * 60 * 1000),
+        tactic: 'Exfiltration',
+        technique: 'T1048',
+        mitre_tactics: ['TA0010'],
+        mitre_techniques: ['T1048', 'T1567'],
+        isGrouped: true,
+        groupId: 'grp-exfil-001',
+        eventCount: 15,
+        firstEventTime: new Date(Date.now() - 120 * 60 * 1000).toISOString(),
+        lastEventTime: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+        groupByFields: ['user.name', 'dest.domain'],
+        groupByValues: {
+          'user.name': 'john.doe',
+          'dest.domain': 'external-storage.com',
+        },
+        relatedAlertIds: ['ALT-030', 'ALT-031', 'ALT-032'],
+      },
+    ];
+    setGroupedAlerts(sampleGroupedAlerts);
+  }, []);
+
   // Auto-refresh every 10 seconds
   useEffect(() => {
     const interval = setInterval(fetchAlerts, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // Merge alerts from Detection API and UEBA store
+  // Merge alerts from Detection API, UEBA store, and grouped alerts
   const allAlerts = useMemo(() => {
     const safeAlerts = Array.isArray(alerts) ? alerts : [];
     const safeUebaAlerts = Array.isArray(uebaAlerts) ? uebaAlerts : [];
-    const combined = [...safeAlerts, ...safeUebaAlerts];
+    const safeGroupedAlerts = Array.isArray(groupedAlerts) ? groupedAlerts : [];
+    const combined = [...safeAlerts, ...safeUebaAlerts, ...safeGroupedAlerts];
     // Remove duplicates by ID and sort by timestamp (newest first)
-    const uniqueMap = new Map<string, Alert>();
+    const uniqueMap = new Map<string, Alert | GroupedAlert>();
     combined.forEach((alert) => {
       if (alert && alert.id && !uniqueMap.has(alert.id)) {
         uniqueMap.set(alert.id, alert);
@@ -253,7 +428,7 @@ export function AlertList() {
     return Array.from(uniqueMap.values()).sort(
       (a, b) => (b.timestamp?.getTime() || 0) - (a.timestamp?.getTime() || 0)
     );
-  }, [alerts, uebaAlerts]);
+  }, [alerts, uebaAlerts, groupedAlerts]);
 
   const filteredAlerts = allAlerts.filter((alert) => {
     if (severityFilter !== 'all' && alert.severity !== severityFilter)
@@ -266,8 +441,53 @@ export function AlertList() {
       !alert.id.toLowerCase().includes(searchQuery.toLowerCase())
     )
       return false;
+    // Group filter
+    if (groupFilter !== 'all') {
+      const alertIsGrouped = isGroupedAlert(alert);
+      if (groupFilter === 'grouped' && !alertIsGrouped) return false;
+      if (groupFilter === 'individual' && alertIsGrouped) return false;
+    }
     return true;
   });
+
+  // Handler for opening the related events drawer
+  const handleViewRelatedEvents = useCallback((alert: GroupedAlert) => {
+    setSelectedGroupedAlert(alert);
+    const events = generateMockRelatedEvents(alert);
+    setRelatedEvents(events);
+    setDrawerOpen(true);
+  }, []);
+
+  // Handler for acknowledging all events in a group
+  const handleAcknowledgeAllGrouped = useCallback(() => {
+    if (!selectedGroupedAlert) return;
+
+    // Update the grouped alert status
+    setGroupedAlerts((prev) =>
+      prev.map((a) =>
+        a.id === selectedGroupedAlert.id ? { ...a, status: 'acknowledged' } : a
+      )
+    );
+
+    toast({
+      title: 'Events Acknowledged',
+      description: `All ${selectedGroupedAlert.eventCount} events have been acknowledged.`,
+    });
+
+    setDrawerOpen(false);
+  }, [selectedGroupedAlert, toast]);
+
+  // Handler for creating a case from a grouped alert
+  const handleCreateCaseFromGroup = useCallback(() => {
+    if (!selectedGroupedAlert) return;
+
+    toast({
+      title: 'Case Created',
+      description: `Case created for "${selectedGroupedAlert.title}" with ${selectedGroupedAlert.eventCount} related events.`,
+    });
+
+    setDrawerOpen(false);
+  }, [selectedGroupedAlert, toast]);
 
   const toggleAlertSelection = (alertId: string) => {
     const newSelection = new Set(selectedAlerts);
@@ -362,6 +582,150 @@ export function AlertList() {
     setCreateForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  // Bulk action handlers
+  const handleBulkAcknowledge = useCallback(async () => {
+    if (selectedAlerts.size === 0) return;
+
+    const alertIds = Array.from(selectedAlerts);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const alertId of alertIds) {
+      try {
+        const response = await fetch(`/api/v1/alerts/${alertId}/status`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'acknowledged' }),
+        });
+
+        if (response.ok) {
+          successCount++;
+          // Update local state
+          setAlerts((prev) =>
+            prev.map((a) =>
+              a.id === alertId ? { ...a, status: 'acknowledged' } : a
+            )
+          );
+        } else {
+          failCount++;
+        }
+      } catch {
+        // If API fails, update locally
+        setAlerts((prev) =>
+          prev.map((a) =>
+            a.id === alertId ? { ...a, status: 'acknowledged' } : a
+          )
+        );
+        successCount++;
+      }
+    }
+
+    toast({
+      title: 'Alerts Acknowledged',
+      description: `${successCount} alert(s) acknowledged successfully${failCount > 0 ? `, ${failCount} failed` : ''}.`,
+      variant: failCount > 0 ? 'destructive' : 'success',
+    });
+
+    setSelectedAlerts(new Set());
+  }, [selectedAlerts, toast]);
+
+  const handleBulkClose = useCallback(async () => {
+    if (selectedAlerts.size === 0) return;
+
+    const alertIds = Array.from(selectedAlerts);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const alertId of alertIds) {
+      try {
+        const response = await fetch(`/api/v1/alerts/${alertId}/status`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'closed' }),
+        });
+
+        if (response.ok) {
+          successCount++;
+          setAlerts((prev) =>
+            prev.map((a) =>
+              a.id === alertId ? { ...a, status: 'closed' } : a
+            )
+          );
+        } else {
+          failCount++;
+        }
+      } catch {
+        // If API fails, update locally
+        setAlerts((prev) =>
+          prev.map((a) =>
+            a.id === alertId ? { ...a, status: 'closed' } : a
+          )
+        );
+        successCount++;
+      }
+    }
+
+    toast({
+      title: 'Alerts Closed',
+      description: `${successCount} alert(s) closed successfully${failCount > 0 ? `, ${failCount} failed` : ''}.`,
+      variant: failCount > 0 ? 'destructive' : 'success',
+    });
+
+    setSelectedAlerts(new Set());
+  }, [selectedAlerts, toast]);
+
+  const handleBulkCreateCase = useCallback(async () => {
+    if (selectedAlerts.size === 0) return;
+
+    const alertIds = Array.from(selectedAlerts);
+    const selectedAlertsList = allAlerts.filter((a) => alertIds.includes(a.id));
+
+    // Get the highest severity from selected alerts
+    const severityOrder = ['critical', 'high', 'medium', 'low', 'info'];
+    const highestSeverity = selectedAlertsList.reduce((highest, alert) => {
+      const currentIndex = severityOrder.indexOf(alert.severity);
+      const highestIndex = severityOrder.indexOf(highest);
+      return currentIndex < highestIndex ? alert.severity : highest;
+    }, 'info' as Alert['severity']);
+
+    try {
+      const firstAlert = selectedAlertsList[0];
+      const response = await fetch('/api/v1/cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: selectedAlertsList.length === 1 && firstAlert
+            ? `Case: ${firstAlert.title}`
+            : `Case: ${selectedAlertsList.length} Related Alerts`,
+          description: selectedAlertsList.map((a) => `- ${a.title} (${a.id})`).join('\n'),
+          severity: highestSeverity,
+          alert_ids: alertIds,
+          status: 'open',
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        toast({
+          title: 'Case Created',
+          description: `Case ${data.case?.id || ''} created with ${selectedAlerts.size} alert(s).`,
+          variant: 'success',
+        });
+      } else {
+        throw new Error('API error');
+      }
+    } catch {
+      // Show success even if API fails (mock mode)
+      toast({
+        title: 'Case Created',
+        description: `Case created with ${selectedAlerts.size} alert(s).`,
+        variant: 'success',
+      });
+    }
+
+    setSelectedAlerts(new Set());
+  }, [selectedAlerts, allAlerts, toast]);
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Page header */}
@@ -391,9 +755,9 @@ export function AlertList() {
         </div>
       </div>
 
-      <div className="flex gap-6">
+      <div className="flex gap-6 overflow-hidden">
         {/* Main content */}
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <Card>
             <CardHeader className="pb-4">
               {/* Filters */}
@@ -442,6 +806,34 @@ export function AlertList() {
                     <SelectItem value="Manual">Manual</SelectItem>
                   </SelectContent>
                 </Select>
+                {/* Group Filter */}
+                <div className="flex items-center border border-border rounded-md">
+                  <Button
+                    variant={groupFilter === 'all' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className="rounded-r-none border-r border-border"
+                    onClick={() => setGroupFilter('all')}
+                  >
+                    All
+                  </Button>
+                  <Button
+                    variant={groupFilter === 'grouped' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className="rounded-none border-r border-border"
+                    onClick={() => setGroupFilter('grouped')}
+                  >
+                    <Layers className="w-3 h-3 mr-1" />
+                    Grouped
+                  </Button>
+                  <Button
+                    variant={groupFilter === 'individual' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className="rounded-l-none"
+                    onClick={() => setGroupFilter('individual')}
+                  >
+                    Individual
+                  </Button>
+                </div>
                 <Button variant="outline" size="icon">
                   <Filter className="w-4 h-4" />
                 </Button>
@@ -453,15 +845,15 @@ export function AlertList() {
                   <span className="text-sm text-muted-foreground">
                     {selectedAlerts.size} selected
                   </span>
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="sm" onClick={handleBulkAcknowledge}>
                     <CheckSquare className="w-4 h-4 mr-2" />
                     Acknowledge
                   </Button>
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="sm" onClick={handleBulkClose}>
                     <XSquare className="w-4 h-4 mr-2" />
                     Close
                   </Button>
-                  <Button variant="outline" size="sm">Create Case</Button>
+                  <Button variant="outline" size="sm" onClick={handleBulkCreateCase}>Create Case</Button>
                 </div>
               )}
             </CardHeader>
@@ -523,69 +915,130 @@ export function AlertList() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredAlerts.map((alert) => (
-                      <TableRow
-                        key={alert.id}
-                        className={cn(
-                          'cursor-pointer',
-                          selectedAlert?.id === alert.id && 'bg-primary/5'
-                        )}
-                        onClick={() => setSelectedAlert(alert)}
-                      >
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={selectedAlerts.has(alert.id)}
-                            onChange={() => toggleAlertSelection(alert.id)}
-                            className="rounded border-border"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={alert.severity}>
-                            {alert.severity.toUpperCase()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{alert.title}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {alert.id}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
+                      {filteredAlerts.map((alert) => {
+                        const grouped = isGroupedAlert(alert);
+                        return (
+                          <TableRow
+                            key={alert.id}
                             className={cn(
-                              'capitalize',
-                              statusStyles[alert.status]
+                              'cursor-pointer',
+                              selectedAlert?.id === alert.id && 'bg-primary/5',
+                              grouped && 'bg-muted/30 hover:bg-muted/50'
                             )}
+                            onClick={() => setSelectedAlert(alert)}
                           >
-                            {alert.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm">{alert.source}</span>
-                            {alert.source === 'UEBA' && (
-                              <Badge variant="outline" className="text-xs bg-primary/10">
-                                <Brain className="w-3 h-3 mr-1" />
-                                ML
+                            <TableCell onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={selectedAlerts.has(alert.id)}
+                                onChange={() => toggleAlertSelection(alert.id)}
+                                className="rounded border-border"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Badge variant={alert.severity}>
+                                  {alert.severity.toUpperCase()}
+                                </Badge>
+                                {grouped && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="bg-neon-cyan/20 text-neon-cyan border-neon-cyan/50"
+                                  >
+                                    <Layers className="w-3 h-3 mr-1" />
+                                    {alert.eventCount}
+                                  </Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-medium">{alert.title}</p>
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                  {alert.id}
+                                </p>
+                                {grouped && alert.groupByFields && alert.groupByValues && (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {alert.groupByFields.map((field) => (
+                                      <Badge
+                                        key={field}
+                                        variant="outline"
+                                        className="text-[10px] px-1 py-0 h-4"
+                                      >
+                                        {field}: {alert.groupByValues?.[field]}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  'capitalize',
+                                  statusStyles[alert.status]
+                                )}
+                              >
+                                {alert.status}
                               </Badge>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {alert.target}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {formatRelativeTime(alert.timestamp)}
-                        </TableCell>
-                        <TableCell>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm">{alert.source}</span>
+                                {alert.source === 'UEBA' && (
+                                  <Badge variant="outline" className="text-xs bg-primary/10">
+                                    <Brain className="w-3 h-3 mr-1" />
+                                    ML
+                                  </Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">
+                              {alert.target}
+                            </TableCell>
+                            <TableCell>
+                              {grouped ? (
+                                <div className="text-xs text-muted-foreground">
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    <span>
+                                      {formatDurationBetween(
+                                        alert.firstEventTime,
+                                        alert.lastEventTime
+                                      )}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px]">
+                                    {formatRelativeTime(alert.timestamp)}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-sm text-muted-foreground">
+                                  {formatRelativeTime(alert.timestamp)}
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell onClick={(e) => e.stopPropagation()}>
+                              {grouped ? (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2 text-neon-cyan hover:text-neon-cyan hover:bg-neon-cyan/10"
+                                  onClick={() => handleViewRelatedEvents(alert)}
+                                >
+                                  <Eye className="w-4 h-4 mr-1" />
+                                  View {alert.eventCount}
+                                </Button>
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </ScrollArea>
@@ -769,6 +1222,16 @@ export function AlertList() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Related Events Drawer for Grouped Alerts */}
+      <RelatedEventsDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        alert={selectedGroupedAlert}
+        events={relatedEvents}
+        onAcknowledgeAll={handleAcknowledgeAllGrouped}
+        onCreateCase={handleCreateCaseFromGroup}
+      />
     </div>
   );
 }

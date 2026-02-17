@@ -32,17 +32,26 @@ services:
     container_name: siem-kafka
     ports:
       - "9092:9092"
+      - "29092:29092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_LOG_DIRS: /var/lib/kafka/data
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_NUM_PARTITIONS: 8
+      # Single broker configuration - set replication factor to 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
@@ -229,6 +238,7 @@ services:
     ports:
       - "9514:9514/udp"
       - "9515:9515/tcp"
+      - "8087:8087"
     environment:
       - KAFKA_BROKERS=kafka:9092
     depends_on:
@@ -261,8 +271,14 @@ services:
     container_name: siem-parser
     environment:
       - KAFKA_BROKERS=kafka:9092
+      - KAFKA_INPUT_TOPIC=logs.raw
+      - KAFKA_OUTPUT_TOPIC=logs.parsed
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=siem_password
     depends_on:
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - siem-network
@@ -277,7 +293,7 @@ services:
       dockerfile: ./services/ml-gateway/Dockerfile
     container_name: siem-ml-gateway
     ports:
-      - "8000:8000"
+      - "8000:8080"
     environment:
       - KAFKA_BROKERS=kafka:9092
       - REDIS_HOST=redis
@@ -286,6 +302,35 @@ services:
     depends_on:
       - kafka
       - redis
+    networks:
+      - siem-network
+
+  copilot:
+    build:
+      context: ./ai
+      dockerfile: ./services/copilot/Dockerfile
+    container_name: siem-copilot
+    ports:
+      - "8001:8001"
+    env_file:
+      - ./.env
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=siem_password
+      # OpenAI API Configuration
+      - VLLM_ENDPOINT=https://api.openai.com/v1
+      - LLM_MODEL=gpt-4o-mini
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=siem
+      - POSTGRES_PASSWORD=siem_password
+      - POSTGRES_DB=siem_soar
+    depends_on:
+      - kafka
+      - redis
+      - postgres
     networks:
       - siem-network
 

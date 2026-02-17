@@ -246,6 +246,13 @@ func (l *Loader) loadFromReader(reader io.Reader, source string) (*Rule, error) 
 }
 
 func (l *Loader) parseRule(r *Rule) error {
+	// Parse alert aggregation configuration if present
+	if r.AlertAggregation != nil {
+		if err := r.AlertAggregation.ParseWindow(); err != nil {
+			return fmt.Errorf("failed to parse alert_aggregation window: %w", err)
+		}
+	}
+
 	switch r.Type {
 	case TypeSigma:
 		return l.converter.Convert(r)

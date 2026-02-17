@@ -12,6 +12,8 @@ import {
   Settings2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { StatusIndicator } from '../execution/StatusIndicator';
+import type { NodeExecutionStatus } from '../../types/execution.types';
 
 export interface ActionNodeData {
   label: string;
@@ -19,6 +21,8 @@ export interface ActionNodeData {
   status?: 'pending' | 'running' | 'completed' | 'failed';
   duration?: number;
   description?: string;
+  executionStatus?: NodeExecutionStatus;
+  executionDuration?: number;
 }
 
 const ActionNode = ({ data, selected }: NodeProps) => {
@@ -58,12 +62,28 @@ const ActionNode = ({ data, selected }: NodeProps) => {
 
   const Icon = getIcon();
 
+  // Border glow effect based on execution status
+  const getStatusBorderClass = () => {
+    if (!nodeData.executionStatus) return '';
+    switch (nodeData.executionStatus) {
+      case 'running':
+        return 'ring-2 ring-blue-500/50 animate-pulse';
+      case 'success':
+        return 'ring-2 ring-[#5CC05C]/50';
+      case 'error':
+        return 'ring-2 ring-[#DC4E41]/50 animate-shake';
+      default:
+        return '';
+    }
+  };
+
   return (
     <div
       className={cn(
         'relative min-w-[220px] transition-all duration-300',
         'hover:scale-105 hover:z-10',
-        selected && 'ring-2 ring-[#00A4A6] ring-offset-2 ring-offset-background scale-105 z-10'
+        selected && 'ring-2 ring-[#00A4A6] ring-offset-2 ring-offset-background scale-105 z-10',
+        getStatusBorderClass()
       )}
     >
       {/* Rounded Rectangle */}
@@ -79,6 +99,12 @@ const ActionNode = ({ data, selected }: NodeProps) => {
             'from-[#00A4A6]/15 via-card to-card border-[#00A4A6]/40 hover:border-[#00A4A6]'
         )}
       >
+        {/* Execution Status Indicator */}
+        {nodeData.executionStatus && (
+          <div className="absolute -top-2 -right-2 z-10">
+            <StatusIndicator status={nodeData.executionStatus} size="sm" />
+          </div>
+        )}
         <div className="flex items-start gap-3">
           {/* Icon Container */}
           <div

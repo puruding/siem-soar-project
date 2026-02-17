@@ -79,9 +79,20 @@ async def lifespan(app: FastAPI):
     logger.info("starting_service", environment=settings.environment)
 
     # Initialize services
+    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
+
+    logger.info(
+        "llm_config",
+        endpoint=settings.vllm_endpoint,
+        model=settings.llm_model,
+        api_key_set=api_key is not None,
+        api_key_prefix=api_key[:20] if api_key else "None",
+    )
+
     chat_service = ChatService(
         llm_endpoint=settings.vllm_endpoint,
         model_name=settings.llm_model,
+        api_key=api_key,
         config=ChatConfig(
             max_tokens=settings.max_tokens,
             temperature=settings.temperature,
@@ -91,16 +102,19 @@ async def lifespan(app: FastAPI):
     nl2sql_service = NL2SQLService(
         llm_endpoint=settings.vllm_endpoint,
         model_name=settings.llm_model,
+        api_key=api_key,
     )
 
     summarize_service = SummarizeService(
         llm_endpoint=settings.vllm_endpoint,
         model_name=settings.llm_model,
+        api_key=api_key,
     )
 
     recommend_service = RecommendService(
         llm_endpoint=settings.vllm_endpoint,
         model_name=settings.llm_model,
+        api_key=api_key,
     )
 
     context_manager = ContextManager()

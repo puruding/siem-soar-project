@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
+	"github.com/siem-soar-platform/services/router/internal/routing"
 )
 
 // KafkaConfig holds Kafka destination configuration.
@@ -178,7 +179,7 @@ func (d *KafkaDestination) Type() string {
 }
 
 // Send sends events to Kafka.
-func (d *KafkaDestination) Send(ctx context.Context, events []*Event) error {
+func (d *KafkaDestination) Send(ctx context.Context, events []*routing.Event) error {
 	if len(events) == 0 {
 		return nil
 	}

@@ -188,7 +188,8 @@ func (e *Engine) matchesBaseConditions(r *rule.Rule, event *engine.Event) bool {
 
 	for _, cond := range r.ParsedConditions.Conditions {
 		if cond.Required {
-			value, found := getNestedValue(event.Data, cond.Field)
+			// Use event's unified field accessor (supports UDM + Raw fallback)
+			value, found := event.GetFieldValue(cond.Field)
 			if !found {
 				return false
 			}
@@ -256,7 +257,8 @@ func (e *Engine) processCorrelation(r *rule.Rule, event *engine.Event) *engine.D
 
 	// Track unique values if needed
 	if cfg.DistinctField != "" {
-		value, found := getNestedValue(event.Data, cfg.DistinctField)
+		// Use event's unified field accessor (supports UDM + Raw fallback)
+		value, found := event.GetFieldValue(cfg.DistinctField)
 		if found {
 			state.UniqueValues[fmt.Sprintf("%v", value)] = true
 		}
@@ -409,7 +411,8 @@ func (e *Engine) processThreshold(r *rule.Rule, event *engine.Event) *engine.Det
 
 func (e *Engine) matchesSequenceStep(step *rule.SequenceStep, event *engine.Event) bool {
 	for _, cond := range step.Conditions {
-		value, found := getNestedValue(event.Data, cond.Field)
+		// Use event's unified field accessor (supports UDM + Raw fallback)
+		value, found := event.GetFieldValue(cond.Field)
 		if !found {
 			return false
 		}
@@ -442,7 +445,8 @@ func (e *Engine) buildGroupKey(fields []string, event *engine.Event) string {
 
 	var parts []string
 	for _, field := range fields {
-		value, found := getNestedValue(event.Data, field)
+		// Use event's unified field accessor (supports UDM + Raw fallback)
+		value, found := event.GetFieldValue(field)
 		if found {
 			parts = append(parts, fmt.Sprintf("%v", value))
 		} else {

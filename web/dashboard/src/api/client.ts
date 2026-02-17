@@ -32,7 +32,13 @@ class ApiClient {
   }
 
   private buildUrl(endpoint: string, params?: Record<string, string | number | boolean | undefined>): string {
-    const url = new URL(`${this.baseUrl}${endpoint}`);
+    // Handle both absolute and relative URLs
+    let fullUrl = `${this.baseUrl}${endpoint}`;
+
+    // For relative URLs, use window.location.origin as base
+    const url = fullUrl.startsWith('http')
+      ? new URL(fullUrl)
+      : new URL(fullUrl, window.location.origin);
 
     if (params) {
       Object.entries(params).forEach(([key, value]) => {

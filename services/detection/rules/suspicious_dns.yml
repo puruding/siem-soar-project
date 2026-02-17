@@ -1,0 +1,30 @@
+title: Suspicious DNS Query
+id: sigma-004
+status: experimental
+description: Detects DNS queries to suspicious domains
+author: SIEM-SOAR
+logsource:
+  category: dns
+  product: network
+detection:
+  selection:
+    event_type: 'dns_query'
+    destination|endswith:
+      - '.xyz'
+      - '.top'
+      - '.tk'
+      - '.ml'
+  condition: selection
+level: high
+tags:
+  - attack.command_and_control
+  - attack.t1071.004
+
+# Alert Aggregation - groups alerts by domain and source IP within 1 hour
+alert_aggregation:
+  group_by:
+    - network.dns.questions[0].name
+    - principal.ip
+  window: 1h
+  action: merge
+  max_count: 200

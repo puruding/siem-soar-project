@@ -11,10 +11,10 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from tqdm import tqdm
 
-from ai.common.logging import LoggerMixin, get_logger
-from ai.models.dga.config import DGAConfig, DGATrainingConfig, DGAFamily
-from ai.models.dga.model import DGADetectorModel
-from ai.models.dga.features import DGAFeatureExtractor, DomainTokenizer
+from common.logging import LoggerMixin, get_logger
+from models.dga.config import DGAConfig, DGATrainingConfig, DGAFamily
+from models.dga.model import DGADetectorModel
+from models.dga.features import DGAFeatureExtractor, DomainTokenizer
 
 
 logger = get_logger(__name__)

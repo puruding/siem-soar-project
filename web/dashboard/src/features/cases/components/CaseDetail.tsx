@@ -1,4 +1,5 @@
 import { useParams, Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +21,7 @@ import {
   FileText,
   Link as LinkIcon,
   Target,
+  Loader2,
 } from 'lucide-react';
 import { formatTimestamp, formatRelativeTime, cn } from '@/lib/utils';
 import { CaseTimeline } from './CaseTimeline';
@@ -32,8 +34,8 @@ const statusStyles: Record<string, string> = {
   closed: 'bg-muted text-muted-foreground border-border',
 };
 
-// Mock case data
-const mockCase = {
+// Default case data (used as fallback)
+const defaultCase = {
   id: 'CASE-2024-001',
   title: 'Ransomware Incident - Finance Department',
   description:
@@ -74,6 +76,35 @@ const mockCase = {
 
 export function CaseDetail() {
   const { id } = useParams<{ id: string }>();
+  const [caseData, setCaseData] = useState(defaultCase);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchCase = async () => {
+      try {
+        const response = await fetch(`/api/cases/${id}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.data) {
+            setCaseData({
+              ...data.data,
+              created: new Date(data.data.created),
+              updated: new Date(data.data.updated),
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to fetch case, using default data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchCase();
+  }, [id]);
+
+  // Use caseData instead of currentCase
+  const currentCase = caseData;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -88,22 +119,22 @@ export function CaseDetail() {
           <div>
             <div className="flex items-center gap-3 mb-1">
               <span className="text-sm text-muted-foreground font-mono">
-                {mockCase.id}
+                {currentCase.id}
               </span>
-              <Badge variant={mockCase.severity as 'critical' | 'high' | 'medium' | 'low'}>
-                {mockCase.severity}
+              <Badge variant={currentCase.severity as 'critical' | 'high' | 'medium' | 'low'}>
+                {currentCase.severity}
               </Badge>
               <Badge
                 variant="outline"
                 className={cn(
                   'capitalize',
-                  statusStyles[mockCase.status]
+                  statusStyles[currentCase.status]
                 )}
               >
-                {mockCase.status.replace('-', ' ')}
+                {currentCase.status.replace('-', ' ')}
               </Badge>
             </div>
-            <h1 className="text-2xl font-display font-bold">{mockCase.title}</h1>
+            <h1 className="text-2xl font-display font-bold">{currentCase.title}</h1>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -130,9 +161,9 @@ export function CaseDetail() {
               <CardTitle>Description</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-muted-foreground">{mockCase.description}</p>
+              <p className="text-muted-foreground">{currentCase.description}</p>
               <div className="flex flex-wrap gap-2 mt-4">
-                {mockCase.tags.map((tag) => (
+                {currentCase.tags.map((tag) => (
                   <Badge key={tag} variant="secondary">
                     {tag}
                   </Badge>
@@ -145,8 +176,8 @@ export function CaseDetail() {
           <Tabs defaultValue="timeline" className="w-full">
             <TabsList className="w-full justify-start">
               <TabsTrigger value="timeline">Timeline</TabsTrigger>
-              <TabsTrigger value="alerts">Alerts ({mockCase.relatedAlerts.length})</TabsTrigger>
-              <TabsTrigger value="evidence">Evidence ({mockCase.evidence.length})</TabsTrigger>
+              <TabsTrigger value="alerts">Alerts ({currentCase.relatedAlerts.length})</TabsTrigger>
+              <TabsTrigger value="evidence">Evidence ({currentCase.evidence.length})</TabsTrigger>
               <TabsTrigger value="tasks">Tasks</TabsTrigger>
               <TabsTrigger value="notes">Notes</TabsTrigger>
             </TabsList>
@@ -159,7 +190,7 @@ export function CaseDetail() {
               <Card>
                 <CardContent className="pt-6">
                   <div className="space-y-3">
-                    {mockCase.relatedAlerts.map((alert) => (
+                    {currentCase.relatedAlerts.map((alert) => (
                       <div
                         key={alert.id}
                         className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-card hover:border-primary/30 transition-colors cursor-pointer"
@@ -197,7 +228,7 @@ export function CaseDetail() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
-                    {mockCase.evidence.map((file, i) => (
+                    {currentCase.evidence.map((file, i) => (
                       <div
                         key={i}
                         className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
@@ -371,15 +402,15 @@ export function CaseDetail() {
                 <div className="flex items-center gap-2 mt-1">
                   <Avatar className="w-8 h-8">
                     <AvatarFallback className="bg-primary/20 text-primary">
-                      {mockCase.assignee.initials}
+                      {currentCase.assignee.initials}
                     </AvatarFallback>
                   </Avatar>
                   <div>
                     <p className="text-sm font-medium">
-                      {mockCase.assignee.name}
+                      {currentCase.assignee.name}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {mockCase.assignee.email}
+                      {currentCase.assignee.email}
                     </p>
                   </div>
                 </div>
@@ -391,7 +422,7 @@ export function CaseDetail() {
                     Created
                   </label>
                   <p className="text-sm mt-1">
-                    {formatTimestamp(mockCase.created)}
+                    {formatTimestamp(currentCase.created)}
                   </p>
                 </div>
                 <div>
@@ -399,7 +430,7 @@ export function CaseDetail() {
                     Updated
                   </label>
                   <p className="text-sm mt-1">
-                    {formatRelativeTime(mockCase.updated)}
+                    {formatRelativeTime(currentCase.updated)}
                   </p>
                 </div>
               </div>
@@ -410,11 +441,11 @@ export function CaseDetail() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Impacted Assets</CardTitle>
-              <Badge variant="outline">{mockCase.impactedAssets.length}</Badge>
+              <Badge variant="outline">{currentCase.impactedAssets.length}</Badge>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {mockCase.impactedAssets.map((asset, i) => (
+                {currentCase.impactedAssets.map((asset, i) => (
                   <div
                     key={i}
                     className="flex items-center justify-between p-2 rounded-lg bg-muted/30"

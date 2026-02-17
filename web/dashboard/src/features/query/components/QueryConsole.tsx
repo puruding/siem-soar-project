@@ -98,21 +98,21 @@ function generateMockResults(sqlQuery: string): Record<string, unknown>[] {
 
   // Extract table name
   const fromMatch = normalizedQuery.match(/from\s+(\w+)/i);
-  const tableName = fromMatch ? fromMatch[1].toLowerCase() : 'events';
+  const tableName = fromMatch?.[1]?.toLowerCase() ?? 'events';
 
   // Get base data for the table
-  const baseData = mockDataStore[tableName] || mockDataStore.events;
+  const baseData = mockDataStore[tableName] ?? mockDataStore.events ?? [];
 
   // Check if it's a COUNT query
   if (normalizedQuery.includes('count(*)') || normalizedQuery.includes('count(1)')) {
     // Check for GROUP BY
     const groupByMatch = normalizedQuery.match(/group\s+by\s+(\w+)/i);
-    if (groupByMatch) {
+    if (groupByMatch?.[1]) {
       const groupByColumn = groupByMatch[1];
       const grouped: Record<string, number> = {};
       baseData.forEach((row) => {
-        const key = String(row[groupByColumn] || 'unknown');
-        grouped[key] = (grouped[key] || 0) + 1;
+        const key = String(row[groupByColumn] ?? 'unknown');
+        grouped[key] = (grouped[key] ?? 0) + 1;
       });
       return Object.entries(grouped).map(([key, count]) => ({
         [groupByColumn]: key,
@@ -126,11 +126,12 @@ function generateMockResults(sqlQuery: string): Record<string, unknown>[] {
   const selectMatch = normalizedQuery.match(/select\s+([\s\S]+?)\s+from/i);
   let columns: string[] = [];
 
-  if (selectMatch) {
+  if (selectMatch?.[1]) {
     const selectPart = selectMatch[1].trim();
     if (selectPart === '*') {
       // Return all columns
-      columns = baseData.length > 0 ? Object.keys(baseData[0]) : [];
+      const firstRow = baseData[0];
+      columns = firstRow ? Object.keys(firstRow) : [];
     } else {
       // Parse column list
       columns = selectPart
@@ -143,32 +144,39 @@ function generateMockResults(sqlQuery: string): Record<string, unknown>[] {
   // Apply WHERE filter if present
   let filteredData = [...baseData];
   const whereMatch = normalizedQuery.match(/where\s+([\s\S]+?)(?:order|group|limit|$)/i);
-  if (whereMatch) {
+  if (whereMatch?.[1]) {
     const whereClause = whereMatch[1].trim();
 
     // Simple equality filter: column = 'value'
     const eqMatch = whereClause.match(/(\w+)\s*=\s*['"]([^'"]+)['"]/);
     if (eqMatch) {
-      const [, col, val] = eqMatch;
-      filteredData = filteredData.filter((row) =>
-        String(row[col]).toLowerCase() === val.toLowerCase()
-      );
+      const col = eqMatch[1];
+      const val = eqMatch[2];
+      if (col && val) {
+        filteredData = filteredData.filter((row) =>
+          String(row[col] ?? '').toLowerCase() === val.toLowerCase()
+        );
+      }
     }
 
     // IN filter: column IN ('value1', 'value2')
     const inMatch = whereClause.match(/(\w+)\s+in\s*\(\s*([^)]+)\s*\)/i);
     if (inMatch) {
-      const [, col, valuesStr] = inMatch;
-      const values = valuesStr.split(',').map((v) => v.trim().replace(/['"]/g, '').toLowerCase());
-      filteredData = filteredData.filter((row) =>
-        values.includes(String(row[col]).toLowerCase())
-      );
+      const col = inMatch[1];
+      const valuesStr = inMatch[2];
+      if (col && valuesStr) {
+        const values = valuesStr.split(',').map((v) => v.trim().replace(/['"]/g, '').toLowerCase());
+        filteredData = filteredData.filter((row) =>
+          values.includes(String(row[col] ?? '').toLowerCase())
+        );
+      }
     }
   }
 
   // Apply LIMIT
   const limitMatch = normalizedQuery.match(/limit\s+(\d+)/i);
-  const limit = limitMatch ? parseInt(limitMatch[1], 10) : filteredData.length;
+  const limitStr = limitMatch?.[1];
+  const limit = limitStr ? parseInt(limitStr, 10) : filteredData.length;
   filteredData = filteredData.slice(0, limit);
 
   // Project only selected columns
@@ -411,6 +419,21 @@ export function QueryConsole() {
     const saved = localStorage.getItem('query-history');
     return saved ? JSON.parse(saved) : queryHistory;
   });
+
+  // Read URL query parameters on mount
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryParam = urlParams.get('q');
+    if (queryParam) {
+      try {
+        const decodedQuery = decodeURIComponent(queryParam);
+        setQuery(decodedQuery);
+      } catch {
+        // If decoding fails, use the raw value
+        setQuery(queryParam);
+      }
+    }
+  }, []);
 
   // Save history to localStorage when it changes
   useEffect(() => {

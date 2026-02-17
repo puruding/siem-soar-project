@@ -96,6 +96,16 @@ temp/
 Thumbs.DB
 desktop.ini
 
+# Windows reserved filenames (NUL, CON, PRN, AUX, etc.)
+nul
+NUL
+con
+CON
+prn
+PRN
+aux
+AUX
+
 # Docker files (we only need the specific Dockerfile being built)
 .dockerignore
 docker-compose.override.yml

@@ -37,6 +37,7 @@ export interface CopilotConfig {
   sessionId?: string;
   language: 'en' | 'ko' | 'auto';
   streamingEnabled: boolean;
+  mockMode?: boolean; // Enable mock responses when backend is unavailable
 }
 
 interface CopilotChatProps {
@@ -85,6 +86,325 @@ const KOREAN_SYSTEM_MESSAGE: Message = {
   ],
   timestamp: new Date(),
 };
+
+// Mock responses for demo mode
+const MOCK_RESPONSES: Record<string, { text: string; sql?: string; data?: QueryResultData }> = {
+  'critical alerts': {
+    text: 'Here are the critical alerts from today. I found **5 critical alerts** that require immediate attention.',
+    sql: 'SELECT * FROM alerts WHERE severity = \'critical\' AND created_at >= NOW() - INTERVAL \'1 day\' ORDER BY created_at DESC LIMIT 10',
+    data: {
+      columns: ['id', 'severity', 'source', 'message', 'timestamp'],
+      rows: [
+        { id: 'ALT-001', severity: 'critical', source: 'Firewall', message: 'Potential DDoS attack detected', timestamp: '2024-01-15 14:30:00' },
+        { id: 'ALT-002', severity: 'critical', source: 'IDS', message: 'SQL injection attempt blocked', timestamp: '2024-01-15 14:25:00' },
+        { id: 'ALT-003', severity: 'critical', source: 'EDR', message: 'Ransomware behavior detected', timestamp: '2024-01-15 14:20:00' },
+        { id: 'ALT-004', severity: 'critical', source: 'SIEM', message: 'Brute force attack on admin account', timestamp: '2024-01-15 14:15:00' },
+        { id: 'ALT-005', severity: 'critical', source: 'WAF', message: 'XSS attack pattern detected', timestamp: '2024-01-15 14:10:00' },
+      ],
+      totalRows: 5,
+      executionTime: 0.023,
+      query: 'SELECT * FROM alerts WHERE severity = \'critical\'',
+    },
+  },
+  'playbook': {
+    text: 'Based on the current context, I recommend the following playbooks:\n\n' +
+      '1. **Malware Containment** - Isolate affected endpoints and block malicious IPs\n' +
+      '2. **Incident Response** - Collect evidence and notify stakeholders\n' +
+      '3. **Threat Hunting** - Search for similar IOCs across the environment\n\n' +
+      'Would you like me to execute any of these playbooks?',
+  },
+  'summarize': {
+    text: '## Incident Summary\n\n' +
+      '**Incident ID:** INC-2024-0115\n' +
+      '**Severity:** Critical\n' +
+      '**Status:** In Progress\n\n' +
+      '### Key Findings:\n' +
+      '- **Attack Vector:** Phishing email with malicious attachment\n' +
+      '- **Affected Systems:** 3 workstations, 1 server\n' +
+      '- **Data at Risk:** Customer PII (estimated 500 records)\n\n' +
+      '### Timeline:\n' +
+      '- 14:00 - Initial phishing email received\n' +
+      '- 14:15 - User opened attachment\n' +
+      '- 14:20 - Malware executed, lateral movement detected\n' +
+      '- 14:30 - SIEM alert triggered\n\n' +
+      '### Recommended Actions:\n' +
+      '1. Isolate affected systems\n' +
+      '2. Reset compromised credentials\n' +
+      '3. Notify legal and compliance teams',
+  },
+  'default': {
+    text: 'I understand your request. Let me analyze that for you.\n\n' +
+      'This is a **demo mode** response. In production, I would:\n' +
+      '- Query the security data lake\n' +
+      '- Analyze patterns using ML models\n' +
+      '- Provide actionable recommendations\n\n' +
+      'Try asking about:\n' +
+      '- "Show critical alerts"\n' +
+      '- "Recommend playbooks"\n' +
+      '- "Summarize this incident"',
+  },
+};
+
+const MOCK_RESPONSES_KO: Record<string, { text: string; sql?: string; data?: QueryResultData }> = {
+  '심각한 경보': {
+    text: '오늘의 심각한 경보를 조회했습니다. **5건의 심각한 경보**가 즉시 조치가 필요합니다.',
+    sql: 'SELECT * FROM alerts WHERE severity = \'critical\' AND created_at >= NOW() - INTERVAL \'1 day\' ORDER BY created_at DESC LIMIT 10',
+    data: {
+      columns: ['id', 'severity', 'source', 'message', 'timestamp'],
+      rows: [
+        { id: 'ALT-001', severity: 'critical', source: 'Firewall', message: 'DDoS 공격 감지', timestamp: '2024-01-15 14:30:00' },
+        { id: 'ALT-002', severity: 'critical', source: 'IDS', message: 'SQL 인젝션 시도 차단', timestamp: '2024-01-15 14:25:00' },
+        { id: 'ALT-003', severity: 'critical', source: 'EDR', message: '랜섬웨어 행위 감지', timestamp: '2024-01-15 14:20:00' },
+        { id: 'ALT-004', severity: 'critical', source: 'SIEM', message: '관리자 계정 무차별 대입 공격', timestamp: '2024-01-15 14:15:00' },
+        { id: 'ALT-005', severity: 'critical', source: 'WAF', message: 'XSS 공격 패턴 감지', timestamp: '2024-01-15 14:10:00' },
+      ],
+      totalRows: 5,
+      executionTime: 0.023,
+      query: 'SELECT * FROM alerts WHERE severity = \'critical\'',
+    },
+  },
+  '플레이북': {
+    text: '현재 상황에 맞는 플레이북을 추천드립니다:\n\n' +
+      '1. **악성코드 격리** - 영향받은 엔드포인트 격리 및 악성 IP 차단\n' +
+      '2. **인시던트 대응** - 증거 수집 및 이해관계자 알림\n' +
+      '3. **위협 헌팅** - 환경 전체에서 유사 IOC 검색\n\n' +
+      '이 중 어떤 플레이북을 실행할까요?',
+  },
+  '요약': {
+    text: '## 인시던트 요약\n\n' +
+      '**인시던트 ID:** INC-2024-0115\n' +
+      '**심각도:** 심각\n' +
+      '**상태:** 진행 중\n\n' +
+      '### 주요 발견 사항:\n' +
+      '- **공격 벡터:** 악성 첨부파일이 포함된 피싱 이메일\n' +
+      '- **영향받은 시스템:** 워크스테이션 3대, 서버 1대\n' +
+      '- **위험에 처한 데이터:** 고객 개인정보 (약 500건)\n\n' +
+      '### 권장 조치:\n' +
+      '1. 영향받은 시스템 격리\n' +
+      '2. 침해된 자격 증명 재설정\n' +
+      '3. 법무 및 컴플라이언스 팀에 알림',
+  },
+  'default': {
+    text: '요청을 이해했습니다. 분석을 진행하겠습니다.\n\n' +
+      '현재 **데모 모드**로 실행 중입니다. 실제 환경에서는:\n' +
+      '- 보안 데이터 레이크를 쿼리하고\n' +
+      '- ML 모델로 패턴을 분석하며\n' +
+      '- 실행 가능한 권장 사항을 제공합니다.\n\n' +
+      '다음과 같은 질문을 해보세요:\n' +
+      '- "심각한 경보 보여줘"\n' +
+      '- "플레이북 추천해줘"\n' +
+      '- "이 인시던트 요약해줘"',
+  },
+};
+
+function getMockResponse(
+  message: string,
+  language: 'en' | 'ko',
+  contextData?: Record<string, unknown>
+): { text: string; sql?: string; data?: QueryResultData } {
+  const lowerMessage = message.toLowerCase();
+  const defaultResponse = { text: 'I understand your request. How can I help you further?' };
+
+  // If we have alert context, generate context-aware responses
+  if (contextData?.alertId) {
+    const alertId = contextData.alertId as string;
+    const alertTitle = contextData.alertTitle as string || 'Unknown Alert';
+    const alertDescription = contextData.alertDescription as string || contextData.description as string || '';
+    const severity = contextData.severity as string || 'unknown';
+    const status = contextData.status as string || 'unknown';
+    const source = contextData.source as string || 'Unknown';
+    const target = contextData.target as string || '';
+    const fields = contextData.fields as Record<string, unknown> || {};
+    // Handle both naming conventions (mitreTactics/mitreTechniques and tactic/technique)
+    const mitreTactics = contextData.mitreTactics as string[] || (contextData.tactic ? [contextData.tactic as string] : []);
+    const mitreTechniques = contextData.mitreTechniques as string[] || (contextData.technique ? [contextData.technique as string] : []);
+
+    // Check for summarize/incident keywords
+    if (lowerMessage.includes('summarize') || lowerMessage.includes('summary') ||
+        lowerMessage.includes('incident') || lowerMessage.includes('요약') ||
+        lowerMessage.includes('인시던트')) {
+      if (language === 'ko') {
+        return {
+          text: `## 인시던트 요약\n\n` +
+            `**Alert ID:** ${alertId}\n` +
+            `**제목:** ${alertTitle}\n` +
+            `**심각도:** ${severity.toUpperCase()}\n` +
+            `**상태:** ${status}\n` +
+            `**소스:** ${source}\n` +
+            (target ? `**대상:** ${target}\n` : '') +
+            (mitreTechniques.length > 0 ? `**MITRE ATT&CK:** ${mitreTechniques.join(', ')}\n` : '') +
+            (alertDescription ? `\n### 설명\n${alertDescription}\n` : '') +
+            `\n### 주요 발견 사항:\n` +
+            `- 해당 이벤트는 ${source}에서 탐지되었습니다\n` +
+            `- 심각도 **${severity.toUpperCase()}** 수준의 보안 위협으로 분류됩니다\n` +
+            (target ? `- 대상 시스템/사용자: ${target}\n` : '') +
+            (fields.src_ip ? `- 출발지 IP: ${fields.src_ip}\n` : '') +
+            (fields.dst_ip ? `- 목적지 IP: ${fields.dst_ip}\n` : '') +
+            (fields.user ? `- 관련 사용자: ${fields.user}\n` : '') +
+            (fields.hostname ? `- 호스트: ${fields.hostname}\n` : '') +
+            `\n### 권장 조치:\n` +
+            `1. 해당 이벤트의 상세 로그를 확인하세요\n` +
+            `2. 관련 자산의 취약점 여부를 점검하세요\n` +
+            `3. 필요시 플레이북을 실행하여 대응하세요`,
+        };
+      } else {
+        return {
+          text: `## Incident Summary\n\n` +
+            `**Alert ID:** ${alertId}\n` +
+            `**Title:** ${alertTitle}\n` +
+            `**Severity:** ${severity.toUpperCase()}\n` +
+            `**Status:** ${status}\n` +
+            `**Source:** ${source}\n` +
+            (target ? `**Target:** ${target}\n` : '') +
+            (mitreTechniques.length > 0 ? `**MITRE ATT&CK:** ${mitreTechniques.join(', ')}\n` : '') +
+            (alertDescription ? `\n### Description\n${alertDescription}\n` : '') +
+            `\n### Key Findings:\n` +
+            `- This event was detected from ${source}\n` +
+            `- Classified as **${severity.toUpperCase()}** severity security threat\n` +
+            (target ? `- Target system/user: ${target}\n` : '') +
+            (fields.src_ip ? `- Source IP: ${fields.src_ip}\n` : '') +
+            (fields.dst_ip ? `- Destination IP: ${fields.dst_ip}\n` : '') +
+            (fields.user ? `- Related User: ${fields.user}\n` : '') +
+            (fields.hostname ? `- Host: ${fields.hostname}\n` : '') +
+            `\n### Recommended Actions:\n` +
+            `1. Review detailed logs for this event\n` +
+            `2. Check for vulnerabilities on related assets\n` +
+            `3. Execute relevant playbooks if needed`,
+        };
+      }
+    }
+
+    // Check for playbook/recommend keywords
+    if (lowerMessage.includes('playbook') || lowerMessage.includes('recommend') ||
+        lowerMessage.includes('플레이북') || lowerMessage.includes('추천')) {
+      if (language === 'ko') {
+        return {
+          text: `**${alertTitle}** 이벤트에 대해 다음 플레이북을 추천합니다:\n\n` +
+            `1. **IP Reputation Check** - 관련 IP의 평판 조회\n` +
+            `2. **Block IP on Firewall** - 악성 IP 차단\n` +
+            (severity === 'critical' || severity === 'high'
+              ? `3. **Isolate Endpoint** - 영향받은 엔드포인트 격리\n` +
+                `4. **Send Slack Alert** - 보안 팀에 알림 전송\n`
+              : `3. **Create Jira Ticket** - 추적을 위한 티켓 생성\n`) +
+            `\n이 중 어떤 플레이북을 실행할까요? Quick Actions에서 직접 실행할 수도 있습니다.`,
+        };
+      } else {
+        return {
+          text: `Based on **${alertTitle}**, I recommend these playbooks:\n\n` +
+            `1. **IP Reputation Check** - Check reputation of related IPs\n` +
+            `2. **Block IP on Firewall** - Block malicious IP addresses\n` +
+            (severity === 'critical' || severity === 'high'
+              ? `3. **Isolate Endpoint** - Isolate affected endpoints\n` +
+                `4. **Send Slack Alert** - Notify security team\n`
+              : `3. **Create Jira Ticket** - Create ticket for tracking\n`) +
+            `\nWould you like to execute any of these? You can also run them from Quick Actions.`,
+        };
+      }
+    }
+
+    // Check for analysis/investigate keywords
+    if (lowerMessage.includes('analyze') || lowerMessage.includes('investigate') ||
+        lowerMessage.includes('분석') || lowerMessage.includes('조사')) {
+      if (language === 'ko') {
+        return {
+          text: `## ${alertTitle} 분석 결과\n\n` +
+            `### 이벤트 상세\n` +
+            `- **Alert ID:** ${alertId}\n` +
+            `- **심각도:** ${severity.toUpperCase()}\n` +
+            `- **상태:** ${status}\n` +
+            `- **탐지 소스:** ${source}\n\n` +
+            (mitreTactics.length > 0 ? `### MITRE ATT&CK 매핑\n` +
+              `- **전술:** ${mitreTactics.join(', ')}\n` +
+              `- **기법:** ${mitreTechniques.join(', ')}\n\n` : '') +
+            `### 관련 지표 (IoC)\n` +
+            (fields.src_ip ? `- 출발지 IP: \`${fields.src_ip}\`\n` : '') +
+            (fields.dst_ip ? `- 목적지 IP: \`${fields.dst_ip}\`\n` : '') +
+            (fields.hash ? `- 파일 해시: \`${fields.hash}\`\n` : '') +
+            (fields.domain ? `- 도메인: \`${fields.domain}\`\n` : '') +
+            `\n### 분석 권장사항\n` +
+            `1. TI(Threat Intelligence) 소스에서 IoC 조회\n` +
+            `2. 관련 시스템에서 유사 활동 검색\n` +
+            `3. 타임라인 분석을 통한 공격 경로 파악`,
+        };
+      } else {
+        return {
+          text: `## Analysis: ${alertTitle}\n\n` +
+            `### Event Details\n` +
+            `- **Alert ID:** ${alertId}\n` +
+            `- **Severity:** ${severity.toUpperCase()}\n` +
+            `- **Status:** ${status}\n` +
+            `- **Detection Source:** ${source}\n\n` +
+            (mitreTactics.length > 0 ? `### MITRE ATT&CK Mapping\n` +
+              `- **Tactics:** ${mitreTactics.join(', ')}\n` +
+              `- **Techniques:** ${mitreTechniques.join(', ')}\n\n` : '') +
+            `### Indicators of Compromise (IoC)\n` +
+            (fields.src_ip ? `- Source IP: \`${fields.src_ip}\`\n` : '') +
+            (fields.dst_ip ? `- Destination IP: \`${fields.dst_ip}\`\n` : '') +
+            (fields.hash ? `- File Hash: \`${fields.hash}\`\n` : '') +
+            (fields.domain ? `- Domain: \`${fields.domain}\`\n` : '') +
+            `\n### Recommended Analysis Steps\n` +
+            `1. Query IoCs against Threat Intelligence sources\n` +
+            `2. Search for similar activity on related systems\n` +
+            `3. Perform timeline analysis to understand attack path`,
+        };
+      }
+    }
+
+    // Default context-aware response
+    if (language === 'ko') {
+      return {
+        text: `**${alertTitle}** 이벤트에 대해 도움을 드리겠습니다.\n\n` +
+          `현재 분석 중인 이벤트:\n` +
+          `- **ID:** ${alertId}\n` +
+          `- **심각도:** ${severity.toUpperCase()}\n` +
+          `- **소스:** ${source}\n\n` +
+          `다음 질문을 해보세요:\n` +
+          `- "이 인시던트 요약해줘"\n` +
+          `- "플레이북 추천해줘"\n` +
+          `- "이 이벤트 분석해줘"`,
+      };
+    } else {
+      return {
+        text: `I'll help you with **${alertTitle}**.\n\n` +
+          `Current event under analysis:\n` +
+          `- **ID:** ${alertId}\n` +
+          `- **Severity:** ${severity.toUpperCase()}\n` +
+          `- **Source:** ${source}\n\n` +
+          `Try asking:\n` +
+          `- "Summarize this incident"\n` +
+          `- "Recommend playbooks"\n` +
+          `- "Analyze this event"`,
+      };
+    }
+  }
+
+  // Fallback to generic responses when no context
+  // Check for critical/alert keywords (both languages)
+  if (lowerMessage.includes('critical') || lowerMessage.includes('alert') ||
+      lowerMessage.includes('심각') || lowerMessage.includes('경보')) {
+    const response = language === 'ko' ? MOCK_RESPONSES_KO['심각한 경보'] : MOCK_RESPONSES['critical alerts'];
+    return response || defaultResponse;
+  }
+
+  // Check for playbook/recommend keywords
+  if (lowerMessage.includes('playbook') || lowerMessage.includes('recommend') ||
+      lowerMessage.includes('플레이북') || lowerMessage.includes('추천')) {
+    const response = language === 'ko' ? MOCK_RESPONSES_KO['플레이북'] : MOCK_RESPONSES['playbook'];
+    return response || defaultResponse;
+  }
+
+  // Check for summarize/incident keywords
+  if (lowerMessage.includes('summarize') || lowerMessage.includes('summary') ||
+      lowerMessage.includes('incident') || lowerMessage.includes('요약') ||
+      lowerMessage.includes('인시던트')) {
+    const response = language === 'ko' ? MOCK_RESPONSES_KO['요약'] : MOCK_RESPONSES['summarize'];
+    return response || defaultResponse;
+  }
+
+  // Default response
+  const response = language === 'ko' ? MOCK_RESPONSES_KO['default'] : MOCK_RESPONSES['default'];
+  return response || defaultResponse;
+}
 
 export function CopilotChat({
   config,
@@ -289,7 +609,7 @@ export function CopilotChat({
       setIsLoading(true);
 
       try {
-        const response = await fetch(`${config.apiEndpoint}/api/v1/chat`, {
+        const response = await fetch(`${config.apiEndpoint}/v1/chat`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -352,25 +672,91 @@ export function CopilotChat({
             )
           );
         } else {
-          const errorMessage: Message = {
+          const errorMessage = (error as Error).message;
+          console.error('API error:', errorMessage);
+
+          // Show error message to user instead of silently falling back to mock
+          const errorResponse: Message = {
             id: loadingMessage.id,
-            role: 'error',
-            content: `Error: ${(error as Error).message}`,
+            role: 'assistant',
+            content: `**Connection Error**\n\nUnable to connect to the AI backend service.\n\n**Error:** ${errorMessage}\n\n**Troubleshooting:**\n- Ensure the copilot service is running\n- Check network connectivity\n- Verify API endpoint configuration\n\nPlease contact your administrator if the issue persists.`,
             timestamp: new Date(),
+            isStreaming: false,
           };
+
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === loadingMessage.id ? errorMessage : msg
+              msg.id === loadingMessage.id ? errorResponse : msg
             )
           );
-          onError?.(error as Error);
+
+          onError?.(new Error(`API connection failed: ${errorMessage}`));
         }
       } finally {
         setIsLoading(false);
         setAbortController(null);
       }
     },
-    [config.apiEndpoint, config.sessionId, conversationId, contextData, onError]
+    [config.apiEndpoint, config.sessionId, conversationId, contextData, onError, language, onQueryResult]
+  );
+
+  // Mock mode message handler
+  const sendMessageMock = useCallback(
+    async (messageText: string) => {
+      const userMessage: Message = {
+        id: `user-${Date.now()}`,
+        role: 'user',
+        content: messageText,
+        timestamp: new Date(),
+      };
+
+      const loadingMessage: Message = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+        isStreaming: true,
+      };
+
+      setMessages((prev) => [...prev, userMessage, loadingMessage]);
+      setIsLoading(true);
+
+      // Simulate network delay
+      await new Promise((resolve) => setTimeout(resolve, 800 + Math.random() * 700));
+
+      const mockResponse = getMockResponse(messageText, language, contextData);
+
+      let content: string | MessageContent[] = mockResponse.text;
+      if (mockResponse.sql) {
+        content = [
+          { type: 'text', content: mockResponse.text },
+          { type: 'sql', content: mockResponse.sql },
+        ];
+      }
+
+      const assistantMessage: Message = {
+        id: loadingMessage.id,
+        role: 'assistant',
+        content,
+        timestamp: new Date(),
+        queryType: mockResponse.sql ? 'search' : 'chat',
+        confidence: 0.95,
+      };
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === loadingMessage.id ? assistantMessage : msg
+        )
+      );
+
+      if (mockResponse.data) {
+        setQueryResult(mockResponse.data);
+        onQueryResult?.(mockResponse.data);
+      }
+
+      setIsLoading(false);
+    },
+    [language, contextData, onQueryResult]
   );
 
   const handleSend = useCallback(async () => {
@@ -379,12 +765,18 @@ export function CopilotChat({
 
     setInput('');
 
+    // Use mock mode if enabled
+    if (config.mockMode) {
+      await sendMessageMock(trimmedInput);
+      return;
+    }
+
     if (config.streamingEnabled) {
       await sendMessageStreaming(trimmedInput);
     } else {
       await sendMessageRest(trimmedInput);
     }
-  }, [input, isLoading, isStreaming, config.streamingEnabled, sendMessageStreaming, sendMessageRest]);
+  }, [input, isLoading, isStreaming, config.mockMode, config.streamingEnabled, sendMessageMock, sendMessageStreaming, sendMessageRest]);
 
   const handleSuggestionSelect = useCallback((suggestion: Suggestion) => {
     setInput(suggestion.text);

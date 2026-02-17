@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/siem-soar-platform/services/gateway/internal/handler"
 )
 
 const (
@@ -32,6 +34,55 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("GET /ready", readyHandler)
+
+	// Alert API routes
+	mux.HandleFunc("GET /api/v1/alerts", handler.ListAlertsHandler)
+	mux.HandleFunc("POST /api/v1/alerts", handler.CreateAlertHandler)
+	mux.HandleFunc("OPTIONS /api/v1/alerts", handler.CreateAlertHandler) // CORS preflight
+
+	// Single alert operations
+	mux.HandleFunc("GET /api/v1/alerts/{id}", handler.GetAlertHandler)
+	mux.HandleFunc("OPTIONS /api/v1/alerts/{id}", handler.GetAlertHandler)
+	mux.HandleFunc("PUT /api/v1/alerts/{id}/status", handler.UpdateAlertStatusHandler)
+	mux.HandleFunc("OPTIONS /api/v1/alerts/{id}/status", handler.UpdateAlertStatusHandler)
+	mux.HandleFunc("GET /api/v1/alerts/{id}/related", handler.GetRelatedAlertsHandler)
+	mux.HandleFunc("OPTIONS /api/v1/alerts/{id}/related", handler.GetRelatedAlertsHandler)
+
+	// Quick Action endpoints for alerts
+	mux.HandleFunc("POST /api/v1/alerts/{id}/acknowledge", handler.AcknowledgeAlertHandler)
+	mux.HandleFunc("OPTIONS /api/v1/alerts/{id}/acknowledge", handler.AcknowledgeAlertHandler)
+	mux.HandleFunc("POST /api/v1/alerts/{id}/close", handler.CloseAlertHandler)
+	mux.HandleFunc("OPTIONS /api/v1/alerts/{id}/close", handler.CloseAlertHandler)
+	mux.HandleFunc("POST /api/v1/alerts/{id}/create-case", handler.CreateCaseFromAlertHandler)
+	mux.HandleFunc("OPTIONS /api/v1/alerts/{id}/create-case", handler.CreateCaseFromAlertHandler)
+	mux.HandleFunc("POST /api/v1/alerts/{id}/run-playbook", handler.RunPlaybookOnAlertHandler)
+	mux.HandleFunc("OPTIONS /api/v1/alerts/{id}/run-playbook", handler.RunPlaybookOnAlertHandler)
+
+	// Alert comments
+	mux.HandleFunc("GET /api/v1/alerts/{id}/comments", handler.GetAlertCommentsHandler)
+	mux.HandleFunc("OPTIONS /api/v1/alerts/{id}/comments", handler.GetAlertCommentsHandler)
+	mux.HandleFunc("POST /api/v1/alerts/{id}/comments", handler.AddAlertCommentHandler)
+
+	// Case API routes
+	mux.HandleFunc("GET /api/v1/cases", handler.ListCasesHandler)
+	mux.HandleFunc("POST /api/v1/cases", handler.CreateCaseHandler)
+	mux.HandleFunc("OPTIONS /api/v1/cases", handler.CreateCaseHandler)
+	mux.HandleFunc("GET /api/v1/cases/{id}", handler.GetCaseHandler)
+	mux.HandleFunc("OPTIONS /api/v1/cases/{id}", handler.GetCaseHandler)
+
+	// Playbook API routes
+	mux.HandleFunc("GET /api/v1/playbooks", handler.ListPlaybooksHandler)
+	mux.HandleFunc("OPTIONS /api/v1/playbooks", handler.ListPlaybooksHandler)
+	mux.HandleFunc("POST /api/v1/playbooks/run/{id}", handler.ExecutePlaybookHandler)
+	mux.HandleFunc("OPTIONS /api/v1/playbooks/run/{id}", handler.ExecutePlaybookHandler)
+	mux.HandleFunc("GET /api/v1/playbooks/{id}", handler.GetPlaybookHandler)
+	mux.HandleFunc("OPTIONS /api/v1/playbooks/{id}", handler.GetPlaybookHandler)
+
+	// Playbook execution routes (separate path to avoid conflict)
+	mux.HandleFunc("GET /api/v1/executions", handler.ListExecutionsHandler)
+	mux.HandleFunc("OPTIONS /api/v1/executions", handler.ListExecutionsHandler)
+	mux.HandleFunc("GET /api/v1/executions/{id}", handler.GetExecutionStatusHandler)
+	mux.HandleFunc("OPTIONS /api/v1/executions/{id}", handler.GetExecutionStatusHandler)
 
 	server := &http.Server{
 		Addr:         ":" + port,

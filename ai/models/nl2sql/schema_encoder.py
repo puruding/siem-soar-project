@@ -301,12 +301,18 @@ class SchemaEncoder(LoggerMixin):
             checksum=hashlib.md5(text.encode()).hexdigest()[:8],
         )
 
+    def _get_enum_value(self, enum_or_str) -> str:
+        """Get string value from enum or string (handles use_enum_values=True)."""
+        if isinstance(enum_or_str, str):
+            return enum_or_str
+        return enum_or_str.value if hasattr(enum_or_str, 'value') else str(enum_or_str)
+
     def _encode_compact(self, tables: list[TableInfo]) -> str:
         """Encode schema in compact format."""
         lines = ["DATABASE SCHEMA:"]
 
         for table in tables:
-            cols = ", ".join([f"{c.name}:{c.type.value}" for c in table.columns])
+            cols = ", ".join([f"{c.name}:{self._get_enum_value(c.type)}" for c in table.columns])
             lines.append(f"\n{table.name} ({cols})")
             if table.description:
                 lines.append(f"  -- {table.description}")
@@ -323,11 +329,12 @@ class SchemaEncoder(LoggerMixin):
             lines.append("Columns:")
 
             for col in table.columns:
-                col_def = f"  - {col.name} ({col.type.value})"
+                col_def = f"  - {col.name} ({self._get_enum_value(col.type)})"
                 if not col.nullable:
                     col_def += " NOT NULL"
-                if col.index_type != IndexType.NONE:
-                    col_def += f" [{col.index_type.value}]"
+                index_val = self._get_enum_value(col.index_type)
+                if index_val != "none":
+                    col_def += f" [{index_val}]"
                 if col.description:
                     col_def += f" -- {col.description}"
                 lines.append(col_def)
@@ -352,17 +359,17 @@ class SchemaEncoder(LoggerMixin):
         lines = ["-- Database Schema DDL\n"]
 
         type_mapping = {
-            ColumnType.STRING: "VARCHAR(255)",
-            ColumnType.INTEGER: "INTEGER",
-            ColumnType.FLOAT: "FLOAT",
-            ColumnType.BOOLEAN: "BOOLEAN",
-            ColumnType.DATETIME: "TIMESTAMP",
-            ColumnType.DATE: "DATE",
-            ColumnType.UUID: "UUID",
-            ColumnType.JSON: "JSON",
-            ColumnType.ARRAY: "ARRAY",
-            ColumnType.IP_ADDRESS: "VARCHAR(45)",
-            ColumnType.ENUM: "VARCHAR(50)",
+            "string": "VARCHAR(255)",
+            "integer": "INTEGER",
+            "float": "FLOAT",
+            "boolean": "BOOLEAN",
+            "datetime": "TIMESTAMP",
+            "date": "DATE",
+            "uuid": "UUID",
+            "json": "JSON",
+            "array": "ARRAY",
+            "ip_address": "VARCHAR(45)",
+            "enum": "VARCHAR(50)",
         }
 
         for table in tables:
@@ -371,7 +378,8 @@ class SchemaEncoder(LoggerMixin):
 
             col_defs = []
             for col in table.columns:
-                sql_type = type_mapping.get(col.type, "VARCHAR(255)")
+                col_type = self._get_enum_value(col.type)
+                sql_type = type_mapping.get(col_type, "VARCHAR(255)")
                 col_def = f"  {col.name} {sql_type}"
                 if not col.nullable:
                     col_def += " NOT NULL"
@@ -399,7 +407,7 @@ class SchemaEncoder(LoggerMixin):
                 desc = col.description or ""
                 if col.examples:
                     desc += f" (e.g., {', '.join(col.examples[:2])})"
-                lines.append(f"| {col.name} | {col.type.value} | {desc} |")
+                lines.append(f"| {col.name} | {self._get_enum_value(col.type)} | {desc} |")
 
             lines.append("")
 

@@ -8,10 +8,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pydantic import Field
 
-from ai.common.logging import LoggerMixin
-from ai.common.models import BaseModel
-from ai.models.dga.config import DGAConfig, DGAFamily, DGAInferenceConfig
-from ai.models.dga.features import DGAFeatureExtractor, DomainTokenizer
+from common.logging import LoggerMixin
+from common.models import BaseModel
+from models.dga.config import DGAConfig, DGAFamily, DGAInferenceConfig
+from models.dga.features import DGAFeatureExtractor, DomainTokenizer
 
 
 class DGAClassification(BaseModel):

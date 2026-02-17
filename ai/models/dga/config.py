@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from ai.common.models import BaseModel
+from common.models import BaseModel
 
 
 class DGAFamily(str, Enum):

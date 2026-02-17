@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -95,6 +97,10 @@ type Alert struct {
 	Fingerprint   string                 `json:"fingerprint"`
 	GroupID       string                 `json:"group_id,omitempty"`
 
+	// Aggregation metadata - tracks which fields were used for grouping
+	GroupByFields []string          `json:"group_by_fields,omitempty"`
+	GroupByValues map[string]string `json:"group_by_values,omitempty"`
+
 	// Timestamps
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at"`
@@ -166,6 +172,16 @@ func DefaultGeneratorConfig() GeneratorConfig {
 	}
 }
 
+// AlertAggregationConfig is a local copy of rule.AlertAggregationConfig for decoupling.
+// This avoids circular imports between generator and rule packages.
+type AlertAggregationConfig struct {
+	GroupBy      []string      `json:"group_by,omitempty"`
+	Window       string        `json:"window,omitempty"`
+	Action       string        `json:"action,omitempty"` // merge, group, drop
+	MaxCount     int           `json:"max_count,omitempty"`
+	ParsedWindow time.Duration `json:"-"`
+}
+
 // DetectionResult represents a detection result from the detection engine.
 type DetectionResult struct {
 	RuleID      string                   `json:"rule_id"`
@@ -178,6 +194,10 @@ type DetectionResult struct {
 	Tags        []string                 `json:"tags,omitempty"`
 	Context     map[string]interface{}   `json:"context,omitempty"`
 	TenantID    string                   `json:"tenant_id"`
+
+	// AlertAggregation contains the rule's aggregation configuration for dedup key generation.
+	// This is populated by the detection engine from the rule's alert_aggregation section.
+	AlertAggregation *AlertAggregationConfig `json:"alert_aggregation,omitempty"`
 }
 
 // Generator generates alerts from detection results.
@@ -368,7 +388,12 @@ func (g *Generator) generateAlert(result *DetectionResult) (*Alert, error) {
 	alert.Entities = g.extractEntities(result.Events)
 
 	// Generate dedup key and fingerprint
-	alert.DedupKey = g.generateDedupKey(alert)
+	// If rule has alert aggregation config, use it for dynamic dedup key generation
+	if result.AlertAggregation != nil && len(result.AlertAggregation.GroupBy) > 0 {
+		alert.DedupKey, alert.GroupByFields, alert.GroupByValues = g.generateDedupKeyFromAggregation(alert, result)
+	} else {
+		alert.DedupKey = g.generateDefaultDedupKey(alert)
+	}
 	alert.Fingerprint = g.generateFingerprint(alert)
 
 	return alert, nil
@@ -496,8 +521,15 @@ func (g *Generator) extractEntities(events []map[string]interface{}) []Entity {
 	return entities
 }
 
-// generateDedupKey generates a deduplication key.
+// generateDedupKey generates a deduplication key using the default logic.
+// Deprecated: Use generateDefaultDedupKey or generateDedupKeyFromAggregation instead.
 func (g *Generator) generateDedupKey(alert *Alert) string {
+	return g.generateDefaultDedupKey(alert)
+}
+
+// generateDefaultDedupKey generates a deduplication key using default logic.
+// It combines rule ID with primary entities (source, target, actor).
+func (g *Generator) generateDefaultDedupKey(alert *Alert) string {
 	// Combine rule ID and key entities for dedup
 	key := alert.RuleID
 
@@ -511,6 +543,194 @@ func (g *Generator) generateDedupKey(alert *Alert) string {
 	h := sha256.New()
 	h.Write([]byte(key))
 	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// generateDedupKeyFromAggregation generates a deduplication key based on the rule's
+// alert aggregation configuration. It extracts values from specified UDM field paths.
+func (g *Generator) generateDedupKeyFromAggregation(alert *Alert, result *DetectionResult) (string, []string, map[string]string) {
+	if result.AlertAggregation == nil || len(result.AlertAggregation.GroupBy) == 0 {
+		return g.generateDefaultDedupKey(alert), nil, nil
+	}
+
+	parts := []string{alert.RuleID}
+	groupByFields := result.AlertAggregation.GroupBy
+	groupByValues := make(map[string]string)
+
+	// Extract values for each group_by field from events
+	for _, fieldPath := range groupByFields {
+		value := g.extractFieldValueFromEvents(alert.Events, fieldPath)
+		if value != "" {
+			parts = append(parts, value)
+			groupByValues[fieldPath] = value
+		}
+	}
+
+	h := sha256.New()
+	h.Write([]byte(strings.Join(parts, ":")))
+	dedupKey := hex.EncodeToString(h.Sum(nil))[:16]
+
+	return dedupKey, groupByFields, groupByValues
+}
+
+// extractFieldValueFromEvents extracts a field value from events using a UDM field path.
+// It tries to find the value in the first event that has it.
+//
+// Examples:
+//   - extractFieldValueFromEvents(events, "principal.ip") -> "192.168.1.1"
+//   - extractFieldValueFromEvents(events, "target.hostname") -> "server01"
+//   - extractFieldValueFromEvents(events, "principal.user.user_name") -> "john"
+func (g *Generator) extractFieldValueFromEvents(events []map[string]interface{}, fieldPath string) string {
+	if len(events) == 0 {
+		return ""
+	}
+
+	// Try each event until we find a value
+	for _, event := range events {
+		value := g.extractFieldFromMap(event, fieldPath)
+		if value != "" {
+			return value
+		}
+	}
+
+	return ""
+}
+
+// extractFieldFromMap extracts a field value from a nested map using dot notation.
+// Handles both dot notation (e.g., "principal.ip") and snake_case field names.
+func (g *Generator) extractFieldFromMap(data map[string]interface{}, fieldPath string) string {
+	parts := strings.Split(fieldPath, ".")
+	current := data
+
+	for i, part := range parts {
+		// Handle array index notation (e.g., "ip[0]")
+		arrayIndex := -1
+		if idx := strings.Index(part, "["); idx > 0 {
+			if endIdx := strings.Index(part, "]"); endIdx > idx {
+				if n, err := strconv.Atoi(part[idx+1 : endIdx]); err == nil {
+					arrayIndex = n
+				}
+				part = part[:idx]
+			}
+		}
+
+		// Try to get the value
+		val, ok := current[part]
+		if !ok {
+			// Try alternative field names (snake_case <-> camelCase)
+			alternativeKey := g.findAlternativeKey(current, part)
+			if alternativeKey == "" {
+				return ""
+			}
+			val = current[alternativeKey]
+		}
+
+		// Handle the last part
+		if i == len(parts)-1 {
+			return g.valueToString(val, arrayIndex)
+		}
+
+		// Navigate deeper
+		switch v := val.(type) {
+		case map[string]interface{}:
+			current = v
+		case []interface{}:
+			if arrayIndex >= 0 && arrayIndex < len(v) {
+				if m, ok := v[arrayIndex].(map[string]interface{}); ok {
+					current = m
+				} else {
+					return ""
+				}
+			} else if len(v) > 0 {
+				if m, ok := v[0].(map[string]interface{}); ok {
+					current = m
+				} else {
+					return ""
+				}
+			} else {
+				return ""
+			}
+		default:
+			return ""
+		}
+	}
+
+	return ""
+}
+
+// findAlternativeKey tries to find an alternative key in the map that matches the given key.
+// It handles snake_case to camelCase conversions and vice versa.
+func (g *Generator) findAlternativeKey(data map[string]interface{}, key string) string {
+	// Direct match
+	if _, ok := data[key]; ok {
+		return key
+	}
+
+	// Try camelCase
+	camelKey := g.snakeToCamel(key)
+	if _, ok := data[camelKey]; ok {
+		return camelKey
+	}
+
+	// Try snake_case
+	snakeKey := g.camelToSnake(key)
+	if _, ok := data[snakeKey]; ok {
+		return snakeKey
+	}
+
+	return ""
+}
+
+// valueToString converts a value to string, handling slices with optional index.
+func (g *Generator) valueToString(val interface{}, arrayIndex int) string {
+	if val == nil {
+		return ""
+	}
+
+	switch v := val.(type) {
+	case string:
+		return v
+	case []interface{}:
+		if arrayIndex >= 0 && arrayIndex < len(v) {
+			return fmt.Sprintf("%v", v[arrayIndex])
+		}
+		if len(v) > 0 {
+			return fmt.Sprintf("%v", v[0])
+		}
+		return ""
+	case []string:
+		if arrayIndex >= 0 && arrayIndex < len(v) {
+			return v[arrayIndex]
+		}
+		if len(v) > 0 {
+			return v[0]
+		}
+		return ""
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// snakeToCamel converts snake_case to camelCase.
+func (g *Generator) snakeToCamel(s string) string {
+	parts := strings.Split(s, "_")
+	for i := 1; i < len(parts); i++ {
+		if len(parts[i]) > 0 {
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+// camelToSnake converts camelCase to snake_case.
+func (g *Generator) camelToSnake(s string) string {
+	var result strings.Builder
+	for i, r := range s {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			result.WriteByte('_')
+		}
+		result.WriteRune(r)
+	}
+	return strings.ToLower(result.String())
 }
 
 // generateFingerprint generates an alert fingerprint for exact matching.

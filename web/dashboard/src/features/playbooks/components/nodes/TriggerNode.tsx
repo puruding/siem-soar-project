@@ -2,12 +2,16 @@ import { memo } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Zap, Play, Clock, Webhook } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { StatusIndicator } from '../execution/StatusIndicator';
+import type { NodeExecutionStatus } from '../../types/execution.types';
 
 export interface TriggerNodeData {
   label: string;
   triggerType: 'alert' | 'schedule' | 'webhook' | 'manual';
   description?: string;
   status?: 'idle' | 'active' | 'disabled';
+  executionStatus?: NodeExecutionStatus;
+  executionDuration?: number;
 }
 
 const TriggerNode = ({ data, selected }: NodeProps) => {
@@ -31,12 +35,28 @@ const TriggerNode = ({ data, selected }: NodeProps) => {
 
   const Icon = getIcon();
 
+  // Border glow effect based on execution status
+  const getStatusBorderClass = () => {
+    if (!nodeData.executionStatus) return '';
+    switch (nodeData.executionStatus) {
+      case 'running':
+        return 'ring-2 ring-blue-500/50 animate-pulse';
+      case 'success':
+        return 'ring-2 ring-[#5CC05C]/50';
+      case 'error':
+        return 'ring-2 ring-[#DC4E41]/50 animate-shake';
+      default:
+        return '';
+    }
+  };
+
   return (
     <div
       className={cn(
         'relative min-w-[200px] transition-all duration-300',
         'hover:scale-105 hover:z-10',
-        selected && 'ring-2 ring-[#5CC05C] ring-offset-2 ring-offset-background scale-105 z-10'
+        selected && 'ring-2 ring-[#5CC05C] ring-offset-2 ring-offset-background scale-105 z-10',
+        getStatusBorderClass()
       )}
     >
       {/* Hexagon shape using clip-path */}
@@ -55,6 +75,12 @@ const TriggerNode = ({ data, selected }: NodeProps) => {
             'polygon(30% 0%, 70% 0%, 100% 50%, 70% 100%, 30% 100%, 0% 50%)',
         }}
       >
+        {/* Execution Status Indicator */}
+        {nodeData.executionStatus && (
+          <div className="absolute -top-2 -right-2 z-10">
+            <StatusIndicator status={nodeData.executionStatus} size="sm" />
+          </div>
+        )}
         <div className="flex flex-col items-center gap-2 text-center">
           {/* Icon with pulse effect */}
           <div

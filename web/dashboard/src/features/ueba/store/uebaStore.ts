@@ -397,10 +397,10 @@ export const useUEBAStore = create<UEBAStore>((set, get) => ({
         throw new Error('API not available');
       }
     } catch (err) {
-      // Fallback to mock data when API is not available
-      console.log('UEBA API not available, using mock data');
+      // No mock data fallback - alerts should only come from API
+      console.log('UEBA API not available');
       set({
-        alerts: generateMockUEBAAlerts(),
+        alerts: [],
         lastUpdated: new Date(),
         loading: false,
       });
@@ -417,9 +417,9 @@ export const useUEBAStore = create<UEBAStore>((set, get) => ({
         throw new Error('API not available');
       }
     } catch (err) {
-      // Fallback to mock data
-      console.log('UEBA Entity Risks API not available, using mock data');
-      set({ entityRisks: generateMockEntityRisks() });
+      // No mock data fallback - entity risks should only come from API
+      console.log('UEBA Entity Risks API not available');
+      set({ entityRisks: [] });
     }
   },
 

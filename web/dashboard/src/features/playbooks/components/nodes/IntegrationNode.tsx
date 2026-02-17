@@ -2,12 +2,16 @@ import { memo } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Shield, Database, Cloud, Ticket, Plug, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { StatusIndicator } from '../execution/StatusIndicator';
+import type { NodeExecutionStatus } from '../../types/execution.types';
 
 export interface IntegrationNodeData {
   label: string;
   integrationType: 'siem' | 'edr' | 'firewall' | 'ticketing' | 'custom';
   connectionStatus?: 'connected' | 'disconnected' | 'error';
   description?: string;
+  executionStatus?: NodeExecutionStatus;
+  executionDuration?: number;
 }
 
 const IntegrationNode = ({ data, selected }: NodeProps) => {
@@ -46,12 +50,28 @@ const IntegrationNode = ({ data, selected }: NodeProps) => {
 
   const Icon = getIcon();
 
+  // Border glow effect based on execution status
+  const getStatusBorderClass = () => {
+    if (!nodeData.executionStatus) return '';
+    switch (nodeData.executionStatus) {
+      case 'running':
+        return 'ring-2 ring-blue-500/50 animate-pulse';
+      case 'success':
+        return 'ring-2 ring-[#5CC05C]/50';
+      case 'error':
+        return 'ring-2 ring-[#DC4E41]/50 animate-shake';
+      default:
+        return '';
+    }
+  };
+
   return (
     <div
       className={cn(
         'relative transition-all duration-300',
         'hover:scale-105 hover:z-10',
-        selected && 'ring-2 ring-[#7B61FF] ring-offset-2 ring-offset-background scale-105 z-10'
+        selected && 'ring-2 ring-[#7B61FF] ring-offset-2 ring-offset-background scale-105 z-10',
+        getStatusBorderClass()
       )}
     >
       {/* Circular Container */}
@@ -69,6 +89,12 @@ const IntegrationNode = ({ data, selected }: NodeProps) => {
             'from-[#7B61FF]/20 via-[#7B61FF]/10 to-transparent border-[#7B61FF]/50 hover:border-[#7B61FF]'
         )}
       >
+        {/* Execution Status Indicator */}
+        {nodeData.executionStatus && (
+          <div className="absolute -top-2 -right-2 z-10">
+            <StatusIndicator status={nodeData.executionStatus} size="sm" />
+          </div>
+        )}
         {/* Content */}
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4">
           {/* Icon Container with pulse for connected */}

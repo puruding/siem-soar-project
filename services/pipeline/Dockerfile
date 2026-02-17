@@ -1,10 +1,10 @@
 # Build stage
 FROM golang:1.23-alpine AS builder
 
-WORKDIR /app
+WORKDIR /app/services/pipeline
 
 # Copy shared pkg directory first
-COPY pkg/ ./pkg/
+COPY pkg/ /app/pkg/
 
 # Copy service-specific files
 COPY services/pipeline/go.mod services/pipeline/go.sum* ./

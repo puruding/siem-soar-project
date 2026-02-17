@@ -3,6 +3,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { Layout } from '@/components/layout/Layout';
 import { Dashboard } from '@/features/dashboard/components/Dashboard';
 import { AlertList } from '@/features/alerts/components/AlertList';
+import { AlertDetailPage } from '@/features/alerts/components/AlertDetailPage';
 import { CaseList } from '@/features/cases/components/CaseList';
 import { CaseDetail } from '@/features/cases/components/CaseDetail';
 import { QueryConsole } from '@/features/query/components/QueryConsole';
@@ -12,6 +13,7 @@ import { ProductList } from '@/features/products';
 import { ParsersPage } from '@/features/parsers';
 import { AssetList } from '@/features/assets';
 import { RulesPage } from '@/features/rules';
+import { CopilotPage } from '@/features/copilot';
 import { useThemeStore } from '@/stores/themeStore';
 import { useEffect } from 'react';
 
@@ -30,6 +32,7 @@ function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="alerts" element={<AlertList />} />
+          <Route path="alerts/:id" element={<AlertDetailPage />} />
           <Route path="cases" element={<CaseList />} />
           <Route path="cases/:id" element={<CaseDetail />} />
           <Route path="query" element={<QueryConsole />} />
@@ -40,6 +43,7 @@ function App() {
           <Route path="parsers" element={<ParsersPage />} />
           <Route path="assets" element={<AssetList />} />
           <Route path="rules" element={<RulesPage />} />
+          <Route path="copilot" element={<CopilotPage />} />
         </Route>
       </Routes>
       <Toaster />

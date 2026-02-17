@@ -16,7 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt* ./
 RUN if [ -f requirements.txt ]; then pip install --no-cache-dir --target=/app/deps -r requirements.txt; \
     else pip install --no-cache-dir --target=/app/deps \
-    fastapi uvicorn pydantic redis torch transformers langchain prometheus-client; fi
+    fastapi uvicorn pydantic pydantic-settings redis torch transformers langchain prometheus-client \
+    scikit-learn numpy structlog httpx; fi
 
 
 # Production stage

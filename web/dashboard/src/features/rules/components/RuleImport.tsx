@@ -128,13 +128,33 @@ export function RuleImport({ open, onOpenChange, onImport }: RuleImportProps) {
     setError(null);
     setRules([]);
 
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      const response = await fetch('/api/rules/import/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repository_url: repoUrl }),
+      });
 
-    // Mock success
-    setRules(mockRepositoryRules);
-    setIsLoading(false);
-  }, []);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data?.rules) {
+          setRules(data.data.rules.map((r: ImportableRule) => ({ ...r, selected: false })));
+        } else {
+          // Fallback to mock data if API returns empty
+          setRules(mockRepositoryRules);
+        }
+      } else {
+        // Fallback to mock data on error
+        console.warn('API unavailable, using mock rules');
+        setRules(mockRepositoryRules);
+      }
+    } catch (error) {
+      console.warn('Failed to fetch rules, using mock data:', error);
+      setRules(mockRepositoryRules);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [repoUrl]);
 
   // Toggle rule selection
   const toggleRule = useCallback((ruleId: string) => {

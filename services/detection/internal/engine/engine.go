@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/siem-soar-platform/pkg/udm"
 	"github.com/siem-soar-platform/services/detection/internal/rule"
 )
 
@@ -43,12 +44,155 @@ type MatchedEvent struct {
 
 // Event represents a security event for detection.
 type Event struct {
-	EventID      string                 `json:"event_id"`
-	TenantID     string                 `json:"tenant_id"`
-	Timestamp    time.Time              `json:"timestamp"`
-	EventType    string                 `json:"event_type"`
-	Data         map[string]interface{} `json:"data"`
-	Normalized   map[string]interface{} `json:"normalized,omitempty"`
+	EventID    string                 `json:"event_id"`
+	TenantID   string                 `json:"tenant_id"`
+	Timestamp  time.Time              `json:"timestamp"`
+	EventType  string                 `json:"event_type"`
+	Raw        map[string]interface{} `json:"raw,omitempty"`        // Raw data (backward compat with Data)
+	UDM        *udm.UDMEvent          `json:"udm,omitempty"`        // UDM normalized data
+	Data       map[string]interface{} `json:"data"`                 // Deprecated: use Raw or UDM
+	Normalized map[string]interface{} `json:"normalized,omitempty"` // Deprecated: use UDM
+}
+
+// GetFieldValue retrieves a field value from the event.
+// It first tries UDM fields, then falls back to Raw/Data.
+// Path format: "principal.user.user_name" or "principal.ip[0]"
+func (e *Event) GetFieldValue(path string) (interface{}, bool) {
+	// Try UDM first if available
+	if e.UDM != nil {
+		value, err := udm.GetField(e.UDM, path)
+		if err == nil && value != nil {
+			return value, true
+		}
+	}
+
+	// Fall back to Raw data
+	if e.Raw != nil {
+		if value, found := getNestedValue(e.Raw, path); found {
+			return value, true
+		}
+	}
+
+	// Fall back to Data (legacy field)
+	if e.Data != nil {
+		if value, found := getNestedValue(e.Data, path); found {
+			return value, true
+		}
+	}
+
+	return nil, false
+}
+
+// GetFieldValueAsString retrieves a field value as a string.
+func (e *Event) GetFieldValueAsString(path string) (string, bool) {
+	value, found := e.GetFieldValue(path)
+	if !found {
+		return "", false
+	}
+	return fmt.Sprintf("%v", value), true
+}
+
+// HasUDM checks if the event has UDM data.
+func (e *Event) HasUDM() bool {
+	return e.UDM != nil
+}
+
+// GetEffectiveData returns the best available data map for the event.
+// Prefers UDM converted to map, then Raw, then Data.
+func (e *Event) GetEffectiveData() map[string]interface{} {
+	if e.UDM != nil {
+		if m, err := udm.ToMap(e.UDM); err == nil {
+			return m
+		}
+	}
+	if e.Raw != nil {
+		return e.Raw
+	}
+	return e.Data
+}
+
+// getNestedValue retrieves a value from a nested map using dot notation.
+func getNestedValue(data map[string]interface{}, path string) (interface{}, bool) {
+	parts := splitFieldPath(path)
+	var current interface{} = data
+
+	for _, part := range parts {
+		switch v := current.(type) {
+		case map[string]interface{}:
+			var ok bool
+			current, ok = v[part.name]
+			if !ok {
+				return nil, false
+			}
+			// Handle array index
+			if part.index >= 0 {
+				if arr, ok := current.([]interface{}); ok && part.index < len(arr) {
+					current = arr[part.index]
+				} else {
+					return nil, false
+				}
+			}
+		case []interface{}:
+			if part.index >= 0 && part.index < len(v) {
+				current = v[part.index]
+			} else {
+				return nil, false
+			}
+		default:
+			return nil, false
+		}
+	}
+
+	return current, true
+}
+
+// fieldPart represents a part of a field path.
+type fieldPart struct {
+	name  string
+	index int // -1 if no index
+}
+
+// splitFieldPath splits a field path into parts, handling array notation.
+func splitFieldPath(path string) []fieldPart {
+	var parts []fieldPart
+	var current string
+	var inBracket bool
+	var bracketContent string
+
+	for _, c := range path {
+		switch {
+		case c == '.' && !inBracket:
+			if current != "" {
+				parts = append(parts, fieldPart{name: current, index: -1})
+				current = ""
+			}
+		case c == '[':
+			inBracket = true
+			bracketContent = ""
+		case c == ']':
+			inBracket = false
+			idx := -1
+			if n, err := fmt.Sscanf(bracketContent, "%d", &idx); err == nil && n == 1 {
+				if current != "" {
+					parts = append(parts, fieldPart{name: current, index: idx})
+					current = ""
+				} else if len(parts) > 0 {
+					// Update last part with index
+					parts[len(parts)-1].index = idx
+				}
+			}
+		case inBracket:
+			bracketContent += string(c)
+		default:
+			current += string(c)
+		}
+	}
+
+	if current != "" {
+		parts = append(parts, fieldPart{name: current, index: -1})
+	}
+
+	return parts
 }
 
 // EngineConfig holds engine configuration.

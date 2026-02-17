@@ -1,0 +1,24 @@
+title: Port Scan Detection
+id: sigma-002
+status: experimental
+description: Detects port scanning activity
+author: SIEM-SOAR
+logsource:
+  category: network
+  product: firewall
+detection:
+  selection:
+    event_type: 'port_scan'
+  condition: selection
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1046
+
+# Alert Aggregation - groups alerts by source IP within 30 minute window
+alert_aggregation:
+  group_by:
+    - principal.ip
+  window: 30m
+  action: merge
+  max_count: 50

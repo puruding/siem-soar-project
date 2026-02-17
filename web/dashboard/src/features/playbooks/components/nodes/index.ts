@@ -13,3 +13,5 @@ export type { IntegrationNodeData } from './IntegrationNode';
 export type { LoopNodeData } from './LoopNode';
 export type { ParallelNodeData } from './ParallelNode';
 export type { WaitNodeData } from './WaitNode';
+
+export { StatusIndicator } from '../execution/StatusIndicator';

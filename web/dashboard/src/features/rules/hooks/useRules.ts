@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import type { SigmaRule, AttackTactic, AttackTechnique, RuleTestResult } from '../types';
+import type { SigmaRule, AttackTactic, AttackTechnique, RuleTestResult, AlertAggregation } from '../types';
 import { ATTACK_TACTICS } from '../types';
 
 // Mock Sigma rules with ATT&CK mappings
@@ -37,6 +37,13 @@ level: critical`,
     version: 3,
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30),
     updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2),
+    // Alert aggregation: Group by file hash to reduce noise from same ransomware
+    alertAggregation: {
+      group_by: ['target.file.sha256', 'principal.hostname'],
+      window: '1h',
+      action: 'merge',
+      max_count: 50,
+    },
   },
   {
     id: 'rule-002',
@@ -72,6 +79,13 @@ level: high`,
     version: 5,
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 60),
     updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 5),
+    // Alert aggregation: Group by user to track repeated PowerShell abuse
+    alertAggregation: {
+      group_by: ['principal.user.user_name', 'principal.hostname'],
+      window: '30m',
+      action: 'group',
+      max_count: 100,
+    },
   },
   {
     id: 'rule-003',
@@ -273,6 +287,13 @@ level: medium`,
     version: 2,
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 180),
     updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 14),
+    // Alert aggregation: Group brute force attempts by source IP
+    alertAggregation: {
+      group_by: ['principal.ip', 'target.user.user_name'],
+      window: '15m',
+      action: 'merge',
+      max_count: 10,
+    },
   },
   {
     id: 'rule-009',
@@ -713,6 +734,7 @@ export function useRules() {
       version: 1,
       createdAt: new Date(),
       updatedAt: new Date(),
+      alertAggregation: ruleData.alertAggregation,
     };
     setRules((prev) => [newRule, ...prev]);
     return newRule;

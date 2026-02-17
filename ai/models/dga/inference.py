@@ -9,10 +9,10 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
-from ai.common.logging import LoggerMixin
-from ai.models.dga.config import DGAConfig, DGAInferenceConfig
-from ai.models.dga.model import DGADetector, DGADetectorModel, DGAClassification, DGABatchResult
-from ai.models.dga.features import DGAFeatureExtractor, DomainTokenizer
+from common.logging import LoggerMixin
+from models.dga.config import DGAConfig, DGAInferenceConfig
+from models.dga.model import DGADetector, DGADetectorModel, DGAClassification, DGABatchResult
+from models.dga.features import DGAFeatureExtractor, DomainTokenizer
 
 
 class LRUCache:
@@ -243,7 +243,7 @@ class DGAInferenceEngine(LoggerMixin):
             family_idx = family_probs.argmax(dim=-1).item()
             family_conf = family_probs[0, family_idx].item()
             # Map index to family name
-            from ai.models.dga.config import DGAFamily
+            from models.dga.config import DGAFamily
             families = list(DGAFamily)
             family = families[family_idx].value if family_idx < len(families) else "unknown"
 
@@ -386,7 +386,7 @@ class DGAInferenceEngine(LoggerMixin):
                 family = "unknown"
                 family_conf = 0.0
                 if is_dga and family_probs is not None:
-                    from ai.models.dga.config import DGAFamily
+                    from models.dga.config import DGAFamily
                     families = list(DGAFamily)
                     family_idx = family_probs[j].argmax().item()
                     family_conf = family_probs[j, family_idx].item()

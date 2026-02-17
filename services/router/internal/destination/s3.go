@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/siem-soar-platform/services/router/internal/routing"
 )
 
 // S3Config holds S3 destination configuration.
@@ -46,7 +47,7 @@ type S3Destination struct {
 	wg        sync.WaitGroup
 
 	// Batching
-	buffer    []*Event
+	buffer    []*routing.Event
 	bufferMu  sync.Mutex
 	flushChan chan struct{}
 
@@ -70,7 +71,7 @@ func NewS3Destination(cfg S3Config, logger *slog.Logger) (*S3Destination, error)
 		logger:    logger.With("component", "s3-dest", "name", cfg.Name),
 		ctx:       ctx,
 		cancel:    cancel,
-		buffer:    make([]*Event, 0, cfg.BatchSize),
+		buffer:    make([]*routing.Event, 0, cfg.BatchSize),
 		flushChan: make(chan struct{}, 1),
 	}
 
@@ -157,7 +158,7 @@ func (d *S3Destination) Type() string {
 }
 
 // Send sends events to S3.
-func (d *S3Destination) Send(ctx context.Context, events []*Event) error {
+func (d *S3Destination) Send(ctx context.Context, events []*routing.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -239,7 +240,7 @@ func (d *S3Destination) doFlush() {
 		return
 	}
 	events := d.buffer
-	d.buffer = make([]*Event, 0, d.config.BatchSize)
+	d.buffer = make([]*routing.Event, 0, d.config.BatchSize)
 	d.bufferMu.Unlock()
 
 	ctx, cancel := context.WithTimeout(d.ctx, 2*time.Minute)
@@ -252,7 +253,7 @@ func (d *S3Destination) doFlush() {
 	}
 }
 
-func (d *S3Destination) flush(ctx context.Context, events []*Event) error {
+func (d *S3Destination) flush(ctx context.Context, events []*routing.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -292,8 +293,8 @@ func (d *S3Destination) flush(ctx context.Context, events []*Event) error {
 	return nil
 }
 
-func (d *S3Destination) partitionEvents(events []*Event) map[string][]*Event {
-	partitions := make(map[string][]*Event)
+func (d *S3Destination) partitionEvents(events []*routing.Event) map[string][]*routing.Event {
+	partitions := make(map[string][]*routing.Event)
 
 	for _, event := range events {
 		var key string
@@ -315,7 +316,7 @@ func (d *S3Destination) partitionEvents(events []*Event) map[string][]*Event {
 	return partitions
 }
 
-func (d *S3Destination) serializeEvents(events []*Event) ([]byte, error) {
+func (d *S3Destination) serializeEvents(events []*routing.Event) ([]byte, error) {
 	var buf bytes.Buffer
 
 	switch d.config.FileFormat {

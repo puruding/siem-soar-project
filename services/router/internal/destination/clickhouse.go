@@ -11,6 +11,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/siem-soar-platform/services/router/internal/routing"
 )
 
 // ClickHouseConfig holds ClickHouse destination configuration.
@@ -42,7 +43,7 @@ type ClickHouseDestination struct {
 	wg        sync.WaitGroup
 
 	// Batching
-	buffer    []*Event
+	buffer    []*routing.Event
 	bufferMu  sync.Mutex
 	flushChan chan struct{}
 
@@ -56,18 +57,6 @@ type ClickHouseDestination struct {
 	errors        atomic.Uint64
 }
 
-// Event represents an event for ClickHouse.
-type Event struct {
-	ID         string
-	TenantID   string
-	Timestamp  time.Time
-	EventType  string
-	SourceType string
-	Severity   string
-	Fields     map[string]interface{}
-	RawData    []byte
-}
-
 // NewClickHouseDestination creates a new ClickHouse destination.
 func NewClickHouseDestination(cfg ClickHouseConfig, logger *slog.Logger) (*ClickHouseDestination, error) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -77,7 +66,7 @@ func NewClickHouseDestination(cfg ClickHouseConfig, logger *slog.Logger) (*Click
 		logger:    logger.With("component", "clickhouse-dest", "name", cfg.Name),
 		ctx:       ctx,
 		cancel:    cancel,
-		buffer:    make([]*Event, 0, cfg.BatchSize),
+		buffer:    make([]*routing.Event, 0, cfg.BatchSize),
 		flushChan: make(chan struct{}, 1),
 	}
 
@@ -178,7 +167,7 @@ func (d *ClickHouseDestination) Type() string {
 }
 
 // Send sends events to ClickHouse.
-func (d *ClickHouseDestination) Send(ctx context.Context, events []*Event) error {
+func (d *ClickHouseDestination) Send(ctx context.Context, events []*routing.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -262,7 +251,7 @@ func (d *ClickHouseDestination) doFlush() {
 		return
 	}
 	events := d.buffer
-	d.buffer = make([]*Event, 0, d.config.BatchSize)
+	d.buffer = make([]*routing.Event, 0, d.config.BatchSize)
 	d.bufferMu.Unlock()
 
 	ctx, cancel := context.WithTimeout(d.ctx, 30*time.Second)
@@ -275,7 +264,7 @@ func (d *ClickHouseDestination) doFlush() {
 	}
 }
 
-func (d *ClickHouseDestination) flush(ctx context.Context, events []*Event) error {
+func (d *ClickHouseDestination) flush(ctx context.Context, events []*routing.Event) error {
 	var lastErr error
 
 	for attempt := 0; attempt < d.config.MaxRetries; attempt++ {
@@ -307,7 +296,7 @@ func (d *ClickHouseDestination) flush(ctx context.Context, events []*Event) erro
 	return lastErr
 }
 
-func (d *ClickHouseDestination) insertBatch(ctx context.Context, events []*Event) error {
+func (d *ClickHouseDestination) insertBatch(ctx context.Context, events []*routing.Event) error {
 	batch, err := d.conn.PrepareBatch(ctx, fmt.Sprintf(`
 		INSERT INTO %s (
 			event_id, tenant_id, timestamp, event_type, source_type,

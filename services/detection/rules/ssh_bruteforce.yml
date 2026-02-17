@@ -1,0 +1,27 @@
+title: SSH Brute Force Detection
+id: sigma-006
+status: stable
+description: Detects SSH brute force attempts based on multiple failed authentication attempts
+author: SIEM-SOAR
+logsource:
+  product: linux
+  service: sshd
+detection:
+  selection:
+    event_type: 'authentication'
+    action: 'failed'
+    application: 'sshd'
+  condition: selection | count() > 5
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1110.001
+
+# Alert Aggregation - groups by target IP for brute force consolidation
+# This ensures all attempts against the same target are grouped together
+alert_aggregation:
+  group_by:
+    - target.ip
+  window: 1h
+  action: merge
+  max_count: 100

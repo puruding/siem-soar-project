@@ -77,7 +77,7 @@ async def predict_dga(
 
     try:
         model = loader.get_model(ModelType.DGA)
-        result = model.predict(request.domain)
+        result = await model.detect(request.domain)
 
         processing_time = (time.time() - start_time) * 1000
         loader.record_inference(ModelType.DGA, processing_time)
@@ -85,8 +85,8 @@ async def predict_dga(
         return DGAPredictResponse(
             domain=request.domain,
             is_dga=result.is_dga,
-            dga_probability=result.probability,
-            family=result.family if result.is_dga else None,
+            dga_probability=result.confidence,
+            family=result.family if isinstance(result.family, str) else (result.family.value if result.family else None),
             confidence=result.confidence,
             processing_time_ms=processing_time,
         )
@@ -112,7 +112,7 @@ async def predict_dga_batch(
 
     try:
         model = loader.get_model(ModelType.DGA)
-        batch_result = model.predict_batch(request.domains)
+        batch_result = await model.batch_detect(request.domains)
 
         processing_time = (time.time() - start_time) * 1000
         loader.record_inference(ModelType.DGA, processing_time / len(request.domains))
@@ -120,16 +120,16 @@ async def predict_dga_batch(
         results = []
         dga_count = 0
 
-        for domain, classification in zip(request.domains, batch_result.classifications):
+        for classification in batch_result.classifications:
             is_dga = classification.is_dga
             if is_dga:
                 dga_count += 1
 
             results.append(DGAPredictResponse(
-                domain=domain,
+                domain=classification.domain,
                 is_dga=is_dga,
-                dga_probability=classification.probability,
-                family=classification.family if is_dga else None,
+                dga_probability=classification.confidence,
+                family=classification.family if isinstance(classification.family, str) else (classification.family.value if classification.family else None),
                 confidence=classification.confidence,
                 processing_time_ms=processing_time / len(request.domains),
             ))

@@ -1,8 +1,8 @@
 /**
- * AlertAIAssistant - AI-powered alert analysis component with demo mode
- * Works without backend by providing intelligent mock responses based on alert context
+ * AlertAIAssistant - AI-powered alert analysis component
+ * Connects to real backend API for AI-powered analysis
  */
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -20,6 +20,7 @@ import {
   Play,
   CheckCircle2,
   Loader2,
+  WifiOff,
 } from 'lucide-react';
 
 interface Alert {
@@ -265,6 +266,7 @@ export function AlertAIAssistant({ alert, className }: AlertAIAssistantProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -313,19 +315,72 @@ What would you like to know?`,
     setInput('');
     setIsTyping(true);
 
-    // Simulate AI thinking time
-    await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 700));
+    try {
+      // Build context with alert information
+      const alertContext = {
+        current_alert: {
+          id: alert.id,
+          title: alert.title,
+          description: alert.description,
+          severity: alert.severity,
+          status: alert.status,
+          source: alert.source,
+          target: alert.target,
+          tactic: alert.tactic,
+          technique: alert.technique,
+          timestamp: alert.timestamp,
+        },
+      };
 
-    // Generate AI response
-    const aiResponse = generateAIResponse(alert, trimmedInput);
-    const assistantMessage: Message = {
-      id: `assistant-${Date.now()}`,
-      role: 'assistant',
-      content: aiResponse,
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, assistantMessage]);
-    setIsTyping(false);
+      // Call real API
+      const response = await fetch('/api/v1/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: trimmedInput,
+          context: alertContext,
+          conversation_id: conversationId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.data) {
+        // Update conversation ID for context continuity
+        if (data.data.conversation_id) {
+          setConversationId(data.data.conversation_id);
+        }
+
+        const assistantMessage: Message = {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content: data.data.message,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+      } else {
+        throw new Error(data.error || 'Unknown error');
+      }
+    } catch (error) {
+      console.warn('API call failed, using fallback:', error);
+      // Fallback to local response generation
+      const aiResponse = generateAIResponse(alert, trimmedInput);
+      const assistantMessage: Message = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: aiResponse + '\n\n*[Fallback mode - API unavailable]*',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, assistantMessage]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -470,7 +525,7 @@ What would you like to know?`,
         </div>
         <p className="text-xs text-muted-foreground mt-2 text-center">
           <Sparkles className="w-3 h-3 inline mr-1" />
-          AI-powered analysis (Demo Mode)
+          AI-powered analysis (GPT-4o-mini)
         </p>
       </div>
     </div>

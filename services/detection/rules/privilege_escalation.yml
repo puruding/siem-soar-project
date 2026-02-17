@@ -1,0 +1,26 @@
+title: Privilege Escalation Attempt
+id: sigma-003
+status: experimental
+description: Detects privilege escalation attempts
+author: SIEM-SOAR
+logsource:
+  category: authentication
+  product: windows
+detection:
+  selection:
+    event_type: 'privilege_escalation'
+  condition: selection
+level: critical
+tags:
+  - attack.privilege_escalation
+  - attack.t1068
+
+# Alert Aggregation - groups alerts by user and target host within 15 minutes
+# Critical alerts use shorter window and smaller group size
+alert_aggregation:
+  group_by:
+    - principal.user.user_name
+    - target.hostname
+  window: 15m
+  action: merge
+  max_count: 10
