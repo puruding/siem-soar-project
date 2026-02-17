@@ -1,36 +1,11 @@
 /**
  * SQLEditor - SQL code editor with syntax highlighting and autocompletion
  */
-import { useCallback, useMemo } from 'react';
+import { useMemo } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
-import { sql, SQLDialect, SQLConfig } from '@codemirror/lang-sql';
+import { sql } from '@codemirror/lang-sql';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { autocompletion, CompletionContext, Completion } from '@codemirror/autocomplete';
-import { EditorView } from '@codemirror/view';
-
-// SQL Keywords for autocompletion
-const SQL_KEYWORDS = [
-  'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN',
-  'IS', 'NULL', 'ORDER', 'BY', 'ASC', 'DESC', 'LIMIT', 'OFFSET',
-  'GROUP', 'HAVING', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'ON',
-  'AS', 'DISTINCT', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'CASE', 'WHEN',
-  'THEN', 'ELSE', 'END', 'UNION', 'ALL', 'INSERT', 'INTO', 'VALUES',
-  'UPDATE', 'SET', 'DELETE', 'CREATE', 'TABLE', 'DROP', 'ALTER', 'INDEX',
-  'WITH', 'INTERVAL', 'NOW', 'TODAY', 'YESTERDAY', 'TRUE', 'FALSE',
-];
-
-// SQL Functions
-const SQL_FUNCTIONS = [
-  'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE', 'NULLIF', 'CAST',
-  'CONCAT', 'LENGTH', 'LOWER', 'UPPER', 'TRIM', 'SUBSTRING', 'REPLACE',
-  'NOW', 'TODAY', 'YESTERDAY', 'DATE', 'DATETIME', 'TIMESTAMP',
-  'YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND',
-  'IF', 'IFNULL', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
-  'ROUND', 'FLOOR', 'CEIL', 'ABS', 'SQRT', 'POWER', 'MOD',
-  'toDateTime', 'toDate', 'toStartOfDay', 'toStartOfHour', 'toStartOfMinute',
-  'formatDateTime', 'dateDiff', 'dateAdd', 'dateSub',
-  'arrayJoin', 'groupArray', 'uniq', 'uniqExact',
-];
+import { EditorView, keymap } from '@codemirror/view';
 
 export interface SchemaTable {
   name: string;
@@ -141,147 +116,33 @@ export function SQLEditor({
   disabled = false,
   className = '',
 }: SQLEditorProps) {
-  // Build completion source from schema
-  const schemaCompletions = useMemo(() => {
-    const completions: Completion[] = [];
-
-    // Add SQL keywords
-    SQL_KEYWORDS.forEach((keyword) => {
-      completions.push({
-        label: keyword,
-        type: 'keyword',
-        detail: 'keyword',
-        boost: -1,
-      });
-      // Also add lowercase version
-      completions.push({
-        label: keyword.toLowerCase(),
-        type: 'keyword',
-        detail: 'keyword',
-        boost: -2,
-      });
-    });
-
-    // Add SQL functions
-    SQL_FUNCTIONS.forEach((func) => {
-      completions.push({
-        label: func,
-        type: 'function',
-        detail: 'function',
-        apply: `${func}()`,
-        boost: 0,
-      });
-      completions.push({
-        label: func.toLowerCase(),
-        type: 'function',
-        detail: 'function',
-        apply: `${func.toLowerCase()}()`,
-        boost: -1,
-      });
-    });
-
-    // Add table names from schema
+  // Build schema for SQL language
+  const sqlSchema = useMemo(() => {
+    const schemaObj: Record<string, string[]> = {};
     schema.forEach((table) => {
-      completions.push({
-        label: table.name,
-        type: 'class',
-        detail: 'table',
-        boost: 2,
-      });
-
-      // Add column names with table prefix
-      table.columns.forEach((col) => {
-        completions.push({
-          label: col.name,
-          type: 'property',
-          detail: `${table.name}.${col.type}`,
-          boost: 1,
-        });
-        // Also add with table prefix
-        completions.push({
-          label: `${table.name}.${col.name}`,
-          type: 'property',
-          detail: col.type,
-          boost: 1,
-        });
-      });
+      schemaObj[table.name] = table.columns.map((c) => c.name);
     });
-
-    return completions;
+    return schemaObj;
   }, [schema]);
 
-  // Custom completion function
-  const customCompletions = useCallback((context: CompletionContext) => {
-    const word = context.matchBefore(/[\w.]+/);
-    if (!word || (word.from === word.to && !context.explicit)) {
-      return null;
-    }
-
-    const searchText = word.text.toLowerCase();
-
-    // Filter completions based on input
-    const filtered = schemaCompletions.filter((c) =>
-      c.label.toLowerCase().includes(searchText)
-    );
-
-    // Sort by relevance
-    filtered.sort((a, b) => {
-      const aStartsWith = a.label.toLowerCase().startsWith(searchText);
-      const bStartsWith = b.label.toLowerCase().startsWith(searchText);
-      if (aStartsWith && !bStartsWith) return -1;
-      if (!aStartsWith && bStartsWith) return 1;
-      return (b.boost || 0) - (a.boost || 0);
-    });
-
-    return {
-      from: word.from,
-      options: filtered.slice(0, 50), // Limit to 50 suggestions
-      validFor: /^[\w.]*$/,
-    };
-  }, [schemaCompletions]);
-
-  // SQL dialect configuration
-  const sqlConfig: SQLConfig = useMemo(() => ({
-    dialect: SQLDialect.define({
-      keywords: SQL_KEYWORDS.join(' ').toLowerCase(),
-      builtin: SQL_FUNCTIONS.join(' ').toLowerCase(),
-      types: 'string int integer float double boolean date datetime timestamp array',
-      operatorChars: '+-*/<>=!&|',
-    }),
-    schema: schema.reduce((acc, table) => {
-      acc[table.name] = table.columns.map((c) => c.name);
-      return acc;
-    }, {} as Record<string, string[]>),
-    tables: schema.map((t) => ({ label: t.name, type: 'class' })),
-  }), [schema]);
-
   // Extensions
-  const extensions = useMemo(() => [
-    sql(sqlConfig),
-    autocompletion({
-      override: [customCompletions],
-      activateOnTyping: true,
-      maxRenderedOptions: 50,
-      icons: true,
-    }),
-    EditorView.lineWrapping,
-    EditorView.domEventHandlers({
-      keydown: (event) => {
-        // Ctrl+Enter to execute
-        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-          event.preventDefault();
-          onExecute?.();
-          return true;
-        }
-        return false;
-      },
-    }),
-    EditorView.updateListener.of((update) => {
-      if (update.docChanged) {
-        onChange(update.state.doc.toString());
-      }
-    }),
-  ], [sqlConfig, customCompletions, onExecute, onChange]);
+  const extensions = useMemo(() => {
+    const exts = [
+      sql({ schema: sqlSchema }),
+      EditorView.lineWrapping,
+      keymap.of([
+        {
+          key: 'Ctrl-Enter',
+          mac: 'Cmd-Enter',
+          run: () => {
+            onExecute?.();
+            return true;
+          },
+        },
+      ]),
+    ];
+    return exts;
+  }, [sqlSchema, onExecute]);
 
   return (
     <div className={`sql-editor-container rounded-md border border-border overflow-hidden ${className}`}>
@@ -292,6 +153,7 @@ export function SQLEditor({
         extensions={extensions}
         placeholder={placeholder}
         editable={!disabled}
+        onChange={onChange}
         basicSetup={{
           lineNumbers: true,
           highlightActiveLineGutter: true,
@@ -305,7 +167,7 @@ export function SQLEditor({
           syntaxHighlighting: true,
           bracketMatching: true,
           closeBrackets: true,
-          autocompletion: false, // We use custom autocompletion
+          autocompletion: true,
           rectangularSelection: true,
           crosshairCursor: false,
           highlightActiveLine: true,
