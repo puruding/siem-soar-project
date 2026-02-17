@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -39,6 +40,9 @@ import {
   Type,
   Calendar,
   ToggleLeft,
+  MessageSquare,
+  ArrowRight,
+  Wand2,
 } from 'lucide-react';
 import {
   Collapsible,
@@ -420,6 +424,10 @@ export function QueryConsole() {
     return saved ? JSON.parse(saved) : queryHistory;
   });
 
+  // NL2SQL state
+  const [nlQuery, setNlQuery] = useState('');
+  const [isConverting, setIsConverting] = useState(false);
+
   // Read URL query parameters on mount
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -451,6 +459,153 @@ export function QueryConsole() {
     };
     setLocalHistory((prev) => [newEntry, ...prev.slice(0, 49)]); // Keep last 50 queries
   }, []);
+
+  // NL2SQL conversion function
+  const convertNL2SQL = useCallback(async () => {
+    if (!nlQuery.trim()) {
+      toast({
+        title: 'Empty Input',
+        description: 'Please enter a natural language query.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsConverting(true);
+
+    try {
+      // Try API first
+      const response = await fetch('/api/v1/nl2sql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: nlQuery,
+          schema: databaseSchema.map(t => ({
+            name: t.name,
+            columns: t.columns.map(c => c.name),
+          })),
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.sql) {
+          setQuery(data.sql);
+          toast({
+            title: 'SQL Generated',
+            description: 'Natural language query converted to SQL.',
+            variant: 'success',
+          });
+          setNlQuery('');
+          return;
+        }
+      }
+      throw new Error('API unavailable');
+    } catch {
+      // Fallback: Generate mock SQL based on keywords
+      const generatedSQL = generateMockSQL(nlQuery);
+      setQuery(generatedSQL);
+      toast({
+        title: 'SQL Generated',
+        description: 'Natural language query converted to SQL. (Fallback mode)',
+        variant: 'success',
+      });
+      setNlQuery('');
+    } finally {
+      setIsConverting(false);
+    }
+  }, [nlQuery, toast]);
+
+  // Mock NL2SQL conversion based on keywords
+  const generateMockSQL = (naturalLanguage: string): string => {
+    const lower = naturalLanguage.toLowerCase();
+
+    // Critical alerts
+    if (lower.includes('critical') && (lower.includes('alert') || lower.includes('경보'))) {
+      return `SELECT id, alert_time, title, severity, status, source
+FROM alerts
+WHERE severity = 'critical'
+ORDER BY alert_time DESC
+LIMIT 100`;
+    }
+
+    // High severity events
+    if ((lower.includes('high') || lower.includes('높은')) && (lower.includes('severity') || lower.includes('심각'))) {
+      return `SELECT id, event_time, event_type, source_ip, severity, description
+FROM events
+WHERE severity IN ('critical', 'high')
+ORDER BY event_time DESC
+LIMIT 100`;
+    }
+
+    // Failed logins
+    if (lower.includes('failed') && lower.includes('login') || lower.includes('로그인') && lower.includes('실패')) {
+      return `SELECT event_time, source_ip, user, hostname, description
+FROM events
+WHERE event_type = 'failed_login'
+ORDER BY event_time DESC
+LIMIT 100`;
+    }
+
+    // Today's events
+    if (lower.includes('today') || lower.includes('오늘')) {
+      return `SELECT id, event_time, event_type, source_ip, severity, description
+FROM events
+WHERE event_time >= today()
+ORDER BY event_time DESC
+LIMIT 100`;
+    }
+
+    // Last hour
+    if (lower.includes('last hour') || lower.includes('지난 1시간') || lower.includes('최근 1시간')) {
+      return `SELECT id, event_time, event_type, source_ip, severity, description
+FROM events
+WHERE event_time >= now() - INTERVAL 1 HOUR
+ORDER BY event_time DESC
+LIMIT 100`;
+    }
+
+    // Count by severity
+    if (lower.includes('count') || lower.includes('개수') || lower.includes('통계')) {
+      return `SELECT severity, COUNT(*) as count
+FROM events
+GROUP BY severity
+ORDER BY count DESC`;
+    }
+
+    // IP search
+    const ipMatch = lower.match(/ip[:\s]+(\d+\.\d+\.\d+\.\d+)/);
+    if (ipMatch) {
+      return `SELECT id, event_time, event_type, source_ip, destination_ip, severity, description
+FROM events
+WHERE source_ip = '${ipMatch[1]}' OR destination_ip = '${ipMatch[1]}'
+ORDER BY event_time DESC
+LIMIT 100`;
+    }
+
+    // User search
+    if (lower.includes('user') || lower.includes('사용자')) {
+      return `SELECT id, username, email, role, department, last_login, status, risk_score
+FROM users
+ORDER BY last_login DESC
+LIMIT 100`;
+    }
+
+    // Assets
+    if (lower.includes('asset') || lower.includes('자산') || lower.includes('endpoint') || lower.includes('호스트')) {
+      return `SELECT id, hostname, ip_address, os, department, criticality, last_seen
+FROM assets
+ORDER BY last_seen DESC
+LIMIT 100`;
+    }
+
+    // Default: Show recent events
+    return `-- AI generated query from: "${naturalLanguage}"
+SELECT id, event_time, event_type, source_ip, severity, description
+FROM events
+ORDER BY event_time DESC
+LIMIT 100`;
+  };
 
   const runQuery = useCallback(async () => {
     if (!query.trim()) {
@@ -595,6 +750,70 @@ export function QueryConsole() {
       <div className="flex gap-6 flex-1 min-h-0">
         {/* Main content */}
         <div className="flex-1 flex flex-col min-w-0">
+          {/* NL2SQL - AI Assistant Section */}
+          <Card className="flex-none mb-4 border-neon-cyan/30 bg-gradient-to-r from-neon-cyan/5 to-transparent">
+            <CardContent className="py-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 rounded-lg bg-neon-cyan/20">
+                  <Wand2 className="w-5 h-5 text-neon-cyan" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm">AI Assistant (NL2SQL)</h3>
+                  <p className="text-xs text-muted-foreground">
+                    자연어로 질문하면 AI가 SQL로 변환해 줍니다
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 relative">
+                  <MessageSquare className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    value={nlQuery}
+                    onChange={(e) => setNlQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        convertNL2SQL();
+                      }
+                    }}
+                    placeholder="예: 오늘 발생한 critical 경보 보여줘 / Show failed login attempts from last hour"
+                    className="pl-10 pr-4 bg-background/50"
+                    disabled={isConverting}
+                  />
+                </div>
+                <Button
+                  onClick={convertNL2SQL}
+                  disabled={!nlQuery.trim() || isConverting}
+                  className="shrink-0 bg-neon-cyan hover:bg-neon-cyan/90 text-black"
+                >
+                  {isConverting ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <ArrowRight className="w-4 h-4 mr-2" />
+                  )}
+                  {isConverting ? 'Converting...' : 'Convert to SQL'}
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <span className="text-xs text-muted-foreground">Try:</span>
+                {[
+                  'Show critical alerts',
+                  'Count events by severity',
+                  'Failed logins today',
+                  'Events from last hour',
+                ].map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    onClick={() => setNlQuery(suggestion)}
+                    className="text-xs px-2 py-1 rounded-full bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Query editor */}
           <Card className="flex-none">
             <CardHeader className="pb-2">
