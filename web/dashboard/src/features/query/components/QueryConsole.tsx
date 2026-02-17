@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -6,6 +6,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
+import { BarChart } from '@/components/widgets/BarChart';
+import { PieChart } from '@/components/widgets/PieChart';
+import { LineChart } from '@/components/widgets/LineChart';
 import {
   Table,
   TableBody,
@@ -43,6 +46,10 @@ import {
   MessageSquare,
   ArrowRight,
   Wand2,
+  BarChart3,
+  PieChartIcon,
+  LineChartIcon,
+  LayoutGrid,
 } from 'lucide-react';
 import {
   Collapsible,
@@ -432,6 +439,10 @@ export function QueryConsole() {
     explanation: string;
   } | null>(null);
 
+  // Visualization state
+  const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
+  const [chartType, setChartType] = useState<'bar' | 'pie' | 'line'>('bar');
+
   // Read URL query parameters on mount
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -790,6 +801,67 @@ LIMIT 100`;
     return `${days}d ago`;
   };
 
+  // Check if results are suitable for visualization
+  const isVisualizableData = useMemo(() => {
+    if (!results || results.length === 0) return false;
+    const firstRow = results[0];
+    if (!firstRow) return false;
+    const keys = Object.keys(firstRow);
+    // Need at least one string column (label) and one number column (value)
+    const hasStringCol = keys.some(k => typeof firstRow[k] === 'string');
+    const hasNumberCol = keys.some(k => typeof firstRow[k] === 'number');
+    return hasStringCol && hasNumberCol && results.length <= 50;
+  }, [results]);
+
+  // Prepare chart data from results
+  const chartData = useMemo(() => {
+    if (!results || results.length === 0) return null;
+
+    const firstRow = results[0];
+    if (!firstRow) return null;
+
+    const keys = Object.keys(firstRow);
+    // Find label column (first string column)
+    const labelKey = keys.find(k => typeof firstRow[k] === 'string') || keys[0];
+    // Find value column (first number column, or 'count')
+    const valueKey = keys.find(k => k.toLowerCase() === 'count') ||
+                     keys.find(k => typeof firstRow[k] === 'number') ||
+                     keys[1];
+
+    if (!labelKey || !valueKey) return null;
+
+    const labels = results.map(row => String(row[labelKey] || 'Unknown'));
+    const values = results.map(row => Number(row[valueKey]) || 0);
+
+    // For pie chart
+    const pieData = results.map(row => ({
+      name: String(row[labelKey] || 'Unknown'),
+      value: Number(row[valueKey]) || 0,
+    }));
+
+    // For line chart (time series detection)
+    const isTimeSeries = labelKey.toLowerCase().includes('time') ||
+                         labelKey.toLowerCase().includes('date') ||
+                         labelKey.toLowerCase().includes('timestamp');
+
+    return {
+      labels,
+      values,
+      pieData,
+      labelKey,
+      valueKey,
+      isTimeSeries,
+    };
+  }, [results]);
+
+  // Auto-detect best chart type
+  const suggestedChartType = useMemo(() => {
+    if (!chartData) return 'bar';
+    if (chartData.isTimeSeries) return 'line';
+    if (chartData.pieData.length <= 8 && chartData.pieData.length >= 2) return 'pie';
+    return 'bar';
+  }, [chartData]);
+
   return (
     <div className="space-y-6 animate-fade-in h-[calc(100vh-140px)] flex flex-col">
       {/* Page header */}
@@ -966,8 +1038,68 @@ LIMIT 100`;
                     </div>
                   )}
                 </div>
-                {results && (
+                {results && results.length > 0 && (
                   <div className="flex items-center gap-2">
+                    {/* View Mode Toggle */}
+                    <div className="flex items-center border border-border rounded-md overflow-hidden mr-2">
+                      <Button
+                        variant={viewMode === 'table' ? 'secondary' : 'ghost'}
+                        size="sm"
+                        className="rounded-none h-8 px-3"
+                        onClick={() => setViewMode('table')}
+                      >
+                        <LayoutGrid className="w-4 h-4 mr-1" />
+                        Table
+                      </Button>
+                      <Button
+                        variant={viewMode === 'chart' ? 'secondary' : 'ghost'}
+                        size="sm"
+                        className="rounded-none h-8 px-3"
+                        onClick={() => {
+                          setViewMode('chart');
+                          setChartType(suggestedChartType);
+                        }}
+                        disabled={!isVisualizableData}
+                        title={!isVisualizableData ? 'Data not suitable for visualization' : undefined}
+                      >
+                        <BarChart3 className="w-4 h-4 mr-1" />
+                        Chart
+                      </Button>
+                    </div>
+
+                    {/* Chart Type Selector (only when in chart mode) */}
+                    {viewMode === 'chart' && isVisualizableData && (
+                      <div className="flex items-center border border-border rounded-md overflow-hidden mr-2">
+                        <Button
+                          variant={chartType === 'bar' ? 'secondary' : 'ghost'}
+                          size="sm"
+                          className="rounded-none h-8 px-2"
+                          onClick={() => setChartType('bar')}
+                          title="Bar Chart"
+                        >
+                          <BarChart3 className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant={chartType === 'pie' ? 'secondary' : 'ghost'}
+                          size="sm"
+                          className="rounded-none h-8 px-2"
+                          onClick={() => setChartType('pie')}
+                          title="Pie Chart"
+                        >
+                          <PieChartIcon className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant={chartType === 'line' ? 'secondary' : 'ghost'}
+                          size="sm"
+                          className="rounded-none h-8 px-2"
+                          onClick={() => setChartType('line')}
+                          title="Line Chart"
+                        >
+                          <LineChartIcon className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    )}
+
                     <Button variant="outline" size="sm">
                       <Copy className="w-4 h-4 mr-2" />
                       Copy
@@ -1007,6 +1139,53 @@ LIMIT 100`;
                   </div>
                 </div>
               ) : results && results.length > 0 ? (
+                viewMode === 'chart' && chartData && isVisualizableData ? (
+                  <div className="h-full p-4">
+                    <div className="mb-4 p-3 rounded-lg bg-muted/30 border border-border">
+                      <div className="flex items-center gap-2 text-sm">
+                        <BarChart3 className="w-4 h-4 text-primary" />
+                        <span className="font-medium">Visualization</span>
+                        <span className="text-muted-foreground">
+                          | Label: <code className="text-xs bg-muted px-1 rounded">{chartData.labelKey}</code>
+                          | Value: <code className="text-xs bg-muted px-1 rounded">{chartData.valueKey}</code>
+                        </span>
+                      </div>
+                    </div>
+                    {chartType === 'bar' && (
+                      <BarChart
+                        data={{
+                          labels: chartData.labels,
+                          values: chartData.values,
+                        }}
+                        height="300px"
+                        horizontal={chartData.labels.length > 10}
+                        showValues={chartData.values.length <= 15}
+                      />
+                    )}
+                    {chartType === 'pie' && (
+                      <PieChart
+                        data={chartData.pieData}
+                        height="300px"
+                        donut={true}
+                        showLegend={true}
+                      />
+                    )}
+                    {chartType === 'line' && (
+                      <LineChart
+                        data={{
+                          labels: chartData.labels,
+                          series: [{
+                            name: chartData.valueKey,
+                            data: chartData.values,
+                          }],
+                        }}
+                        height="300px"
+                        smooth={true}
+                        area={true}
+                      />
+                    )}
+                  </div>
+                ) : (
                 <ScrollArea className="h-full">
                   <Table>
                     <TableHeader>
@@ -1047,6 +1226,7 @@ LIMIT 100`;
                     </TableBody>
                   </Table>
                 </ScrollArea>
+                )
               ) : results && results.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground">
                   <div className="text-center">
