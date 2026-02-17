@@ -898,6 +898,13 @@ export function CopilotChat({
 
         {/* Input */}
         <div className="p-4 border-t border-border shrink-0">
+          {/* Ask in natural language label */}
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="h-4 w-4 text-neon-cyan" />
+            <span className="text-sm font-medium text-foreground">
+              {language === 'ko' ? '자연어로 질문하세요' : 'Ask in natural language'}
+            </span>
+          </div>
           <div className="flex items-end gap-2">
             <div className="flex-1 relative">
               <textarea
@@ -907,8 +914,8 @@ export function CopilotChat({
                 onKeyDown={handleKeyDown}
                 placeholder={
                   language === 'ko'
-                    ? '질문을 입력하세요... (예: 오늘 발생한 심각한 경보 보여줘)'
-                    : 'Ask a question... (e.g., Show me critical alerts from today)'
+                    ? '예: 오늘 발생한 심각한 경보 보여줘'
+                    : 'e.g., Show me critical alerts from today'
                 }
                 className={cn(
                   'w-full resize-none rounded-lg border border-input bg-background px-4 py-3 pr-12',
