@@ -427,6 +427,10 @@ export function QueryConsole() {
   // NL2SQL state
   const [nlQuery, setNlQuery] = useState('');
   const [isConverting, setIsConverting] = useState(false);
+  const [sqlExplanation, setSqlExplanation] = useState<{
+    originalQuery: string;
+    explanation: string;
+  } | null>(null);
 
   // Read URL query parameters on mount
   useEffect(() => {
@@ -491,6 +495,10 @@ export function QueryConsole() {
         const data = await response.json();
         if (data.success && data.sql) {
           setQuery(data.sql);
+          setSqlExplanation({
+            originalQuery: nlQuery,
+            explanation: data.explanation || generateExplanation(nlQuery, data.sql),
+          });
           toast({
             title: 'SQL Generated',
             description: 'Natural language query converted to SQL.',
@@ -504,7 +512,12 @@ export function QueryConsole() {
     } catch {
       // Fallback: Generate mock SQL based on keywords
       const generatedSQL = generateMockSQL(nlQuery);
+      const explanation = generateExplanation(nlQuery, generatedSQL);
       setQuery(generatedSQL);
+      setSqlExplanation({
+        originalQuery: nlQuery,
+        explanation,
+      });
       toast({
         title: 'SQL Generated',
         description: 'Natural language query converted to SQL. (Fallback mode)',
@@ -515,6 +528,60 @@ export function QueryConsole() {
       setIsConverting(false);
     }
   }, [nlQuery, toast]);
+
+  // Generate explanation for the SQL query
+  const generateExplanation = (naturalLanguage: string, sql: string): string => {
+    const lower = naturalLanguage.toLowerCase();
+    const sqlLower = sql.toLowerCase();
+
+    // Critical alerts
+    if (lower.includes('critical') && (lower.includes('alert') || lower.includes('경보'))) {
+      return '이 쿼리는 alerts 테이블에서 심각도가 "critical"인 경보를 조회합니다. 결과는 경보 발생 시간 기준 최신순으로 정렬되며, 최대 100건까지 표시됩니다.';
+    }
+
+    // High severity events
+    if ((lower.includes('high') || lower.includes('높은')) && (lower.includes('severity') || lower.includes('심각'))) {
+      return '이 쿼리는 events 테이블에서 심각도가 "critical" 또는 "high"인 이벤트를 조회합니다. 고위험 보안 이벤트를 빠르게 파악할 수 있습니다.';
+    }
+
+    // Failed logins
+    if (lower.includes('failed') && lower.includes('login') || lower.includes('로그인') && lower.includes('실패')) {
+      return '이 쿼리는 로그인 실패 이벤트를 조회합니다. 무차별 대입 공격(Brute Force)이나 비인가 접근 시도를 탐지하는 데 유용합니다.';
+    }
+
+    // Today's events
+    if (lower.includes('today') || lower.includes('오늘')) {
+      return '이 쿼리는 오늘 발생한 모든 보안 이벤트를 조회합니다. today() 함수를 사용하여 오늘 자정 이후의 이벤트만 필터링합니다.';
+    }
+
+    // Last hour
+    if (lower.includes('last hour') || lower.includes('지난 1시간') || lower.includes('최근 1시간')) {
+      return '이 쿼리는 최근 1시간 동안 발생한 이벤트를 조회합니다. INTERVAL 구문을 사용하여 현재 시간 기준 1시간 전까지의 데이터를 필터링합니다.';
+    }
+
+    // Count/Statistics
+    if (lower.includes('count') || lower.includes('개수') || lower.includes('통계')) {
+      return '이 쿼리는 심각도별 이벤트 개수를 집계합니다. GROUP BY를 사용하여 각 심각도 수준의 이벤트 분포를 파악할 수 있습니다.';
+    }
+
+    // IP search
+    if (sqlLower.includes('source_ip') && sqlLower.includes('destination_ip')) {
+      return '이 쿼리는 특정 IP 주소와 관련된 모든 이벤트를 조회합니다. 출발지(source_ip) 또는 목적지(destination_ip)로 해당 IP가 포함된 이벤트를 찾습니다.';
+    }
+
+    // User search
+    if (lower.includes('user') || lower.includes('사용자')) {
+      return '이 쿼리는 사용자 계정 정보를 조회합니다. 마지막 로그인 시간, 역할, 위험 점수 등을 확인할 수 있습니다.';
+    }
+
+    // Assets
+    if (lower.includes('asset') || lower.includes('자산') || lower.includes('endpoint')) {
+      return '이 쿼리는 네트워크 자산 정보를 조회합니다. 호스트명, IP 주소, 운영체제, 중요도 등의 자산 인벤토리를 확인할 수 있습니다.';
+    }
+
+    // Default explanation
+    return `이 쿼리는 "${naturalLanguage}" 요청을 기반으로 생성되었습니다. events 테이블에서 최신 보안 이벤트를 조회하며, 시간 역순으로 정렬됩니다.`;
+  };
 
   // Mock NL2SQL conversion based on keywords
   const generateMockSQL = (naturalLanguage: string): string => {
@@ -811,6 +878,34 @@ LIMIT 100`;
                   </button>
                 ))}
               </div>
+
+              {/* 💡 Explanation Section */}
+              {sqlExplanation && (
+                <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                  <div className="flex items-start gap-3">
+                    <div className="p-1.5 rounded bg-amber-500/20 shrink-0 mt-0.5">
+                      <Sparkles className="w-4 h-4 text-amber-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <h4 className="text-sm font-semibold text-amber-500">💡 Explanation</h4>
+                        <button
+                          onClick={() => setSqlExplanation(null)}
+                          className="text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        <span className="font-medium">Query:</span> "{sqlExplanation.originalQuery}"
+                      </p>
+                      <p className="text-sm text-foreground/90 leading-relaxed">
+                        {sqlExplanation.explanation}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
