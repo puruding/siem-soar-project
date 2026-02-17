@@ -784,12 +784,12 @@ LIMIT 100`;
                 <Button
                   onClick={convertNL2SQL}
                   disabled={!nlQuery.trim() || isConverting}
-                  className="shrink-0 bg-neon-cyan hover:bg-neon-cyan/90 text-black"
+                  className="shrink-0 min-w-[140px] bg-[#00A4A6] hover:bg-[#00A4A6]/90 text-white font-medium"
                 >
                   {isConverting ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   ) : (
-                    <ArrowRight className="w-4 h-4 mr-2" />
+                    <Wand2 className="w-4 h-4 mr-2" />
                   )}
                   {isConverting ? 'Converting...' : 'Convert to SQL'}
                 </Button>
