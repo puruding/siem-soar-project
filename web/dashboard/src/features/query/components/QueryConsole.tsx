@@ -4,8 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
+import { SQLEditor } from '@/components/ui/sql-editor';
 import { BarChart } from '@/components/widgets/BarChart';
 import { PieChart } from '@/components/widgets/PieChart';
 import { LineChart } from '@/components/widgets/LineChart';
@@ -1010,13 +1010,17 @@ LIMIT 100`;
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
-              <Textarea
+            <CardContent className="p-0">
+              <SQLEditor
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={handleKeyDown}
-                className="font-mono text-sm h-[200px] bg-[#1e1e1e] text-[#d4d4d4] border-border resize-none"
-                placeholder="Enter SQL query..."
+                onChange={setQuery}
+                onExecute={runQuery}
+                schema={databaseSchema.map(t => ({
+                  name: t.name,
+                  columns: t.columns.map(c => ({ name: c.name, type: c.type })),
+                }))}
+                height="200px"
+                placeholder="Enter SQL query... (Ctrl+Space for autocomplete)"
                 disabled={isRunning}
               />
             </CardContent>
