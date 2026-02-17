@@ -1,11 +1,10 @@
 /**
  * SQLEditor - SQL code editor with syntax highlighting and autocompletion
+ * Using Monaco Editor for reliable syntax highlighting and autocompletion
  */
-import { useMemo } from 'react';
-import CodeMirror from '@uiw/react-codemirror';
-import { sql } from '@codemirror/lang-sql';
-import { oneDark } from '@codemirror/theme-one-dark';
-import { EditorView, keymap } from '@codemirror/view';
+import { useRef, useEffect } from 'react';
+import Editor, { OnMount, BeforeMount } from '@monaco-editor/react';
+import type * as monacoEditor from 'monaco-editor';
 
 export interface SchemaTable {
   name: string;
@@ -23,88 +22,31 @@ interface SQLEditorProps {
   className?: string;
 }
 
-// Custom theme to match the app's dark theme
-const customTheme = EditorView.theme({
-  '&': {
-    backgroundColor: '#1e1e1e',
-    color: '#d4d4d4',
-    fontSize: '14px',
-    fontFamily: 'JetBrains Mono, Fira Code, Consolas, Monaco, monospace',
-  },
-  '.cm-content': {
-    caretColor: '#00A4A6',
-    padding: '12px 0',
-  },
-  '.cm-cursor': {
-    borderLeftColor: '#00A4A6',
-    borderLeftWidth: '2px',
-  },
-  '.cm-activeLine': {
-    backgroundColor: 'rgba(0, 164, 166, 0.08)',
-  },
-  '.cm-activeLineGutter': {
-    backgroundColor: 'rgba(0, 164, 166, 0.08)',
-  },
-  '.cm-gutters': {
-    backgroundColor: '#1e1e1e',
-    color: '#6e7681',
-    border: 'none',
-    borderRight: '1px solid #2d3339',
-  },
-  '.cm-lineNumbers .cm-gutterElement': {
-    padding: '0 12px 0 8px',
-    minWidth: '40px',
-  },
-  '.cm-selectionBackground': {
-    backgroundColor: 'rgba(0, 164, 166, 0.3) !important',
-  },
-  '&.cm-focused .cm-selectionBackground': {
-    backgroundColor: 'rgba(0, 164, 166, 0.3) !important',
-  },
-  '.cm-matchingBracket': {
-    backgroundColor: 'rgba(0, 164, 166, 0.3)',
-    outline: '1px solid #00A4A6',
-  },
-  '.cm-tooltip': {
-    backgroundColor: '#1F2527',
-    border: '1px solid #2D3339',
-    borderRadius: '6px',
-    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
-  },
-  '.cm-tooltip.cm-tooltip-autocomplete': {
-    '& > ul': {
-      fontFamily: 'JetBrains Mono, Fira Code, Consolas, Monaco, monospace',
-      fontSize: '13px',
-      maxHeight: '300px',
+// Custom dark theme for Monaco
+const defineTheme: BeforeMount = (monaco) => {
+  monaco.editor.defineTheme('sql-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'keyword', foreground: '569CD6', fontStyle: 'bold' },
+      { token: 'string', foreground: 'CE9178' },
+      { token: 'number', foreground: 'B5CEA8' },
+      { token: 'comment', foreground: '6A9955', fontStyle: 'italic' },
+      { token: 'operator', foreground: 'D4D4D4' },
+      { token: 'identifier', foreground: '9CDCFE' },
+    ],
+    colors: {
+      'editor.background': '#1e1e1e',
+      'editor.foreground': '#d4d4d4',
+      'editor.lineHighlightBackground': '#00A4A615',
+      'editor.selectionBackground': '#00A4A640',
+      'editorCursor.foreground': '#00A4A6',
+      'editorLineNumber.foreground': '#6e7681',
+      'editorLineNumber.activeForeground': '#00A4A6',
+      'editor.selectionHighlightBackground': '#00A4A630',
     },
-    '& > ul > li': {
-      padding: '6px 12px',
-      borderRadius: '4px',
-      margin: '2px 4px',
-    },
-    '& > ul > li[aria-selected]': {
-      backgroundColor: 'rgba(0, 164, 166, 0.2)',
-      color: '#ffffff',
-    },
-  },
-  '.cm-completionLabel': {
-    color: '#d4d4d4',
-  },
-  '.cm-completionDetail': {
-    color: '#9BA7B4',
-    fontStyle: 'italic',
-    marginLeft: '8px',
-  },
-  '.cm-completionMatchedText': {
-    color: '#00A4A6',
-    fontWeight: 'bold',
-    textDecoration: 'none',
-  },
-  '.cm-placeholder': {
-    color: '#6e7681',
-    fontStyle: 'italic',
-  },
-}, { dark: true });
+  });
+};
 
 export function SQLEditor({
   value,
@@ -116,69 +58,164 @@ export function SQLEditor({
   disabled = false,
   className = '',
 }: SQLEditorProps) {
-  // Build schema for SQL language
-  const sqlSchema = useMemo(() => {
-    const schemaObj: Record<string, string[]> = {};
-    schema.forEach((table) => {
-      schemaObj[table.name] = table.columns.map((c) => c.name);
-    });
-    return schemaObj;
-  }, [schema]);
+  const editorRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(null);
 
-  // Extensions
-  const extensions = useMemo(() => {
-    const exts = [
-      sql({ schema: sqlSchema }),
-      EditorView.lineWrapping,
-      keymap.of([
-        {
-          key: 'Ctrl-Enter',
-          mac: 'Cmd-Enter',
-          run: () => {
-            onExecute?.();
-            return true;
-          },
+  // Handle editor mount
+  const handleEditorMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
+
+    // Add Ctrl+Enter shortcut for execute
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      onExecute?.();
+    });
+
+    // Register SQL completion provider with schema
+    if (schema.length > 0) {
+      monaco.languages.registerCompletionItemProvider('sql', {
+        provideCompletionItems: (model: monacoEditor.editor.ITextModel, position: monacoEditor.Position) => {
+          const word = model.getWordUntilPosition(position);
+          const range = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: word.startColumn,
+            endColumn: word.endColumn,
+          };
+
+          const suggestions: monacoEditor.languages.CompletionItem[] = [];
+
+          // Add table names
+          schema.forEach((table) => {
+            suggestions.push({
+              label: table.name,
+              kind: monaco.languages.CompletionItemKind.Class,
+              insertText: table.name,
+              detail: 'Table',
+              range,
+            } as monacoEditor.languages.CompletionItem);
+
+            // Add column names
+            table.columns.forEach((col) => {
+              suggestions.push({
+                label: col.name,
+                kind: monaco.languages.CompletionItemKind.Field,
+                insertText: col.name,
+                detail: `${table.name}.${col.type}`,
+                range,
+              } as monacoEditor.languages.CompletionItem);
+
+              // Add with table prefix
+              suggestions.push({
+                label: `${table.name}.${col.name}`,
+                kind: monaco.languages.CompletionItemKind.Field,
+                insertText: `${table.name}.${col.name}`,
+                detail: col.type,
+                range,
+              } as monacoEditor.languages.CompletionItem);
+            });
+          });
+
+          // Add SQL keywords
+          const keywords = [
+            'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN',
+            'IS', 'NULL', 'ORDER', 'BY', 'ASC', 'DESC', 'LIMIT', 'OFFSET',
+            'GROUP', 'HAVING', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'ON',
+            'AS', 'DISTINCT', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'CASE', 'WHEN',
+            'THEN', 'ELSE', 'END', 'UNION', 'ALL', 'INSERT', 'INTO', 'VALUES',
+            'UPDATE', 'SET', 'DELETE', 'CREATE', 'TABLE', 'DROP', 'ALTER', 'INDEX',
+            'WITH', 'INTERVAL', 'NOW', 'TODAY', 'YESTERDAY', 'TRUE', 'FALSE',
+          ];
+
+          keywords.forEach((kw) => {
+            suggestions.push({
+              label: kw,
+              kind: monaco.languages.CompletionItemKind.Keyword,
+              insertText: kw,
+              detail: 'Keyword',
+              range,
+            } as monacoEditor.languages.CompletionItem);
+          });
+
+          // Add SQL functions
+          const functions = [
+            'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE', 'NULLIF', 'CAST',
+            'CONCAT', 'LENGTH', 'LOWER', 'UPPER', 'TRIM', 'SUBSTRING', 'REPLACE',
+            'NOW', 'TODAY', 'DATE', 'DATETIME', 'TIMESTAMP',
+            'YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND',
+            'IF', 'IFNULL', 'ROUND', 'FLOOR', 'CEIL', 'ABS',
+          ];
+
+          functions.forEach((fn) => {
+            suggestions.push({
+              label: fn,
+              kind: monaco.languages.CompletionItemKind.Function,
+              insertText: `${fn}()`,
+              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              detail: 'Function',
+              range,
+            } as monacoEditor.languages.CompletionItem);
+          });
+
+          return { suggestions };
         },
-      ]),
-    ];
-    return exts;
-  }, [sqlSchema, onExecute]);
+      });
+    }
+
+    // Focus the editor
+    editor.focus();
+  };
+
+  // Update editor options when disabled changes
+  useEffect(() => {
+    if (editorRef.current) {
+      editorRef.current.updateOptions({ readOnly: disabled });
+    }
+  }, [disabled]);
 
   return (
     <div className={`sql-editor-container rounded-md border border-border overflow-hidden ${className}`}>
-      <CodeMirror
-        value={value}
+      <Editor
         height={height}
-        theme={[oneDark, customTheme]}
-        extensions={extensions}
-        placeholder={placeholder}
-        editable={!disabled}
-        onChange={onChange}
-        basicSetup={{
-          lineNumbers: true,
-          highlightActiveLineGutter: true,
-          highlightSpecialChars: true,
-          history: true,
-          foldGutter: true,
-          drawSelection: true,
-          dropCursor: true,
-          allowMultipleSelections: true,
-          indentOnInput: true,
-          syntaxHighlighting: true,
-          bracketMatching: true,
-          closeBrackets: true,
-          autocompletion: true,
-          rectangularSelection: true,
-          crosshairCursor: false,
-          highlightActiveLine: true,
-          highlightSelectionMatches: true,
-          closeBracketsKeymap: true,
-          defaultKeymap: true,
-          searchKeymap: true,
-          historyKeymap: true,
-          foldKeymap: true,
-          completionKeymap: true,
-          lintKeymap: true,
+        defaultLanguage="sql"
+        value={value}
+        onChange={(val) => onChange(val || '')}
+        beforeMount={defineTheme}
+        onMount={handleEditorMount}
+        theme="sql-dark"
+        options={{
+          minimap: { enabled: false },
+          fontSize: 14,
+          fontFamily: 'JetBrains Mono, Fira Code, Consolas, Monaco, monospace',
+          lineNumbers: 'on',
+          lineNumbersMinChars: 3,
+          folding: true,
+          wordWrap: 'on',
+          automaticLayout: true,
+          scrollBeyondLastLine: false,
+          tabSize: 2,
+          insertSpaces: true,
+          renderLineHighlight: 'line',
+          cursorBlinking: 'smooth',
+          cursorStyle: 'line',
+          cursorWidth: 2,
+          selectOnLineNumbers: true,
+          roundedSelection: true,
+          readOnly: disabled,
+          domReadOnly: disabled,
+          quickSuggestions: true,
+          suggestOnTriggerCharacters: true,
+          acceptSuggestionOnEnter: 'on',
+          tabCompletion: 'on',
+          wordBasedSuggestions: 'currentDocument',
+          parameterHints: { enabled: true },
+          formatOnPaste: true,
+          formatOnType: true,
+          padding: { top: 12, bottom: 12 },
+          scrollbar: {
+            vertical: 'auto',
+            horizontal: 'auto',
+            verticalScrollbarSize: 10,
+            horizontalScrollbarSize: 10,
+          },
         }}
       />
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#1a1a1a] border-t border-border text-xs text-muted-foreground">
