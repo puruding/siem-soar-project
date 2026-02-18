@@ -3,7 +3,9 @@ import type {
   WSMessage,
   WSNodeStartPayload,
   WSNodeCompletePayload,
-  WSNodeErrorPayload
+  WSNodeErrorPayload,
+  WSApprovalRequiredPayload,
+  WSApprovalResponsePayload,
 } from '../types/execution.types';
 import type { ProcessingItem } from '../types/processing.types';
 
@@ -47,6 +49,11 @@ const mockOutputs: Record<string, Record<string, unknown>> = {
     result: true,
     branch: 'yes',
   },
+  approval: {
+    status: 'approved',
+    approvedBy: 'admin@company.com',
+    approvedAt: new Date().toISOString(),
+  },
 };
 
 export class MockWebSocketService {
@@ -57,6 +64,8 @@ export class MockWebSocketService {
   private isPaused = false;
   private currentExecutionId: string | null = null;
   private abortController: AbortController | null = null;
+  private pendingApprovals: Map<string, { resolve: (approved: boolean) => void; nodeId: string }> =
+    new Map();
 
   constructor(config?: Partial<MockWSConfig>) {
     this.config = { ...defaultConfig, ...config };
@@ -154,6 +163,12 @@ export class MockWebSocketService {
   private async executeNode(executionId: string, node: Node): Promise<void> {
     const nodeName = (node.data as { label?: string })?.label || node.id;
     const nodeType = node.type || 'action';
+
+    // Handle approval nodes specially - they emit their own node:start with awaiting_approval status
+    if (nodeType === 'approval') {
+      await this.executeApprovalNode(executionId, node, nodeName);
+      return; // Don't continue to the normal completion logic
+    }
 
     // Emit node start
     this.emit({
@@ -259,6 +274,125 @@ export class MockWebSocketService {
     }
   }
 
+  private async executeApprovalNode(
+    executionId: string,
+    node: Node,
+    nodeName: string,
+  ): Promise<void> {
+    // Emit node:start with awaiting_approval status
+    this.emit({
+      type: 'node:start',
+      executionId,
+      timestamp: Date.now(),
+      payload: {
+        nodeId: node.id,
+        nodeName,
+        input: { status: 'awaiting_approval' },
+      } as WSNodeStartPayload,
+    });
+
+    // Emit approval:required so the UI can prompt the user
+    this.emit({
+      type: 'approval:required',
+      executionId,
+      timestamp: Date.now(),
+      payload: {
+        nodeId: node.id,
+        nodeName,
+        executionId,
+        requestedAt: new Date().toISOString(),
+        description: `Manual approval required for node: ${nodeName}`,
+      } as WSApprovalRequiredPayload,
+    });
+
+    // Create a Promise that resolves when approve/rejectNode is called
+    const approvalKey = `${executionId}:${node.id}`;
+    const approved = await new Promise<boolean>((resolve) => {
+      this.pendingApprovals.set(approvalKey, { resolve, nodeId: node.id });
+    });
+
+    // Clean up the pending approval entry
+    this.pendingApprovals.delete(approvalKey);
+
+    if (approved) {
+      this.emit({
+        type: 'node:complete',
+        executionId,
+        timestamp: Date.now(),
+        payload: {
+          nodeId: node.id,
+          nodeName,
+          output: mockOutputs.approval,
+          duration: this.config.nodeExecutionDelay,
+        } as WSNodeCompletePayload,
+      });
+    } else {
+      this.emit({
+        type: 'node:error',
+        executionId,
+        timestamp: Date.now(),
+        payload: {
+          nodeId: node.id,
+          nodeName,
+          error: {
+            message: 'Approval rejected by operator',
+            code: 'APPROVAL_REJECTED',
+          },
+        } as WSNodeErrorPayload,
+      });
+
+      // Abort execution on rejection
+      this.abortController?.abort();
+    }
+  }
+
+  approveNode(executionId: string, nodeId: string, comment?: string): void {
+    const approvalKey = `${executionId}:${nodeId}`;
+    const pending = this.pendingApprovals.get(approvalKey);
+    if (!pending) return;
+
+    // Emit the response message before resolving
+    this.emit({
+      type: 'approval:response',
+      executionId,
+      timestamp: Date.now(),
+      payload: {
+        nodeId,
+        nodeName: nodeId,
+        executionId,
+        approved: true,
+        respondedBy: 'admin@company.com',
+        comment,
+        respondedAt: new Date().toISOString(),
+      } as WSApprovalResponsePayload,
+    });
+
+    pending.resolve(true);
+  }
+
+  rejectNode(executionId: string, nodeId: string, comment?: string): void {
+    const approvalKey = `${executionId}:${nodeId}`;
+    const pending = this.pendingApprovals.get(approvalKey);
+    if (!pending) return;
+
+    // Emit the response message before resolving
+    this.emit({
+      type: 'approval:response',
+      executionId,
+      timestamp: Date.now(),
+      payload: {
+        nodeId,
+        nodeName: nodeId,
+        executionId,
+        approved: false,
+        comment,
+        respondedAt: new Date().toISOString(),
+      } as WSApprovalResponsePayload,
+    });
+
+    pending.resolve(false);
+  }
+
   pauseExecution(): void {
     if (!this.isRunning) return;
     this.isPaused = true;
@@ -344,6 +478,7 @@ export class MockWebSocketService {
     this.cancelExecution();
     this.handlers.clear();
     this.itemHandlers.clear();
+    this.pendingApprovals.clear();
   }
 
   private delay(ms: number): Promise<void> {

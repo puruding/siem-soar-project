@@ -51,6 +51,11 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      // SOAR API - routes to SOAR service
+      '/api/v1/playbooks': {
+        target: 'http://localhost:8082',
+        changeOrigin: true,
+      },
       // Default API - routes to gateway service
       '/api': {
         target: 'http://localhost:8080',

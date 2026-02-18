@@ -4,6 +4,7 @@ go 1.23.0
 
 require (
 	github.com/google/uuid v1.6.0
+	github.com/lib/pq v1.11.2
 	go.temporal.io/sdk v1.40.0
 	gopkg.in/yaml.v3 v3.0.1
 )

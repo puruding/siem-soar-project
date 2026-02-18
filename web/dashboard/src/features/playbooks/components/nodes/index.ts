@@ -5,6 +5,7 @@ export { default as IntegrationNode } from './IntegrationNode';
 export { default as LoopNode } from './LoopNode';
 export { default as ParallelNode } from './ParallelNode';
 export { default as WaitNode } from './WaitNode';
+export { default as ApprovalGateNode } from './ApprovalGateNode';
 
 export type { TriggerNodeData } from './TriggerNode';
 export type { ActionNodeData } from './ActionNode';
@@ -13,5 +14,6 @@ export type { IntegrationNodeData } from './IntegrationNode';
 export type { LoopNodeData } from './LoopNode';
 export type { ParallelNodeData } from './ParallelNode';
 export type { WaitNodeData } from './WaitNode';
+export type { ApprovalGateNodeData } from './ApprovalGateNode';
 
 export { StatusIndicator } from '../execution/StatusIndicator';

@@ -6,13 +6,15 @@ export type NodeExecutionStatus =
   | 'success'
   | 'error'
   | 'skipped'
-  | 'cancelled';
+  | 'cancelled'
+  | 'awaiting_approval';
 
 // Single node execution result
 export interface NodeExecutionResult {
   nodeId: string;
   nodeName: string;
   status: NodeExecutionStatus;
+  executionOrder?: number;  // index of when this node started (0, 1, 2...)
   startedAt?: Date;
   completedAt?: Date;
   duration?: number;
@@ -49,7 +51,9 @@ export type WSMessageType =
   | 'item:start'
   | 'item:complete'
   | 'item:error'
-  | 'metrics:update';
+  | 'metrics:update'
+  | 'approval:required'
+  | 'approval:response';
 
 export interface WSMessage<T = unknown> {
   type: WSMessageType;
@@ -79,4 +83,22 @@ export interface WSNodeErrorPayload {
     code?: string;
     stack?: string;
   };
+}
+
+export interface WSApprovalRequiredPayload {
+  nodeId: string;
+  nodeName: string;
+  executionId: string;
+  requestedAt: string;
+  description?: string;
+}
+
+export interface WSApprovalResponsePayload {
+  nodeId: string;
+  nodeName: string;
+  executionId: string;
+  approved: boolean;
+  respondedBy?: string;
+  comment?: string;
+  respondedAt: string;
 }

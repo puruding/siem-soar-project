@@ -25,6 +25,7 @@ import {
   Ticket,
   Cloud,
   Plug,
+  ShieldAlert,
   LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -157,6 +158,13 @@ const nodePalette: PaletteCategory[] = [
         icon: Timer,
         data: { waitType: 'duration', duration: 60 },
         description: 'Delay execution',
+      },
+      {
+        type: 'approval',
+        label: 'Approval Gate',
+        icon: ShieldAlert,
+        data: { approverRoles: ['SOC Manager'], timeout: 3600, autoReject: false },
+        description: 'Require human approval',
       },
     ],
   },

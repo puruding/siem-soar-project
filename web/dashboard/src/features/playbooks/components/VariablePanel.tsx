@@ -40,7 +40,7 @@ import {
 import { cn } from '@/lib/utils';
 
 export type VariableType = 'string' | 'number' | 'boolean' | 'array' | 'object';
-export type VariableScope = 'global' | 'node' | 'execution';
+export type VariableScope = 'global' | 'node' | 'execution' | 'organization';
 
 export interface PlaybookVariable {
   id: string;
@@ -57,14 +57,19 @@ interface VariablePanelProps {
   onAddVariable: (variable: Omit<PlaybookVariable, 'id'>) => void;
   onUpdateVariable: (id: string, updates: Partial<PlaybookVariable>) => void;
   onDeleteVariable: (id: string) => void;
+  selectedNodeId?: string; // Currently selected node ID for filtering node-scoped variables
+  selectedNodeLabel?: string; // Label of the selected node for display
   className?: string;
 }
 
+// Variable management panel with edit/delete functionality
 export function VariablePanel({
   variables,
   onAddVariable,
   onUpdateVariable,
   onDeleteVariable,
+  selectedNodeId,
+  selectedNodeLabel,
   className,
 }: VariablePanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,6 +91,40 @@ export function VariablePanel({
     v.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Group variables by scope
+  // Node variables are filtered by selectedNodeId
+  const groupedVariables = {
+    global: filteredVariables.filter((v) => v.scope === 'global'),
+    execution: filteredVariables.filter((v) => v.scope === 'execution'),
+    node: filteredVariables.filter((v) => v.scope === 'node' && (!selectedNodeId || v.nodeId === selectedNodeId)),
+  };
+
+  // Count all node variables (not filtered)
+  const allNodeVariablesCount = filteredVariables.filter((v) => v.scope === 'node').length;
+
+  const scopeInfo: Record<'global' | 'execution' | 'node', { title: string; description: string; icon: React.ReactNode; color: string }> = {
+    global: {
+      title: 'Global Variables',
+      description: '이 플레이북 전체에서 사용 가능한 변수',
+      icon: <Globe className="w-4 h-4" />,
+      color: 'text-blue-500',
+    },
+    execution: {
+      title: 'Execution Variables',
+      description: '테스트 실행 시 입력값으로 제공되는 변수 (Test Run 패널에 표시)',
+      icon: <Play className="w-4 h-4" />,
+      color: 'text-[#9B59B6]',
+    },
+    node: {
+      title: 'Node Variables',
+      description: selectedNodeId
+        ? `"${selectedNodeLabel || selectedNodeId}" 노드의 지역 변수`
+        : '노드를 선택하면 해당 노드의 변수가 표시됩니다',
+      icon: <Box className="w-4 h-4" />,
+      color: 'text-[#F79836]',
+    },
+  };
+
   const getScopeIcon = (scope: VariableScope) => {
     switch (scope) {
       case 'global':
@@ -94,6 +133,8 @@ export function VariablePanel({
         return <Box className="w-3 h-3" />;
       case 'execution':
         return <Play className="w-3 h-3" />;
+      default:
+        return <Globe className="w-3 h-3" />;
     }
   };
 
@@ -105,6 +146,8 @@ export function VariablePanel({
         return 'text-[#F79836] bg-[#F79836]/10 border-[#F79836]/30';
       case 'execution':
         return 'text-[#9B59B6] bg-[#9B59B6]/10 border-[#9B59B6]/30';
+      default:
+        return 'text-blue-500 bg-blue-500/10 border-blue-500/30';
     }
   };
 
@@ -167,7 +210,13 @@ export function VariablePanel({
       // Keep as string if parsing fails
     }
 
-    onAddVariable({ ...newVariable, value: parsedValue });
+    // If scope is 'node', include the selected node ID
+    const variableToAdd = {
+      ...newVariable,
+      value: parsedValue,
+      nodeId: newVariable.scope === 'node' ? selectedNodeId : undefined,
+    };
+    onAddVariable(variableToAdd);
     setNewVariable({
       name: '',
       type: 'string',
@@ -269,9 +318,11 @@ export function VariablePanel({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="global">Global</SelectItem>
-                      <SelectItem value="node">Node</SelectItem>
-                      <SelectItem value="execution">Execution</SelectItem>
+                      <SelectItem value="global">Global (플레이북 전체)</SelectItem>
+                      <SelectItem value="node" disabled={!selectedNodeId}>
+                        Node {selectedNodeId ? `(${selectedNodeLabel || selectedNodeId})` : '(노드 선택 필요)'}
+                      </SelectItem>
+                      <SelectItem value="execution">Execution (테스트 실행 입력)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -340,71 +391,80 @@ export function VariablePanel({
         />
       </div>
 
-      {/* Variables List */}
+      {/* Variables List - Grouped by Scope */}
       <ScrollArea className="flex-1 -mx-2 px-2">
-        <div className="space-y-2 pb-4">
+        <div className="space-y-4 pb-4">
           {filteredVariables.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
               {searchQuery ? `No variables match "${searchQuery}"` : 'No variables defined'}
             </div>
           ) : (
-            filteredVariables.map((variable) => (
+            (['global', 'execution', 'node'] as const).map((scope) => {
+              const scopeVars = groupedVariables[scope];
+              const info = scopeInfo[scope];
+
+              // For global/execution: skip if empty
+              // For node: always show the section
+              if (scope !== 'node' && scopeVars.length === 0) return null;
+              // Skip node section if there are no node variables at all
+              if (scope === 'node' && allNodeVariablesCount === 0) return null;
+
+              return (
+                <div key={scope} className="space-y-2">
+                  {/* Scope Header */}
+                  <div className={cn('flex items-center gap-2 py-2 px-1 border-b border-border/50', info.color)}>
+                    {info.icon}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-semibold">{info.title}</h3>
+                      <p className="text-2xs text-muted-foreground">{info.description}</p>
+                    </div>
+                    <Badge variant="secondary" className="ml-auto text-2xs shrink-0">
+                      {scope === 'node' ? `${scopeVars.length}/${allNodeVariablesCount}` : scopeVars.length}
+                    </Badge>
+                  </div>
+
+                  {/* Node-specific messaging */}
+                  {scope === 'node' && !selectedNodeId && (
+                    <div className="py-4 text-center text-sm text-muted-foreground bg-muted/30 rounded-lg border border-dashed border-border/50">
+                      <Box className="w-6 h-6 mx-auto mb-2 text-muted-foreground/50" />
+                      캔버스에서 노드를 선택하세요
+                    </div>
+                  )}
+
+                  {scope === 'node' && selectedNodeId && scopeVars.length === 0 && (
+                    <div className="py-4 text-center text-sm text-muted-foreground bg-muted/30 rounded-lg border border-dashed border-border/50">
+                      이 노드에 등록된 변수가 없습니다
+                    </div>
+                  )}
+
+                  {/* Variables in this scope */}
+                  {scopeVars.map((variable) => (
               <div
                 key={variable.id}
                 className="p-3 rounded-xl border border-border/50 bg-muted/20 hover:bg-muted/40 transition-colors"
               >
-                {/* Header */}
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-mono text-sm font-medium text-foreground truncate">
-                      {variable.name}
-                    </span>
-                    <Badge
-                      variant="outline"
-                      className={cn('text-2xs capitalize', getScopeColor(variable.scope))}
-                    >
-                      {getScopeIcon(variable.scope)}
-                      <span className="ml-1">{variable.scope}</span>
-                    </Badge>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="w-6 h-6"
-                      onClick={() => handleCopyReference(variable.name, variable.id)}
-                    >
-                      {copiedId === variable.id ? (
-                        <Check className="w-3 h-3 text-[#5CC05C]" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="w-6 h-6"
-                      onClick={() => setEditingVariable(variable)}
-                    >
-                      <Edit2 className="w-3 h-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="w-6 h-6 text-[#DC4E41] hover:text-[#DC4E41]"
-                      onClick={() => onDeleteVariable(variable.id)}
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Type badge */}
-                <div className="flex items-center gap-2 mb-2">
+                {/* Header - Variable name and badges */}
+                <div className="flex items-center gap-2 flex-wrap mb-2">
+                  <span className="font-mono text-sm font-medium text-foreground">
+                    {variable.name}
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={cn('text-2xs capitalize', getScopeColor(variable.scope))}
+                    title={variable.scope === 'execution' ? 'This variable will appear as input in Test Run panel' : undefined}
+                  >
+                    {getScopeIcon(variable.scope)}
+                    <span className="ml-1">{variable.scope}</span>
+                  </Badge>
                   <Badge variant="secondary" className="text-2xs capitalize">
                     {getTypeIcon(variable.type)}
                     <span className="ml-1">{variable.type}</span>
                   </Badge>
+                  {variable.scope === 'execution' && (
+                    <span className="text-2xs text-purple-400" title="Appears in Test Run inputs">
+                      → Input
+                    </span>
+                  )}
                 </div>
 
                 {/* Description */}
@@ -415,13 +475,54 @@ export function VariablePanel({
                 )}
 
                 {/* Value preview */}
-                <div className="p-2 rounded-lg bg-background/50 border border-border/30">
+                <div className="p-2 rounded-lg bg-background/50 border border-border/30 mb-3">
                   <pre className="text-2xs font-mono text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-16">
                     {formatValue(variable.value, variable.type)}
                   </pre>
                 </div>
+
+                {/* Action buttons - separate row */}
+                <div className="flex items-center gap-2 pt-2 border-t border-border/30">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs flex-1 border-border bg-background hover:bg-muted"
+                    onClick={() => handleCopyReference(variable.name, variable.id)}
+                    title="Copy reference {{variable_name}}"
+                  >
+                    {copiedId === variable.id ? (
+                      <Check className="w-3.5 h-3.5 mr-1 text-[#5CC05C]" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5 mr-1" />
+                    )}
+                    Copy
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs flex-1 border-blue-500/50 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20"
+                    onClick={() => setEditingVariable(variable)}
+                    title="Edit variable"
+                  >
+                    <Edit2 className="w-3.5 h-3.5 mr-1" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs flex-1 border-red-500/50 bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                    onClick={() => onDeleteVariable(variable.id)}
+                    title="Delete variable"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-1" />
+                    Delete
+                  </Button>
+                </div>
               </div>
-            ))
+            ))}
+                </div>
+              );
+            })
           )}
         </div>
       </ScrollArea>

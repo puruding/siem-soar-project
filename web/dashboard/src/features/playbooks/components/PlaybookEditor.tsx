@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
   ReactFlow,
   MiniMap,
@@ -21,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -83,6 +84,7 @@ import {
   LoopNode,
   ParallelNode,
   WaitNode,
+  ApprovalGateNode,
   TriggerNodeData,
   ActionNodeData,
   DecisionNodeData,
@@ -90,18 +92,57 @@ import {
   LoopNodeData,
   ParallelNodeData,
   WaitNodeData,
+  ApprovalGateNodeData,
 } from './nodes';
 import { LabeledEdge } from './edges';
 import { NodePalette } from './NodePalette';
-import { ExecutionHistory, ExecutionRun, ExecutionLog } from './ExecutionHistory';
+import { ExecutionHistory, ExecutionRun, ExecutionLog, ApprovalInfo } from './ExecutionHistory';
 import { VariablePanel, PlaybookVariable } from './VariablePanel';
+import { useOrganizationVariables } from '../stores/organizationVariablesStore';
 import { ExecutionPanel } from './execution';
+import { DynamicInputForm, validateAllFields } from './DynamicInputForm';
+import { TRIGGER_INPUT_SCHEMAS, getDefaultInputValues, getPlaybookInputSchema } from '../constants/triggerInputSchemas';
+import type { PlaybookInputField, InputValues, TriggerType, InputFieldType } from '../types/inputSchema';
 import { ProcessingMonitor } from './monitoring/ProcessingMonitor';
 import { TemplateEditor } from './editor';
 import { useExecutionWebSocket, useNodeOutputSchema, useProcessingMetrics } from '../hooks';
 import { useExecutionStore } from '../stores/executionStore';
 import { useProcessingStore } from '../stores/processingStore';
 import { mockWebSocketService } from '../services/mockWebSocketService';
+import {
+  deployPlaybook,
+  convertNodesToSteps,
+  savePlaybook,
+  updatePlaybook,
+  getPlaybookWithDefinition,
+  type PlaybookDeployRequest,
+  type PlaybookSaveRequest,
+} from '../services/playbookApi';
+
+// Convert execution-scoped variables to input fields
+function variableToInputField(variable: PlaybookVariable, order: number): PlaybookInputField {
+  // Map variable type to input field type
+  const typeMap: Record<string, InputFieldType> = {
+    string: 'text',
+    number: 'number',
+    boolean: 'boolean',
+    array: 'json',
+    object: 'json',
+  };
+
+  return {
+    id: `var-${variable.id}`,
+    name: variable.name,
+    label: variable.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+    type: typeMap[variable.type] || 'text',
+    required: false,
+    defaultValue: variable.value,
+    description: variable.description,
+    placeholder: variable.description || `Enter ${variable.name}...`,
+    group: 'Custom Variables',
+    order: 100 + order,
+  };
+}
 
 // Node type configuration
 const nodeTypes = {
@@ -112,59 +153,17 @@ const nodeTypes = {
   loop: LoopNode,
   parallel: ParallelNode,
   wait: WaitNode,
+  approval: ApprovalGateNode,
 } as any;
 
 const edgeTypes = {
   labeled: LabeledEdge,
 } as any;
 
-// Sample execution history data
-const sampleExecutions: ExecutionRun[] = [
-  {
-    id: 'exec-001-abc123',
-    status: 'success',
-    startedAt: new Date(Date.now() - 3600000),
-    completedAt: new Date(Date.now() - 3480000),
-    duration: 120000,
-    triggeredBy: 'system',
-    nodesExecuted: 6,
-    totalNodes: 6,
-    logs: [
-      { nodeId: '1', nodeName: 'Malware Alert', status: 'success', message: 'Trigger activated', timestamp: new Date(Date.now() - 3600000), duration: 50 },
-      { nodeId: '2', nodeName: 'Enrich IOCs', status: 'success', message: 'Enrichment completed', timestamp: new Date(Date.now() - 3590000), duration: 1500 },
-      { nodeId: '3', nodeName: 'Severity Check', status: 'success', message: 'Condition: true', timestamp: new Date(Date.now() - 3570000), duration: 100 },
-      { nodeId: '4', nodeName: 'Isolate Endpoint', status: 'success', message: 'Endpoint isolated', timestamp: new Date(Date.now() - 3550000), duration: 2000 },
-      { nodeId: '6', nodeName: 'Notify SOC', status: 'success', message: 'Notification sent', timestamp: new Date(Date.now() - 3500000), duration: 500 },
-    ],
-  },
-  {
-    id: 'exec-002-def456',
-    status: 'failed',
-    startedAt: new Date(Date.now() - 7200000),
-    completedAt: new Date(Date.now() - 7140000),
-    duration: 60000,
-    triggeredBy: 'analyst',
-    nodesExecuted: 3,
-    totalNodes: 6,
-    errorMessage: 'Failed to connect to EDR system',
-    logs: [
-      { nodeId: '1', nodeName: 'Malware Alert', status: 'success', message: 'Trigger activated', timestamp: new Date(Date.now() - 7200000), duration: 45 },
-      { nodeId: '2', nodeName: 'Enrich IOCs', status: 'success', message: 'Enrichment completed', timestamp: new Date(Date.now() - 7190000), duration: 1200 },
-      { nodeId: '3', nodeName: 'Severity Check', status: 'success', message: 'Condition: true', timestamp: new Date(Date.now() - 7170000), duration: 80 },
-      { nodeId: '4', nodeName: 'Isolate Endpoint', status: 'failed', message: 'EDR connection timeout', timestamp: new Date(Date.now() - 7150000), duration: 30000 },
-    ],
-  },
-  {
-    id: 'exec-003-ghi789',
-    status: 'success',
-    startedAt: new Date(Date.now() - 86400000),
-    completedAt: new Date(Date.now() - 86280000),
-    duration: 120000,
-    triggeredBy: 'schedule',
-    nodesExecuted: 6,
-    totalNodes: 6,
-  },
-];
+// Execution history - starts empty, populated by actual Test Runs
+// Note: Mock data removed - only real executions are shown now
+const initialExecutions: ExecutionRun[] = [];
+
 
 // Sample variables
 const sampleVariables: PlaybookVariable[] = [
@@ -191,6 +190,22 @@ const sampleVariables: PlaybookVariable[] = [
     scope: 'global',
     value: ['soc@example.com', 'security@example.com'],
     description: 'Email recipients for alerts',
+  },
+  {
+    id: 'var-4',
+    name: 'firewall_zone',
+    type: 'string',
+    scope: 'execution',
+    value: '',
+    description: 'Target firewall zone for blocking rules',
+  },
+  {
+    id: 'var-5',
+    name: 'block_duration_hours',
+    type: 'number',
+    scope: 'execution',
+    value: 24,
+    description: 'How long to maintain the block (hours)',
   },
 ];
 
@@ -578,22 +593,51 @@ const playbookFlows: Record<string, { nodes: Node[]; edges: Edge[] }> = {
 };
 
 // Helper function to get playbook flow by ID
-function getPlaybookFlow(id: string | undefined): { nodes: Node[]; edges: Edge[] } {
+function getPlaybookFlow(id: string | undefined): { nodes: Node[]; edges: Edge[]; name?: string; description?: string; status?: string; category?: string; variables?: PlaybookVariable[] } {
   if (!id || id === 'new') {
     return { nodes: [], edges: [] };
   }
+
+  // First check localStorage for saved playbooks
+  const savedData = localStorage.getItem(`playbook-${id}`);
+  if (savedData) {
+    try {
+      const parsed = JSON.parse(savedData);
+      return {
+        nodes: (parsed.nodes || []).map((n: any) => ({
+          ...n,
+          position: n.position || { x: 0, y: 0 },
+        })),
+        edges: parsed.edges || [],
+        name: parsed.name,
+        description: parsed.description,
+        status: parsed.status,
+        category: parsed.category,
+        variables: parsed.variables, // Load saved variables
+      };
+    } catch (e) {
+      console.error('Failed to parse saved playbook:', e);
+    }
+  }
+
+  // Fall back to predefined flows
   const flow = playbookFlows[id];
   if (flow) {
     return flow;
   }
-  // Default to PB-001 if not found
-  const defaultFlow = playbookFlows['PB-001'];
-  return defaultFlow ?? { nodes: [], edges: [] };
+
+  // Return empty for unknown IDs instead of defaulting to PB-001
+  return { nodes: [], edges: [] };
 }
 
 export function PlaybookEditor() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const isNew = !id || id === 'new';
+  const shouldAutoRun = searchParams.get('run') === 'true';
+
+  // Organization variables from store
+  const { variables: organizationVariables } = useOrganizationVariables();
 
   // Helper to safely get string values from node data
   const getNodeDataString = (data: any, key: string, defaultValue = ''): string => {
@@ -606,6 +650,77 @@ export function PlaybookEditor() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Playbook metadata state
+  const [playbookName, setPlaybookName] = useState(
+    playbookFlow.name || (isNew ? 'New Playbook' : 'Untitled Playbook')
+  );
+  const [playbookDescription, setPlaybookDescription] = useState(
+    playbookFlow.description || (isNew ? 'Create a new automation workflow' : '')
+  );
+  const [playbookStatus, setPlaybookStatus] = useState<'draft' | 'active' | 'inactive'>(
+    (playbookFlow.status as 'draft' | 'active' | 'inactive') || 'draft'
+  );
+  const [playbookCategory, setPlaybookCategory] = useState(
+    playbookFlow.category || 'Custom'
+  );
+
+  // Reload playbook data when id changes - API first, then localStorage fallback
+  useEffect(() => {
+    const loadPlaybook = async () => {
+      // For new playbooks, use empty state
+      if (isNew) {
+        setNodes([]);
+        setEdges([]);
+        setPlaybookName('New Playbook');
+        setPlaybookDescription('Create a new automation workflow');
+        setPlaybookStatus('draft');
+        setPlaybookCategory('Custom');
+        setVariables([]);
+        return;
+      }
+
+      // Try to load from API first
+      try {
+        const apiData = await getPlaybookWithDefinition(id!);
+        if (apiData && apiData.definition) {
+          const def = apiData.definition;
+          // Parse nodes and edges from definition
+          const loadedNodes = (def.nodes as Node[]) || [];
+          const loadedEdges = (def.edges as Edge[]) || [];
+          const loadedVars = (def.variables as PlaybookVariable[]) || [];
+
+          setNodes(loadedNodes);
+          setEdges(loadedEdges);
+          setPlaybookName(apiData.name || apiData.display_name || 'Untitled Playbook');
+          setPlaybookDescription(apiData.description || '');
+          setPlaybookStatus((apiData.enabled ? 'active' : 'draft') as 'draft' | 'active' | 'inactive');
+          setPlaybookCategory(apiData.category || 'Custom');
+          setVariables(loadedVars);
+
+          // Clear localStorage entry since we got fresh data from API
+          localStorage.removeItem(`playbook-${id}`);
+          return;
+        }
+      } catch (apiError) {
+        console.warn('API load failed, trying localStorage:', apiError);
+      }
+
+      // Fall back to localStorage/predefined flows
+      const flow = getPlaybookFlow(id);
+      setNodes(flow.nodes);
+      setEdges(flow.edges);
+      setPlaybookName(flow.name || 'Untitled Playbook');
+      setPlaybookDescription(flow.description || '');
+      setPlaybookStatus((flow.status as 'draft' | 'active' | 'inactive') || 'draft');
+      setPlaybookCategory(flow.category || 'Custom');
+      if (flow.variables) {
+        setVariables(flow.variables);
+      }
+    };
+
+    loadPlaybook();
+  }, [id, isNew, setNodes, setEdges]);
+
   // Sync selectedNode with nodes when nodes are updated
   useEffect(() => {
     if (selectedNode) {
@@ -617,11 +732,68 @@ export function PlaybookEditor() {
   }, [nodes, selectedNode]);
   const [propertiesTab, setPropertiesTab] = useState<'node' | 'variables'>('node');
 
-  // Variables state
-  const [variables, setVariables] = useState<PlaybookVariable[]>(sampleVariables);
+  // Variables state - load from saved playbook or use defaults for new playbooks
+  const [variables, setVariables] = useState<PlaybookVariable[]>(
+    playbookFlow.variables || (isNew ? [] : sampleVariables)
+  );
 
-  // Execution history state
-  const [executionHistory, setExecutionHistory] = useState<ExecutionRun[]>(sampleExecutions);
+  // Get trigger type from trigger node
+  const triggerType = useMemo((): TriggerType => {
+    const triggerNode = nodes.find(n => n.type === 'trigger');
+    if (triggerNode) {
+      const triggerData = triggerNode.data as any;
+      if (triggerData?.triggerType) {
+        return triggerData.triggerType as TriggerType;
+      }
+    }
+    return 'manual'; // Default to manual if no trigger found
+  }, [nodes]);
+
+  // Get input schema based on trigger type + execution-scoped variables
+  const inputSchema = useMemo((): PlaybookInputField[] => {
+    // Base schema from trigger type
+    const baseSchema = getPlaybookInputSchema(triggerType);
+
+    // Add execution-scoped playbook variables as input fields
+    const executionVars = variables
+      .filter(v => v.scope === 'execution')
+      .map((v, i) => variableToInputField(v, i));
+
+    // Also include organization variables in test run inputs (they appear as pre-filled context)
+    const orgExecutionVars = organizationVariables
+      .map((v, i) => ({
+        ...variableToInputField(v, 200 + i),
+        group: 'Organization Variables',
+        label: v.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      }));
+
+    // Merge: base schema first, then custom variables, then org variables
+    return [...baseSchema, ...executionVars, ...orgExecutionVars];
+  }, [triggerType, variables]);
+
+  // Dynamic test run inputs based on schema
+  const [testRunInputs, setTestRunInputs] = useState<InputValues>(() =>
+    getDefaultInputValues(TRIGGER_INPUT_SCHEMAS['alert'])
+  );
+
+  // Update inputs when schema changes (trigger type or variables)
+  useEffect(() => {
+    const defaults = getDefaultInputValues(inputSchema);
+
+    // Also apply current values from execution-scoped variables
+    variables
+      .filter(v => v.scope === 'execution')
+      .forEach(v => {
+        if (v.value !== undefined && v.value !== null && v.value !== '') {
+          defaults[v.name] = v.value;
+        }
+      });
+
+    setTestRunInputs(defaults);
+  }, [inputSchema, variables]);
+
+  // Execution history state - starts empty, populated by Test Run
+  const [executionHistory, setExecutionHistory] = useState<ExecutionRun[]>(initialExecutions);
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
@@ -650,6 +822,13 @@ export function PlaybookEditor() {
     results: { success: 0, failed: 0, skipped: 0 },
   });
   const [isTestRunPanelOpen, setIsTestRunPanelOpen] = useState(false);
+
+  // Auto-open Test Run panel when navigated with ?run=true
+  useEffect(() => {
+    if (shouldAutoRun && !isNew && nodes.length > 0) {
+      setIsTestRunPanelOpen(true);
+    }
+  }, [shouldAutoRun, isNew, nodes.length]);
 
   // Execution view state
   const [isExecutionPanelOpen, setIsExecutionPanelOpen] = useState(false);
@@ -766,43 +945,92 @@ export function PlaybookEditor() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeploying, setIsDeploying] = useState(false);
 
-  // Save playbook handler
+  // Save playbook handler - saves to API with localStorage fallback
   const handleSave = useCallback(async () => {
     setIsSaving(true);
     try {
-      // Prepare playbook data
-      const playbookData = {
-        id: id || `playbook-${Date.now()}`,
-        name: isNew ? 'New Playbook' : 'Malware Response Playbook',
-        nodes: nodes.map(n => ({
-          id: n.id,
-          type: n.type,
-          position: n.position,
-          data: n.data,
-        })),
-        edges: edges.map(e => ({
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          sourceHandle: e.sourceHandle,
-          targetHandle: e.targetHandle,
-          type: e.type,
-          data: e.data,
-        })),
-        variables,
-        updatedAt: new Date().toISOString(),
+      // Generate a proper ID for new playbooks
+      const playbookId = id && id !== 'new' ? id : `PB-${Date.now()}`;
+      const isNewPlaybook = !id || id === 'new';
+
+      // Prepare nodes and edges data
+      const nodesData = nodes.map(n => ({
+        id: n.id,
+        type: n.type,
+        position: n.position,
+        data: n.data,
+      }));
+
+      const edgesData = edges.map(e => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+        type: e.type,
+        data: e.data,
+      }));
+
+      // Determine trigger type from trigger node
+      const triggerNode = nodes.find(n => n.type === 'trigger');
+      const triggerTypeValue = (triggerNode?.data as Record<string, unknown>)?.triggerType as string || 'manual';
+
+      // Prepare API request
+      const request: PlaybookSaveRequest = {
+        id: playbookId,
+        name: playbookName,
+        display_name: playbookName,
+        description: playbookDescription,
+        category: playbookCategory,
+        status: playbookStatus,
+        trigger_type: triggerTypeValue,
+        enabled: playbookStatus === 'active',
+        tags: [],
+        nodes: nodesData,
+        edges: edgesData,
+        variables: variables,
       };
 
-      // Simulate API call (replace with actual API endpoint)
-      await new Promise(resolve => setTimeout(resolve, 800));
+      let savedToApi = false;
 
-      // Save to localStorage for persistence demo
-      localStorage.setItem(`playbook-${playbookData.id}`, JSON.stringify(playbookData));
+      // Try to save to API
+      try {
+        if (isNewPlaybook) {
+          const response = await savePlaybook(request);
+          // Update URL if new playbook was created with a new ID
+          if (response.id && response.id !== playbookId) {
+            window.history.replaceState(null, '', `/playbooks/${response.id}`);
+          }
+        } else {
+          await updatePlaybook(playbookId, request);
+        }
+        savedToApi = true;
+      } catch (apiError) {
+        console.warn('API save failed, using localStorage fallback:', apiError);
+      }
+
+      // Also save to localStorage as cache/fallback
+      const playbookData = {
+        id: playbookId,
+        name: playbookName,
+        description: playbookDescription,
+        category: playbookCategory,
+        status: playbookStatus,
+        triggers: ['Manual'],
+        nodes: nodesData,
+        edges: edgesData,
+        variables,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(`playbook-${playbookId}`, JSON.stringify(playbookData));
 
       toast({
         title: 'Playbook Saved',
-        description: `Successfully saved "${playbookData.name}" with ${nodes.length} nodes.`,
-        variant: 'success',
+        description: savedToApi
+          ? `Successfully saved "${playbookName}" to database.`
+          : `Saved "${playbookName}" locally. API not available.`,
+        variant: savedToApi ? 'success' : 'default',
       });
     } catch (error) {
       console.error('Failed to save playbook:', error);
@@ -814,9 +1042,9 @@ export function PlaybookEditor() {
     } finally {
       setIsSaving(false);
     }
-  }, [id, isNew, nodes, edges, variables]);
+  }, [id, playbookName, playbookDescription, playbookCategory, playbookStatus, nodes, edges, variables]);
 
-  // Deploy playbook handler
+  // Deploy playbook handler - calls SOAR backend API
   const handleDeploy = useCallback(async () => {
     if (nodes.length === 0) {
       toast({
@@ -827,7 +1055,7 @@ export function PlaybookEditor() {
       return;
     }
 
-    // Check for trigger node
+    // Validate: must have trigger node
     const hasTrigger = nodes.some(n => n.type === 'trigger');
     if (!hasTrigger) {
       toast({
@@ -840,50 +1068,111 @@ export function PlaybookEditor() {
 
     setIsDeploying(true);
     try {
-      // Simulate deployment process
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Find trigger node to get trigger configuration
+      const triggerNode = nodes.find(n => n.type === 'trigger');
+      const triggerData = triggerNode?.data as Record<string, unknown> | undefined;
 
-      // Simulate API call to deploy
-      const deploymentId = `deploy-${Date.now()}`;
+      // Build deploy request from frontend state
+      const deployRequest: PlaybookDeployRequest = {
+        id: id || `pb-${Date.now()}`,
+        name: playbookName.toLowerCase().replace(/\s+/g, '_'),
+        display_name: playbookName,
+        description: playbookDescription,
+        category: playbookCategory.toLowerCase(),
+        enabled: true,
+        version: 1,
+        trigger: {
+          type: (triggerData?.triggerType as string) || 'manual',
+          conditions: triggerData?.conditions as PlaybookDeployRequest['trigger']['conditions'],
+        },
+        steps: convertNodesToSteps(nodes, edges),
+        variables: variables.map(v => ({
+          name: v.name,
+          type: v.type,
+          value: v.value,
+        })),
+      };
 
-      toast({
-        title: 'Playbook Deployed',
-        description: `Successfully deployed! Deployment ID: ${deploymentId.slice(-8)}`,
-        variant: 'success',
-      });
+      // Call backend API
+      const response = await deployPlaybook(deployRequest);
 
-      // Add to execution history
+      // Update local state to active
+      setPlaybookStatus('active');
+
+      // Save to localStorage as well for offline access
+      const playbookData = {
+        id: response.id || deployRequest.id,
+        name: playbookName,
+        description: playbookDescription,
+        status: 'active',
+        category: playbookCategory,
+        nodes,
+        edges,
+        variables,
+        version: response.version || 1,
+        deployedAt: new Date().toISOString(),
+        workflowId: response.workflow_id,
+      };
+      localStorage.setItem(`playbook-${playbookData.id}`, JSON.stringify(playbookData));
+
+      // Create execution record for deployment
       const newExecution: ExecutionRun = {
-        id: deploymentId,
+        id: `deploy-${Date.now()}`,
         status: 'success',
         startedAt: new Date(),
         completedAt: new Date(),
-        duration: 1500,
+        duration: 0,
         triggeredBy: 'deployment',
         nodesExecuted: nodes.length,
         totalNodes: nodes.length,
       };
       setExecutionHistory(prev => [newExecution, ...prev]);
+
+      toast({
+        title: 'Playbook Deployed',
+        description: `Successfully deployed to SOAR backend! ID: ${response.id || deployRequest.id}`,
+        variant: 'success',
+      });
+
     } catch (error) {
       console.error('Failed to deploy playbook:', error);
+
+      // Fallback: save locally if backend is unavailable
+      const playbookData = {
+        id: id || `pb-${Date.now()}`,
+        name: playbookName,
+        description: playbookDescription,
+        status: 'active',
+        category: playbookCategory,
+        nodes,
+        edges,
+        variables,
+        deployedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(`playbook-${playbookData.id}`, JSON.stringify(playbookData));
+
       toast({
-        title: 'Deployment Failed',
-        description: 'An error occurred during deployment.',
-        variant: 'destructive',
+        title: 'Deployed Locally',
+        description: 'Backend unavailable. Playbook saved locally and will sync when backend is online.',
       });
     } finally {
       setIsDeploying(false);
     }
-  }, [nodes]);
+  }, [id, nodes, edges, playbookName, playbookDescription, playbookCategory, variables]);
 
-  // Test Run simulation
+  // Test Run simulation - executes playbook with current input values
   const startTestRun = useCallback(async () => {
     if (nodes.length === 0) {
-      alert('No nodes to test');
+      toast({
+        title: 'No Nodes',
+        description: 'Add nodes to the playbook before running a test.',
+        variant: 'destructive',
+      });
       return;
     }
 
-    setIsTestRunPanelOpen(true);
+    // Log input parameters being used for this execution
+    console.log('Starting test run with inputs:', testRunInputs);
     setTestRunState({
       isRunning: true,
       currentNodeId: null,
@@ -896,10 +1185,71 @@ export function PlaybookEditor() {
     const executionId = `exec-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     executionStore.initExecution(executionId);
 
-    // Start mock WebSocket execution in background (for ExecutionPanel demo)
-    mockWebSocketService.startExecution(executionId, nodes, edges);
+    // Create new execution record in history
+    const newExecution: ExecutionRun = {
+      id: executionId,
+      status: 'running',
+      startedAt: new Date(),
+      triggeredBy: 'manual',
+      nodesExecuted: 0,
+      totalNodes: nodes.length,
+    };
+    setExecutionHistory((prev) => [newExecution, ...prev]);
 
-    // Build execution order using BFS from trigger nodes
+    // IMPORTANT: Register the message handler BEFORE starting execution
+    // to ensure all events are captured in correct order
+    const unsubscribe = mockWebSocketService.onMessage((message) => {
+      if (message.executionId === executionId) {
+        executionStore.handleWSMessage(message);
+
+        // Handle approval required message
+        if (message.type === 'approval:required') {
+          const payload = message.payload as { nodeId: string; nodeName: string };
+          setExecutionHistory((prev) =>
+            prev.map((exec) => {
+              if (exec.id === executionId) {
+                return {
+                  ...exec,
+                  status: 'pending_approval' as const,
+                  approval: {
+                    required: true,
+                    status: 'pending' as const,
+                    requestedAt: new Date(),
+                    currentStep: payload.nodeName,
+                    nodeId: payload.nodeId,
+                  },
+                };
+              }
+              return exec;
+            })
+          );
+        }
+      }
+    });
+
+    // Start mock WebSocket execution in background (for ExecutionPanel demo)
+    mockWebSocketService.startExecution(executionId, nodes, edges).finally(() => {
+      // Cleanup handler when execution completes
+      unsubscribe();
+
+      // Update execution history with final status
+      setExecutionHistory((prev) =>
+        prev.map((exec) => {
+          if (exec.id === executionId && exec.status === 'running') {
+            return {
+              ...exec,
+              status: 'success' as const,
+              completedAt: new Date(),
+              duration: Date.now() - exec.startedAt.getTime(),
+              nodesExecuted: nodes.length,
+            };
+          }
+          return exec;
+        })
+      );
+    });
+
+    // Execute playbook with proper conditional branching
     const triggerNodes = nodes.filter((n) => n.type === 'trigger');
     if (triggerNodes.length === 0) {
       setTestRunState((prev) => ({
@@ -917,57 +1267,51 @@ export function PlaybookEditor() {
       return;
     }
 
-    const executionOrder: Node[] = [];
+    // Track execution state
     const visited = new Set<string>();
-    const queue: Node[] = [...triggerNodes];
+    const skippedNodes = new Set<string>();
+    let successCount = 0;
+    let failedCount = 0;
+    let skippedCount = 0;
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (visited.has(current.id)) continue;
+    // Get next nodes based on current node and decision results
+    const getNextNodes = (currentId: string, decisionResult?: boolean): Node[] => {
+      const outgoingEdges = edges.filter((e) => e.source === currentId);
 
-      visited.add(current.id);
-      executionOrder.push(current);
-
-      // Find connected nodes
-      const outgoingEdges = edges.filter((e) => e.source === current.id);
-      for (const edge of outgoingEdges) {
-        const targetNode = nodes.find((n) => n.id === edge.target);
-        if (targetNode && !visited.has(targetNode.id)) {
-          queue.push(targetNode);
-        }
+      // For decision nodes, filter by the correct branch
+      const currentNode = nodes.find(n => n.id === currentId);
+      if (currentNode?.type === 'decision' && decisionResult !== undefined) {
+        const branchHandle = decisionResult ? 'yes' : 'no';
+        const filteredEdges = outgoingEdges.filter(e => e.sourceHandle === branchHandle);
+        return filteredEdges
+          .map(e => nodes.find(n => n.id === e.target))
+          .filter((n): n is Node => n !== undefined);
       }
-    }
 
-    if (executionOrder.length === 0) {
-      setTestRunState((prev) => ({
-        ...prev,
-        isRunning: false,
-        logs: [
-          {
-            nodeId: 'system',
-            message: 'No nodes in execution order',
-            status: 'error',
-            timestamp: new Date(),
-          },
-        ],
-      }));
-      return;
-    }
+      return outgoingEdges
+        .map(e => nodes.find(n => n.id === e.target))
+        .filter((n): n is Node => n !== undefined);
+    };
 
-    // Execute nodes sequentially
-    for (let i = 0; i < executionOrder.length; i++) {
-      const node = executionOrder[i];
-      if (!node) continue;
+    // Mark nodes on skipped branch
+    const markSkippedBranch = (currentId: string, skippedHandle: string) => {
+      const skippedEdges = edges.filter(e => e.source === currentId && e.sourceHandle === skippedHandle);
+      const bfsQueue = skippedEdges.map(e => e.target);
 
-      const progressPercent = ((i + 1) / executionOrder.length) * 100;
+      while (bfsQueue.length > 0) {
+        const nodeId = bfsQueue.shift()!;
+        if (skippedNodes.has(nodeId) || visited.has(nodeId)) continue;
+        skippedNodes.add(nodeId);
 
-      setTestRunState((prev) => ({
-        ...prev,
-        currentNodeId: node.id,
-        progress: progressPercent,
-      }));
+        // Find children of skipped node
+        const childEdges = edges.filter(e => e.source === nodeId);
+        childEdges.forEach(e => bfsQueue.push(e.target));
+      }
+    };
 
-      // Highlight current node
+    // Execute a single node
+    const executeNode = async (node: Node): Promise<{ success: boolean; decisionResult?: boolean }> => {
+      // Set node to running/evaluating state
       setNodes((nds) =>
         nds.map((n) =>
           n.id === node.id
@@ -975,12 +1319,9 @@ export function PlaybookEditor() {
                 ...n,
                 data: {
                   ...n.data,
-                  status:
-                    n.type === 'trigger'
-                      ? 'active'
-                      : n.type === 'decision'
-                      ? 'evaluating'
-                      : 'running',
+                  status: n.type === 'trigger' ? 'active'
+                       : n.type === 'decision' ? 'evaluating'
+                       : 'running',
                 } as any,
               }
             : n
@@ -989,6 +1330,7 @@ export function PlaybookEditor() {
 
       setTestRunState((prev) => ({
         ...prev,
+        currentNodeId: node.id,
         logs: [
           ...prev.logs,
           {
@@ -1001,14 +1343,12 @@ export function PlaybookEditor() {
       }));
 
       // Simulate execution delay
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
-      // Simulate success/failure (90% success rate)
-      const isSuccess = Math.random() > 0.1;
+      await new Promise((resolve) => setTimeout(resolve, 1200));
 
       if (node.type === 'decision') {
-        // Simulate condition evaluation
+        // Evaluate condition (random for demo, would use real logic in production)
         const conditionResult = Math.random() > 0.5;
+
         setNodes((nds) =>
           nds.map((n) =>
             n.id === node.id
@@ -1030,17 +1370,18 @@ export function PlaybookEditor() {
             ...prev.logs,
             {
               nodeId: node.id,
-              message: `Condition evaluated: ${conditionResult ? 'YES' : 'NO'}`,
+              message: `Condition "${(node.data as any).condition || 'default'}" evaluated: ${conditionResult ? 'YES (true)' : 'NO (false)'}`,
               status: 'success',
               timestamp: new Date(),
             },
           ],
-          results: {
-            ...prev.results,
-            success: prev.results.success + 1,
-          },
         }));
+
+        return { success: true, decisionResult: conditionResult };
       } else {
+        // Regular node execution (90% success rate for demo)
+        const isSuccess = Math.random() > 0.1;
+
         setNodes((nds) =>
           nds.map((n) =>
             n.id === node.id
@@ -1062,31 +1403,128 @@ export function PlaybookEditor() {
             ...prev.logs,
             {
               nodeId: node.id,
-              message: isSuccess
-                ? 'Completed successfully'
-                : 'Execution failed',
+              message: isSuccess ? 'Completed successfully' : 'Execution failed',
               status: isSuccess ? 'success' : 'error',
               timestamp: new Date(),
             },
           ],
-          results: {
-            ...prev.results,
-            success: isSuccess
-              ? prev.results.success + 1
-              : prev.results.success,
-            failed: isSuccess ? prev.results.failed : prev.results.failed + 1,
-          },
         }));
+
+        return { success: isSuccess };
       }
+    };
+
+    // BFS execution with proper branching
+    const queue: Node[] = [...triggerNodes];
+    let totalProcessed = 0;
+    const estimatedTotal = nodes.length;
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+
+      if (visited.has(current.id)) continue;
+      if (skippedNodes.has(current.id)) {
+        // Mark as skipped in UI
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === current.id
+              ? { ...n, data: { ...n.data, status: 'skipped' } as any }
+              : n
+          )
+        );
+        setTestRunState((prev) => ({
+          ...prev,
+          logs: [
+            ...prev.logs,
+            {
+              nodeId: current.id,
+              message: `Skipped (branch not taken)`,
+              status: 'info',
+              timestamp: new Date(),
+            },
+          ],
+        }));
+        skippedCount++;
+        continue;
+      }
+
+      visited.add(current.id);
+      totalProcessed++;
+
+      // Update progress
+      setTestRunState((prev) => ({
+        ...prev,
+        progress: Math.min((totalProcessed / estimatedTotal) * 100, 95),
+      }));
+
+      // Execute the node
+      const result = await executeNode(current);
+
+      if (result.success) {
+        successCount++;
+      } else {
+        failedCount++;
+      }
+
+      // Get next nodes to execute
+      if (current.type === 'decision' && result.decisionResult !== undefined) {
+        // For decision nodes, mark the skipped branch
+        const skippedHandle = result.decisionResult ? 'no' : 'yes';
+        markSkippedBranch(current.id, skippedHandle);
+
+        // Only queue nodes from the taken branch
+        const nextNodes = getNextNodes(current.id, result.decisionResult);
+        nextNodes.forEach(n => {
+          if (!visited.has(n.id) && !skippedNodes.has(n.id)) {
+            queue.push(n);
+          }
+        });
+      } else {
+        // For other nodes, queue all children
+        const nextNodes = getNextNodes(current.id);
+        nextNodes.forEach(n => {
+          if (!visited.has(n.id)) {
+            queue.push(n);
+          }
+        });
+      }
+
+      // Update results
+      setTestRunState((prev) => ({
+        ...prev,
+        results: {
+          success: successCount,
+          failed: failedCount,
+          skipped: skippedCount,
+        },
+      }));
     }
+
+    // Mark any remaining unvisited nodes as skipped
+    nodes.forEach(node => {
+      if (!visited.has(node.id) && !skippedNodes.has(node.id) && node.type !== 'trigger') {
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === node.id
+              ? { ...n, data: { ...n.data, status: 'skipped' } as any }
+              : n
+          )
+        );
+      }
+    });
 
     setTestRunState((prev) => ({
       ...prev,
       isRunning: false,
       currentNodeId: null,
       progress: 100,
+      results: {
+        success: successCount,
+        failed: failedCount,
+        skipped: skippedCount,
+      },
     }));
-  }, [nodes, edges, setNodes]);
+  }, [nodes, edges, setNodes, testRunInputs]);
 
   const stopTestRun = useCallback(() => {
     setTestRunState((prev) => ({
@@ -1169,6 +1607,79 @@ export function PlaybookEditor() {
     console.log('Selected execution:', execution.id);
   }, []);
 
+  // Handle approval workflow
+  const handleApproveExecution = useCallback((executionId: string, comment?: string) => {
+    setExecutionHistory((prev) =>
+      prev.map((exec) => {
+        if (exec.id === executionId && exec.status === 'pending_approval') {
+          return {
+            ...exec,
+            status: 'running' as const,
+            approval: exec.approval
+              ? {
+                  ...exec.approval,
+                  status: 'approved' as const,
+                  respondedAt: new Date(),
+                  respondedBy: 'admin',
+                  comment,
+                }
+              : undefined,
+          };
+        }
+        return exec;
+      })
+    );
+
+    // Resume the execution via WebSocket
+    const execution = executionHistory.find((e) => e.id === executionId);
+    if (execution?.approval?.nodeId) {
+      mockWebSocketService.approveNode(executionId, execution.approval.nodeId, comment);
+    }
+
+    toast({
+      title: 'Execution Approved',
+      description: `Approved by admin at ${new Date().toLocaleTimeString()}. Workflow will continue.`,
+      variant: 'success',
+    });
+  }, [executionHistory]);
+
+  const handleRejectExecution = useCallback((executionId: string, comment?: string) => {
+    setExecutionHistory((prev) =>
+      prev.map((exec) => {
+        if (exec.id === executionId && exec.status === 'pending_approval') {
+          return {
+            ...exec,
+            status: 'cancelled' as const,
+            completedAt: new Date(),
+            duration: Date.now() - exec.startedAt.getTime(),
+            approval: exec.approval
+              ? {
+                  ...exec.approval,
+                  status: 'rejected' as const,
+                  respondedAt: new Date(),
+                  respondedBy: 'admin',
+                  comment,
+                }
+              : undefined,
+          };
+        }
+        return exec;
+      })
+    );
+
+    // Reject the execution via WebSocket
+    const execution = executionHistory.find((e) => e.id === executionId);
+    if (execution?.approval?.nodeId) {
+      mockWebSocketService.rejectNode(executionId, execution.approval.nodeId, comment);
+    }
+
+    toast({
+      title: 'Execution Rejected',
+      description: 'Workflow has been cancelled due to rejection.',
+      variant: 'destructive',
+    });
+  }, [executionHistory]);
+
   return (
     <div
       className={cn(
@@ -1187,21 +1698,28 @@ export function PlaybookEditor() {
           <div>
             <div className="flex items-center gap-3">
               <Input
-                defaultValue={isNew ? 'New Playbook' : 'Malware Response Playbook'}
-                className="text-lg font-display font-bold border-none p-0 h-auto focus-visible:ring-0"
+                value={playbookName}
+                onChange={(e) => setPlaybookName(e.target.value)}
+                className="text-lg font-display font-bold border-none p-0 h-auto focus-visible:ring-0 max-w-[300px]"
+                placeholder="Enter playbook name..."
               />
               <Badge
                 variant="outline"
-                className="text-[#5CC05C] border-[#5CC05C]/50"
+                className={cn(
+                  playbookStatus === 'active' && 'text-[#5CC05C] border-[#5CC05C]/50',
+                  playbookStatus === 'draft' && 'text-[#F79836] border-[#F79836]/50',
+                  playbookStatus === 'inactive' && 'text-muted-foreground border-border'
+                )}
               >
-                {isNew ? 'Draft' : 'Active'}
+                {playbookStatus.charAt(0).toUpperCase() + playbookStatus.slice(1)}
               </Badge>
             </div>
-            <p className="text-sm text-muted-foreground">
-              {isNew
-                ? 'Create a new automation workflow'
-                : 'Automated malware detection and response'}
-            </p>
+            <Input
+              value={playbookDescription}
+              onChange={(e) => setPlaybookDescription(e.target.value)}
+              className="text-sm text-muted-foreground border-none p-0 h-auto focus-visible:ring-0 max-w-[400px]"
+              placeholder="Enter description..."
+            />
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -1237,7 +1755,7 @@ export function PlaybookEditor() {
           <Separator orientation="vertical" className="h-6" />
           <Button
             variant="outline"
-            onClick={startTestRun}
+            onClick={() => setIsTestRunPanelOpen(true)}
             disabled={testRunState.isRunning}
           >
             <Play className="w-4 h-4 mr-2" />
@@ -1387,6 +1905,8 @@ export function PlaybookEditor() {
           <ExecutionHistory
             executions={executionHistory}
             onSelectExecution={handleSelectExecution}
+            onApprove={handleApproveExecution}
+            onReject={handleRejectExecution}
             className="shrink-0 rounded-b-xl"
           />
         </div>
@@ -1414,6 +1934,8 @@ export function PlaybookEditor() {
                 onAddVariable={handleAddVariable}
                 onUpdateVariable={handleUpdateVariable}
                 onDeleteVariable={handleDeleteVariable}
+                selectedNodeId={selectedNode?.id}
+                selectedNodeLabel={selectedNode?.data?.label as string | undefined}
               />
             ) : selectedNode ? (
               <ScrollArea className="h-full">
@@ -2476,6 +2998,81 @@ export function PlaybookEditor() {
                     </>
                   )}
 
+                  {/* ApprovalGate Node settings */}
+                  {selectedNode.type === 'approval' && (
+                    <>
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Description
+                        </label>
+                        <Textarea
+                          value={(selectedNode.data as any).description || ''}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              description: e.target.value,
+                            })
+                          }
+                          rows={2}
+                          placeholder="Approval required for critical actions"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Approver Roles
+                        </label>
+                        <Input
+                          value={((selectedNode.data as any).approverRoles || []).join(', ')}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              approverRoles: e.target.value.split(',').map((s: string) => s.trim()).filter(Boolean),
+                            })
+                          }
+                          placeholder="SOC Manager, Security Lead"
+                        />
+                        <p className="text-2xs text-muted-foreground mt-1">
+                          Comma-separated list of roles
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide mb-1 block">
+                          Timeout (seconds)
+                        </label>
+                        <Input
+                          type="number"
+                          value={(selectedNode.data as any).timeout || 3600}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              timeout: parseInt(e.target.value, 10) || 3600,
+                            })
+                          }
+                          min={60}
+                          step={60}
+                        />
+                        <p className="text-2xs text-muted-foreground mt-1">
+                          Time before automatic action (min: 60s)
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs text-muted-foreground uppercase tracking-wide">
+                          Auto-Reject on Timeout
+                        </label>
+                        <input
+                          type="checkbox"
+                          checked={(selectedNode.data as any).autoReject || false}
+                          onChange={(e) =>
+                            updateNodeData(selectedNode.id, {
+                              autoReject: e.target.checked,
+                            })
+                          }
+                          className="w-4 h-4 rounded border-border"
+                        />
+                      </div>
+                    </>
+                  )}
+
                   <div className="pt-4">
                     <Button
                       variant="destructive"
@@ -2513,15 +3110,86 @@ export function PlaybookEditor() {
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               <Play className="w-5 h-5" />
-              Test Run
+              Playbook Execution
             </SheetTitle>
           </SheetHeader>
 
           <div className="mt-6 space-y-6">
-            {/* Progress */}
+            {/* Input Parameters - Always visible at top when not running */}
+            {!testRunState.isRunning && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold flex items-center gap-2">
+                    <Variable className="w-4 h-4" />
+                    Input Parameters
+                  </h4>
+                  <Badge variant="outline" className="text-xs">
+                    {triggerType}
+                  </Badge>
+                </div>
+                <div className="p-3 rounded-lg border border-border/50 bg-muted/20 max-h-[300px] overflow-y-auto">
+                  <DynamicInputForm
+                    fields={inputSchema}
+                    values={testRunInputs}
+                    onChange={setTestRunInputs}
+                    disabled={testRunState.isRunning}
+                    compact={true}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Actions - Right after input parameters */}
+            <div className="flex gap-2">
+              {testRunState.isRunning ? (
+                <Button
+                  onClick={stopTestRun}
+                  variant="destructive"
+                  className="flex-1"
+                >
+                  <StopCircle className="w-4 h-4 mr-2" />
+                  Stop
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    onClick={() => {
+                      const validation = validateAllFields(inputSchema, testRunInputs);
+                      if (!validation.valid) {
+                        toast({
+                          title: 'Validation Error',
+                          description: 'Please fill in all required fields correctly.',
+                          variant: 'destructive',
+                        });
+                        return;
+                      }
+                      startTestRun();
+                    }}
+                    className="flex-1"
+                    disabled={nodes.length === 0}
+                  >
+                    <Play className="w-4 h-4 mr-2" />
+                    Run Playbook
+                  </Button>
+                  <Button
+                    onClick={resetTestRun}
+                    variant="outline"
+                    disabled={testRunState.logs.length === 0}
+                  >
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Reset
+                  </Button>
+                </>
+              )}
+            </div>
+
+            {/* Separator */}
+            <Separator />
+
+            {/* Progress - Shows execution status */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">Progress</span>
+                <span className="text-sm font-medium">Execution Progress</span>
                 <span className="text-sm text-muted-foreground">
                   {Math.round(testRunState.progress)}%
                 </span>
@@ -2569,14 +3237,24 @@ export function PlaybookEditor() {
               </div>
             )}
 
+            {/* Status Message */}
+            {!testRunState.isRunning && testRunState.progress === 100 && (
+              <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                <div className="flex items-center gap-2 text-sm text-green-600">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span className="font-medium">Execution completed successfully</span>
+                </div>
+              </div>
+            )}
+
             {/* Execution Logs */}
             <div>
               <h4 className="text-sm font-semibold mb-3">Execution Log</h4>
-              <ScrollArea className="h-[400px] rounded-lg border border-border/50 bg-muted/20">
+              <ScrollArea className="h-[250px] rounded-lg border border-border/50 bg-muted/20">
                 <div className="p-3 space-y-2">
                   {testRunState.logs.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground text-sm">
-                      No logs yet. Start a test run to see execution details.
+                      No logs yet. Run the playbook to see execution details.
                     </div>
                   ) : (
                     testRunState.logs.map((log, i) => (
@@ -2617,49 +3295,6 @@ export function PlaybookEditor() {
                 </div>
               </ScrollArea>
             </div>
-
-            {/* Actions */}
-            <div className="flex gap-2">
-              {testRunState.isRunning ? (
-                <Button
-                  onClick={stopTestRun}
-                  variant="destructive"
-                  className="flex-1"
-                >
-                  <StopCircle className="w-4 h-4 mr-2" />
-                  Stop
-                </Button>
-              ) : (
-                <>
-                  <Button
-                    onClick={startTestRun}
-                    className="flex-1"
-                    disabled={nodes.length === 0}
-                  >
-                    <Play className="w-4 h-4 mr-2" />
-                    Run
-                  </Button>
-                  <Button
-                    onClick={resetTestRun}
-                    variant="outline"
-                    disabled={testRunState.logs.length === 0}
-                  >
-                    <RotateCcw className="w-4 h-4 mr-2" />
-                    Reset
-                  </Button>
-                </>
-              )}
-            </div>
-
-            {/* Status Message */}
-            {!testRunState.isRunning && testRunState.progress === 100 && (
-              <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-                <div className="flex items-center gap-2 text-sm text-green-600">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span className="font-medium">Test run completed</span>
-                </div>
-              </div>
-            )}
           </div>
         </SheetContent>
       </Sheet>

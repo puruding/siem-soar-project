@@ -1,4 +1,4 @@
-import { Loader2, CheckCircle2, XCircle, Clock, AlertTriangle, Ban } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Clock, AlertTriangle, Ban, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { NodeExecutionStatus } from '../../types/execution.types';
 
@@ -65,6 +65,13 @@ const statusConfig: Record<NodeExecutionStatus, {
     color: 'text-gray-500',
     bgColor: 'bg-gray-500/20',
     label: 'Cancelled',
+  },
+  awaiting_approval: {
+    icon: ShieldAlert,
+    color: 'text-orange-500',
+    bgColor: 'bg-orange-500/20',
+    label: 'Awaiting Approval',
+    animate: true,
   },
 };
 

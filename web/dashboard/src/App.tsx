@@ -14,6 +14,7 @@ import { ParsersPage } from '@/features/parsers';
 import { AssetList } from '@/features/assets';
 import { RulesPage } from '@/features/rules';
 import { CopilotPage } from '@/features/copilot';
+import { SettingsPage } from '@/features/settings';
 import { useThemeStore } from '@/stores/themeStore';
 import { useEffect } from 'react';
 
@@ -44,6 +45,7 @@ function App() {
           <Route path="assets" element={<AssetList />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="copilot" element={<CopilotPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
       <Toaster />

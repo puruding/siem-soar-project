@@ -16,8 +16,16 @@ export function NodeStatusTimeline({
   selectedNodeId,
   onNodeSelect,
 }: NodeStatusTimelineProps) {
-  // Convert Map to sorted array by startedAt
+  // Convert Map to sorted array by executionOrder (primary) or startedAt (fallback)
   const sortedNodes = Array.from(nodeResults.values()).sort((a, b) => {
+    // Primary: sort by executionOrder if both have it
+    if (a.executionOrder !== undefined && b.executionOrder !== undefined) {
+      return a.executionOrder - b.executionOrder;
+    }
+    // Fallback: nodes with executionOrder come first
+    if (a.executionOrder !== undefined) return -1;
+    if (b.executionOrder !== undefined) return 1;
+    // Last resort: sort by startedAt
     if (!a.startedAt) return 1;
     if (!b.startedAt) return -1;
     return a.startedAt.getTime() - b.startedAt.getTime();

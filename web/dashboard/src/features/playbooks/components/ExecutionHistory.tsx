@@ -26,12 +26,28 @@ import {
   Timer,
   User,
   AlertTriangle,
+  ShieldCheck,
+  ShieldX,
+  ShieldAlert,
+  MessageSquare,
 } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+
+export interface ApprovalInfo {
+  required: boolean;
+  status: 'pending' | 'approved' | 'rejected';
+  requestedAt?: Date;
+  respondedAt?: Date;
+  respondedBy?: string;
+  comment?: string;
+  currentStep?: string; // 승인 대기 중인 단계 이름
+  nodeId?: string; // 승인 대기 중인 노드 ID
+}
 
 export interface ExecutionRun {
   id: string;
-  status: 'running' | 'success' | 'failed' | 'cancelled';
+  status: 'running' | 'success' | 'failed' | 'cancelled' | 'pending_approval';
   startedAt: Date;
   completedAt?: Date;
   duration?: number; // in milliseconds
@@ -40,6 +56,7 @@ export interface ExecutionRun {
   totalNodes: number;
   errorMessage?: string;
   logs?: ExecutionLog[];
+  approval?: ApprovalInfo; // 승인 워크플로우 정보
 }
 
 export interface ExecutionLog {
@@ -54,17 +71,22 @@ export interface ExecutionLog {
 interface ExecutionHistoryProps {
   executions: ExecutionRun[];
   onSelectExecution?: (execution: ExecutionRun) => void;
+  onApprove?: (executionId: string, comment?: string) => void;
+  onReject?: (executionId: string, comment?: string) => void;
   className?: string;
 }
 
 export function ExecutionHistory({
   executions,
   onSelectExecution,
+  onApprove,
+  onReject,
   className,
 }: ExecutionHistoryProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [selectedExecution, setSelectedExecution] = useState<ExecutionRun | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [approvalComment, setApprovalComment] = useState('');
 
   const formatDuration = (ms: number) => {
     if (ms < 1000) return `${ms}ms`;
@@ -92,6 +114,8 @@ export function ExecutionHistory({
         return <XCircle className="w-4 h-4 text-[#DC4E41]" />;
       case 'cancelled':
         return <AlertTriangle className="w-4 h-4 text-yellow-500" />;
+      case 'pending_approval':
+        return <ShieldAlert className="w-4 h-4 text-orange-500 animate-pulse" />;
     }
   };
 
@@ -105,6 +129,37 @@ export function ExecutionHistory({
         return 'border-[#DC4E41]/50 bg-[#DC4E41]/10';
       case 'cancelled':
         return 'border-yellow-500/50 bg-yellow-500/10';
+      case 'pending_approval':
+        return 'border-orange-500/50 bg-orange-500/10';
+    }
+  };
+
+  const getStatusLabel = (status: ExecutionRun['status']) => {
+    switch (status) {
+      case 'running':
+        return 'Running';
+      case 'success':
+        return 'Success';
+      case 'failed':
+        return 'Failed';
+      case 'cancelled':
+        return 'Cancelled';
+      case 'pending_approval':
+        return 'Waiting for Approval';
+    }
+  };
+
+  const handleApprove = () => {
+    if (selectedExecution) {
+      onApprove?.(selectedExecution.id, approvalComment);
+      setApprovalComment('');
+    }
+  };
+
+  const handleReject = () => {
+    if (selectedExecution) {
+      onReject?.(selectedExecution.id, approvalComment);
+      setApprovalComment('');
     }
   };
 
@@ -136,6 +191,12 @@ export function ExecutionHistory({
                 <Badge className="text-2xs bg-blue-500/20 text-blue-500 border-blue-500/30">
                   <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                   Running
+                </Badge>
+              )}
+              {executions.some((e) => e.status === 'pending_approval') && (
+                <Badge className="text-2xs bg-orange-500/20 text-orange-500 border-orange-500/30">
+                  <ShieldAlert className="w-3 h-3 mr-1" />
+                  Approval Required
                 </Badge>
               )}
             </div>
@@ -220,6 +281,20 @@ export function ExecutionHistory({
                         </div>
                       )}
 
+                      {/* Pending approval indicator */}
+                      {execution.status === 'pending_approval' && execution.approval && (
+                        <div className="mt-2 p-2 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                          <div className="text-2xs text-orange-500 font-medium mb-1">
+                            Waiting for Approval
+                          </div>
+                          {execution.approval.currentStep && (
+                            <div className="text-2xs text-muted-foreground">
+                              Step: {execution.approval.currentStep}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Completion stats */}
                       {execution.status !== 'running' && (
                         <div className="flex items-center gap-2 text-2xs">
@@ -255,14 +330,14 @@ export function ExecutionHistory({
               <div className="flex items-center gap-2">
                 <Badge
                   className={cn(
-                    'capitalize',
                     selectedExecution.status === 'success' && 'bg-[#5CC05C]/20 text-[#5CC05C] border-[#5CC05C]/30',
                     selectedExecution.status === 'failed' && 'bg-[#DC4E41]/20 text-[#DC4E41] border-[#DC4E41]/30',
                     selectedExecution.status === 'running' && 'bg-blue-500/20 text-blue-500 border-blue-500/30',
-                    selectedExecution.status === 'cancelled' && 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30'
+                    selectedExecution.status === 'cancelled' && 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30',
+                    selectedExecution.status === 'pending_approval' && 'bg-orange-500/20 text-orange-500 border-orange-500/30'
                   )}
                 >
-                  {selectedExecution.status}
+                  {getStatusLabel(selectedExecution.status)}
                 </Badge>
               </div>
 
@@ -298,6 +373,100 @@ export function ExecutionHistory({
                   </div>
                 </div>
               </div>
+
+              {/* Approval Section */}
+              {selectedExecution.status === 'pending_approval' && selectedExecution.approval && (
+                <div className="p-4 rounded-lg bg-orange-500/10 border border-orange-500/30">
+                  <div className="flex items-center gap-2 text-sm text-orange-500 font-semibold mb-3">
+                    <ShieldAlert className="w-5 h-5" />
+                    Approval Required
+                  </div>
+
+                  {selectedExecution.approval.currentStep && (
+                    <div className="mb-3">
+                      <div className="text-2xs text-muted-foreground uppercase tracking-wide mb-1">Current Step</div>
+                      <div className="text-sm font-medium">{selectedExecution.approval.currentStep}</div>
+                    </div>
+                  )}
+
+                  {selectedExecution.approval.requestedAt && (
+                    <div className="mb-3">
+                      <div className="text-2xs text-muted-foreground uppercase tracking-wide mb-1">Requested At</div>
+                      <div className="text-sm">{selectedExecution.approval.requestedAt.toLocaleString()}</div>
+                    </div>
+                  )}
+
+                  {/* Comment input */}
+                  <div className="mb-3">
+                    <div className="text-2xs text-muted-foreground uppercase tracking-wide mb-1">Comment (Optional)</div>
+                    <Textarea
+                      placeholder="Add a comment for this approval decision..."
+                      value={approvalComment}
+                      onChange={(e) => setApprovalComment(e.target.value)}
+                      className="h-20 text-sm bg-background/50"
+                    />
+                  </div>
+
+                  {/* Approve/Reject buttons */}
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={handleApprove}
+                      className="flex-1 bg-[#5CC05C] hover:bg-[#5CC05C]/90 text-white"
+                    >
+                      <ShieldCheck className="w-4 h-4 mr-2" />
+                      Approve
+                    </Button>
+                    <Button
+                      onClick={handleReject}
+                      variant="destructive"
+                      className="flex-1"
+                    >
+                      <ShieldX className="w-4 h-4 mr-2" />
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Approval History (for already approved/rejected) */}
+              {selectedExecution.approval && selectedExecution.approval.status !== 'pending' && (
+                <div className={cn(
+                  "p-3 rounded-lg border",
+                  selectedExecution.approval.status === 'approved'
+                    ? "bg-[#5CC05C]/10 border-[#5CC05C]/30"
+                    : "bg-[#DC4E41]/10 border-[#DC4E41]/30"
+                )}>
+                  <div className={cn(
+                    "flex items-center gap-2 text-sm font-medium mb-2",
+                    selectedExecution.approval.status === 'approved' ? "text-[#5CC05C]" : "text-[#DC4E41]"
+                  )}>
+                    {selectedExecution.approval.status === 'approved'
+                      ? <ShieldCheck className="w-4 h-4" />
+                      : <ShieldX className="w-4 h-4" />
+                    }
+                    {selectedExecution.approval.status === 'approved' ? 'Approved' : 'Rejected'}
+                  </div>
+                  {selectedExecution.approval.respondedBy && (
+                    <div className="flex items-center gap-1 text-sm text-muted-foreground mb-1">
+                      <User className="w-3 h-3" />
+                      by {selectedExecution.approval.respondedBy}
+                    </div>
+                  )}
+                  {selectedExecution.approval.respondedAt && (
+                    <div className="text-2xs text-muted-foreground mb-1">
+                      at {selectedExecution.approval.respondedAt.toLocaleString()}
+                    </div>
+                  )}
+                  {selectedExecution.approval.comment && (
+                    <div className="mt-2 p-2 rounded bg-background/50">
+                      <div className="flex items-start gap-1 text-sm text-muted-foreground">
+                        <MessageSquare className="w-3 h-3 mt-0.5 shrink-0" />
+                        <span>{selectedExecution.approval.comment}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Error Message */}
               {selectedExecution.errorMessage && (

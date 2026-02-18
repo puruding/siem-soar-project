@@ -13,6 +13,7 @@ interface ExecutionStore {
   execution: ExecutionState | null;
   isConnected: boolean;
   selectedNodeId: string | null;
+  nodeStartCounter: number;
 
   // Actions
   initExecution: (executionId: string) => void;
@@ -35,6 +36,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   execution: null,
   isConnected: false,
   selectedNodeId: null,
+  nodeStartCounter: 0,
 
   initExecution: (executionId: string) => {
     set({
@@ -44,6 +46,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         status: 'running',
         startedAt: new Date(),
       },
+      nodeStartCounter: 0,
     });
   },
 
@@ -56,11 +59,13 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     switch (message.type) {
       case 'node:start': {
         const payload = message.payload as WSNodeStartPayload;
+        const { nodeStartCounter } = get();
         const newResults = new Map(execution.nodeResults);
         newResults.set(payload.nodeId, {
           nodeId: payload.nodeId,
           nodeName: payload.nodeName,
           status: 'running',
+          executionOrder: nodeStartCounter,
           startedAt: new Date(message.timestamp),
           input: payload.input,
         });
@@ -70,6 +75,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
             currentNodeId: payload.nodeId,
             nodeResults: newResults,
           },
+          nodeStartCounter: nodeStartCounter + 1,
         });
         break;
       }
@@ -171,5 +177,5 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     set({ execution: { ...execution, status } });
   },
 
-  reset: () => set({ execution: null, selectedNodeId: null }),
+  reset: () => set({ execution: null, selectedNodeId: null, nodeStartCounter: 0 }),
 }));
