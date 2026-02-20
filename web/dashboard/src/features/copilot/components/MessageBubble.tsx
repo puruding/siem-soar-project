@@ -16,6 +16,8 @@ import {
   Check,
 } from 'lucide-react';
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export type MessageRole = 'user' | 'assistant' | 'system' | 'error';
 
@@ -88,13 +90,37 @@ function MessageBubbleComponent({ message, className }: MessageBubbleProps) {
   const renderContent = () => {
     if (typeof message.content === 'string') {
       return (
-        <div className="prose prose-sm prose-invert max-w-none">
-          <p className="whitespace-pre-wrap break-words leading-relaxed">
+        <div className="prose prose-sm prose-invert max-w-none prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-table:text-foreground">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              h1: ({children}) => <h1 className="text-lg font-bold mt-4 mb-2 text-foreground">{children}</h1>,
+              h2: ({children}) => <h2 className="text-base font-bold mt-3 mb-2 text-foreground border-b border-border pb-1">{children}</h2>,
+              h3: ({children}) => <h3 className="text-sm font-semibold mt-2 mb-1 text-foreground">{children}</h3>,
+              p: ({children}) => <p className="mb-2 leading-relaxed">{children}</p>,
+              ul: ({children}) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+              ol: ({children}) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+              li: ({children}) => <li className="text-sm">{children}</li>,
+              table: ({children}) => <table className="w-full border-collapse border border-border my-2 text-sm">{children}</table>,
+              th: ({children}) => <th className="border border-border px-2 py-1 bg-muted/50 font-semibold text-left">{children}</th>,
+              td: ({children}) => <td className="border border-border px-2 py-1">{children}</td>,
+              blockquote: ({children}) => <blockquote className="border-l-4 border-neon-cyan pl-3 my-2 italic text-muted-foreground">{children}</blockquote>,
+              code: ({className, children}) => {
+                const isInline = !className;
+                return isInline ? (
+                  <code className="bg-muted/50 px-1 py-0.5 rounded text-neon-cyan text-xs">{children}</code>
+                ) : (
+                  <code className="block bg-background/50 border border-border rounded-lg p-3 overflow-x-auto text-sm font-mono">{children}</code>
+                );
+              },
+              hr: () => <hr className="my-3 border-border" />,
+            }}
+          >
             {message.content}
-            {message.isStreaming && (
-              <span className="inline-block w-2 h-4 ml-0.5 bg-neon-cyan animate-pulse" />
-            )}
-          </p>
+          </ReactMarkdown>
+          {message.isStreaming && (
+            <span className="inline-block w-2 h-4 ml-0.5 bg-neon-cyan animate-pulse" />
+          )}
         </div>
       );
     }
@@ -104,9 +130,35 @@ function MessageBubbleComponent({ message, className }: MessageBubbleProps) {
         {message.content.map((block, index) => (
           <div key={index}>
             {block.type === 'text' && (
-              <p className="whitespace-pre-wrap break-words leading-relaxed">
-                {block.content}
-              </p>
+              <div className="prose prose-sm prose-invert max-w-none">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    h1: ({children}) => <h1 className="text-lg font-bold mt-4 mb-2 text-foreground">{children}</h1>,
+                    h2: ({children}) => <h2 className="text-base font-bold mt-3 mb-2 text-foreground border-b border-border pb-1">{children}</h2>,
+                    h3: ({children}) => <h3 className="text-sm font-semibold mt-2 mb-1 text-foreground">{children}</h3>,
+                    p: ({children}) => <p className="mb-2 leading-relaxed">{children}</p>,
+                    ul: ({children}) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                    ol: ({children}) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                    li: ({children}) => <li className="text-sm">{children}</li>,
+                    table: ({children}) => <table className="w-full border-collapse border border-border my-2 text-sm">{children}</table>,
+                    th: ({children}) => <th className="border border-border px-2 py-1 bg-muted/50 font-semibold text-left">{children}</th>,
+                    td: ({children}) => <td className="border border-border px-2 py-1">{children}</td>,
+                    blockquote: ({children}) => <blockquote className="border-l-4 border-neon-cyan pl-3 my-2 italic text-muted-foreground">{children}</blockquote>,
+                    code: ({className, children}) => {
+                      const isInline = !className;
+                      return isInline ? (
+                        <code className="bg-muted/50 px-1 py-0.5 rounded text-neon-cyan text-xs">{children}</code>
+                      ) : (
+                        <code className="block bg-background/50 border border-border rounded-lg p-3 overflow-x-auto text-sm font-mono">{children}</code>
+                      );
+                    },
+                    hr: () => <hr className="my-3 border-border" />,
+                  }}
+                >
+                  {block.content}
+                </ReactMarkdown>
+              </div>
             )}
             {block.type === 'sql' && (
               <div className="relative group">
