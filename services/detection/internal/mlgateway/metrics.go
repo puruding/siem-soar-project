@@ -2,6 +2,8 @@
 package mlgateway
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -123,6 +125,50 @@ var (
 		},
 		[]string{"priority"},
 	)
+
+	// NEW: Dashboard-compatible metrics (without namespace prefix for exact PromQL match)
+	// detection_ml_call_duration_seconds - matches dashboard query exactly
+	detectionMLCallDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "detection_ml_call_duration_seconds",
+			Help:    "Duration of Detection service calls to ML Gateway in seconds",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0},
+		},
+	)
+
+	// circuit_breaker_state with name label - matches dashboard query: circuit_breaker_state{name="ml-gateway"}
+	circuitBreakerState = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "circuit_breaker_state",
+			Help: "Circuit breaker state (0=closed, 1=half-open, 2=open)",
+		},
+		[]string{"name"},
+	)
+
+	// circuit_breaker_opens_total with name label - matches dashboard query
+	circuitBreakerOpensTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "circuit_breaker_opens_total",
+			Help: "Total number of times the circuit breaker has opened",
+		},
+		[]string{"name"},
+	)
+
+	// ml_cache_hits_total - for cache hit rate calculation
+	mlCacheHitsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "ml_cache_hits_total",
+			Help: "Total ML cache hits",
+		},
+	)
+
+	// ml_cache_requests_total - for cache hit rate calculation
+	mlCacheRequestsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "ml_cache_requests_total",
+			Help: "Total ML cache requests",
+		},
+	)
 )
 
 // NewMetrics creates a new Metrics instance.
@@ -174,4 +220,30 @@ func SetMLEnrichmentEnabled(enabled bool) {
 // GetCircuitBreakerStateGauge returns the circuit breaker state gauge for a given name.
 func GetCircuitBreakerStateGauge(name string) prometheus.Gauge {
 	return circuitState.WithLabelValues(name)
+}
+
+// RecordMLCallDuration records the duration of ML Gateway calls for dashboard metrics.
+func RecordMLCallDuration(duration time.Duration) {
+	detectionMLCallDuration.Observe(duration.Seconds())
+}
+
+// SetCircuitBreakerState sets the circuit breaker state for dashboard metrics.
+func SetCircuitBreakerState(name string, state float64) {
+	circuitBreakerState.WithLabelValues(name).Set(state)
+}
+
+// IncrementCircuitBreakerOpens increments the circuit breaker opens counter.
+func IncrementCircuitBreakerOpens(name string) {
+	circuitBreakerOpensTotal.WithLabelValues(name).Inc()
+}
+
+// RecordCacheHit records a cache hit for dashboard metrics.
+func RecordCacheHit() {
+	mlCacheHitsTotal.Inc()
+	mlCacheRequestsTotal.Inc()
+}
+
+// RecordCacheMiss records a cache miss for dashboard metrics.
+func RecordCacheMiss() {
+	mlCacheRequestsTotal.Inc()
 }

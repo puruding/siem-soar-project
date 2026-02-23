@@ -15,6 +15,7 @@ import (
 	"github.com/siem-soar-platform/services/soar/internal/connector"
 	"github.com/siem-soar-platform/services/soar/internal/executor"
 	"github.com/siem-soar-platform/services/soar/internal/integration"
+	"github.com/siem-soar-platform/services/soar/internal/metrics"
 	"github.com/siem-soar-platform/services/soar/internal/playbook"
 	"github.com/siem-soar-platform/services/soar/internal/websocket"
 )
@@ -273,6 +274,7 @@ func NewSOAREngine(
 		eventBus:         eventBus,
 		caseClient:       caseClient,
 		alertClient:      alertClient,
+		metricsRecorder:  metrics.NewPrometheusMetricsRecorder(),
 		logger:           logger,
 		config:           config,
 		autoTriggers:     make(map[string]*AutoTrigger),
@@ -551,7 +553,10 @@ func (e *SOAREngine) ExecutePlaybook(ctx context.Context, req *ExecutePlaybookRe
 	result, err := e.executor.Execute(ctx, execReq)
 	duration := time.Since(startTime)
 
-	// Record metrics
+	// Record metrics using Prometheus metrics directly
+	metrics.RecordExecutionDuration(req.PlaybookID, duration, err == nil)
+
+	// Also call legacy metrics recorder if set
 	if e.metricsRecorder != nil {
 		e.metricsRecorder.RecordExecution(req.PlaybookID, duration, err == nil)
 	}
@@ -675,6 +680,8 @@ type ApprovalDecision struct {
 
 // TriggerOnAlert triggers playbooks based on an alert.
 func (e *SOAREngine) TriggerOnAlert(ctx context.Context, alert *AlertResponse) ([]*ExecutionResponse, error) {
+	triggerStart := time.Now() // Start timing trigger phase
+
 	e.mu.RLock()
 	triggers := make([]*AutoTrigger, 0)
 	for _, t := range e.autoTriggers {
@@ -700,6 +707,9 @@ func (e *SOAREngine) TriggerOnAlert(ctx context.Context, alert *AlertResponse) (
 			Inputs:  alert.Data,
 			Async:   true,
 		}
+
+		// Record trigger duration before executing
+		metrics.RecordTriggerDuration(time.Since(triggerStart))
 
 		result, err := e.ExecutePlaybook(ctx, req)
 		if err != nil {

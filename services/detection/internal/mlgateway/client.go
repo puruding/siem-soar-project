@@ -160,8 +160,14 @@ func NewClient(cfg Config, featureFlag func() bool, logger *slog.Logger) (*Clien
 				"from", from.String(),
 				"to", to.String(),
 			)
-			// Update Prometheus metric
+			// Update BOTH metrics (legacy and dashboard-compatible)
 			circuitState.WithLabelValues(name).Set(stateToFloat(to))
+			SetCircuitBreakerState(name, stateToFloat(to))
+
+			// Track circuit opens
+			if to == gobreaker.StateOpen {
+				IncrementCircuitBreakerOpens(name)
+			}
 		},
 	}
 
@@ -241,12 +247,14 @@ func (c *Client) TriageAlert(ctx context.Context, alertReq *AlertRequest) (*MLAn
 	if cached, ok := c.getFromCache(ctx, cacheKey); ok {
 		span.SetAttributes(attribute.Bool("cache_hit", true))
 		c.metrics.cacheHits.Inc()
+		RecordCacheHit() // NEW: dashboard-compatible metric
 		cached.CacheHit = true
 		cached.TraceID = alertReq.TraceID
 		return cached, nil
 	}
 	span.SetAttributes(attribute.Bool("cache_hit", false))
 	c.metrics.cacheMisses.Inc()
+	RecordCacheMiss() // NEW: dashboard-compatible metric
 
 	// Execute via circuit breaker
 	start := time.Now()
@@ -256,6 +264,7 @@ func (c *Client) TriageAlert(ctx context.Context, alertReq *AlertRequest) (*MLAn
 
 	duration := time.Since(start)
 	c.metrics.triageDuration.WithLabelValues("triage").Observe(duration.Seconds())
+	RecordMLCallDuration(duration) // NEW: dashboard-compatible metric
 
 	if err != nil {
 		// Check if circuit is open
@@ -321,10 +330,12 @@ func (c *Client) BatchTriageAlerts(ctx context.Context, alerts []*AlertRequest) 
 			cached.TraceID = traceID
 			results[i] = cached
 			c.metrics.cacheHits.Inc()
+			RecordCacheHit() // NEW: dashboard-compatible metric
 		} else {
 			uncachedAlerts = append(uncachedAlerts, alert)
 			uncachedIndices = append(uncachedIndices, i)
 			c.metrics.cacheMisses.Inc()
+			RecordCacheMiss() // NEW: dashboard-compatible metric
 		}
 	}
 
@@ -342,6 +353,7 @@ func (c *Client) BatchTriageAlerts(ctx context.Context, alerts []*AlertRequest) 
 
 	duration := time.Since(start)
 	c.metrics.triageDuration.WithLabelValues("batch_triage").Observe(duration.Seconds())
+	RecordMLCallDuration(duration) // NEW: dashboard-compatible metric
 
 	if err != nil {
 		if err == gobreaker.ErrOpenState || err == gobreaker.ErrTooManyRequests {
