@@ -3,6 +3,7 @@
  */
 
 import { apiClient } from './client';
+import { snakeToCamelObject } from '@/lib/utils';
 import type {
   Case,
   CaseFilter,
@@ -64,28 +65,44 @@ export const casesApi = {
       }
     }
 
-    return apiClient.get<GetCasesResponse>('/cases', { params: queryParams });
+    const response = await apiClient.get<GetCasesResponse>('/cases', { params: queryParams });
+    if (response.success && response.data) {
+      response.data = snakeToCamelObject<GetCasesResponse>(response.data);
+    }
+    return response;
   },
 
   /**
    * Get a single case by ID
    */
   async getCase(caseId: string): Promise<ApiResponse<Case>> {
-    return apiClient.get<Case>(`/cases/${caseId}`);
+    const response = await apiClient.get<Case>(`/cases/${caseId}`);
+    if (response.success && response.data) {
+      response.data = snakeToCamelObject<Case>(response.data);
+    }
+    return response;
   },
 
   /**
    * Create a new case
    */
   async createCase(payload: CaseCreatePayload): Promise<ApiResponse<Case>> {
-    return apiClient.post<Case>('/cases', payload);
+    const response = await apiClient.post<Case>('/cases', payload);
+    if (response.success && response.data) {
+      response.data = snakeToCamelObject<Case>(response.data);
+    }
+    return response;
   },
 
   /**
    * Update a case
    */
   async updateCase(caseId: string, payload: CaseUpdatePayload): Promise<ApiResponse<Case>> {
-    return apiClient.patch<Case>(`/cases/${caseId}`, payload);
+    const response = await apiClient.patch<Case>(`/cases/${caseId}`, payload);
+    if (response.success && response.data) {
+      response.data = snakeToCamelObject<Case>(response.data);
+    }
+    return response;
   },
 
   /**
@@ -99,28 +116,44 @@ export const casesApi = {
    * Assign a case to a user
    */
   async assignCase(caseId: string, assigneeId: string): Promise<ApiResponse<Case>> {
-    return apiClient.post<Case>(`/cases/${caseId}/assign`, { assigneeId });
+    const response = await apiClient.post<Case>(`/cases/${caseId}/assign`, { assigneeId });
+    if (response.success && response.data) {
+      response.data = snakeToCamelObject<Case>(response.data);
+    }
+    return response;
   },
 
   /**
    * Change case status
    */
   async changeStatus(caseId: string, status: Case['status'], comment?: string): Promise<ApiResponse<Case>> {
-    return apiClient.post<Case>(`/cases/${caseId}/status`, { status, comment });
+    const response = await apiClient.post<Case>(`/cases/${caseId}/status`, { status, comment });
+    if (response.success && response.data) {
+      response.data = snakeToCamelObject<Case>(response.data);
+    }
+    return response;
   },
 
   /**
    * Add an alert to a case
    */
   async addAlert(caseId: string, alertId: string): Promise<ApiResponse<Case>> {
-    return apiClient.post<Case>(`/cases/${caseId}/alerts`, { alertId });
+    const response = await apiClient.post<Case>(`/cases/${caseId}/alerts`, { alertId });
+    if (response.success && response.data) {
+      response.data = snakeToCamelObject<Case>(response.data);
+    }
+    return response;
   },
 
   /**
    * Remove an alert from a case
    */
   async removeAlert(caseId: string, alertId: string): Promise<ApiResponse<Case>> {
-    return apiClient.delete<Case>(`/cases/${caseId}/alerts/${alertId}`);
+    const response = await apiClient.delete<Case>(`/cases/${caseId}/alerts/${alertId}`);
+    if (response.success && response.data) {
+      response.data = snakeToCamelObject<Case>(response.data);
+    }
+    return response;
   },
 
   /**
@@ -141,7 +174,11 @@ export const casesApi = {
    * Get case timeline
    */
   async getTimeline(caseId: string): Promise<ApiResponse<CaseTimeline[]>> {
-    return apiClient.get<CaseTimeline[]>(`/cases/${caseId}/timeline`);
+    const response = await apiClient.get<CaseTimeline[]>(`/cases/${caseId}/timeline`);
+    if (response.success && response.data) {
+      response.data = snakeToCamelObject<CaseTimeline[]>(response.data);
+    }
+    return response;
   },
 
   /**
@@ -175,16 +212,24 @@ export const casesApi = {
    * Get related cases
    */
   async getRelatedCases(caseId: string, limit?: number): Promise<ApiResponse<Case[]>> {
-    return apiClient.get<Case[]>(`/cases/${caseId}/related`, {
+    const response = await apiClient.get<Case[]>(`/cases/${caseId}/related`, {
       params: { limit },
     });
+    if (response.success && response.data) {
+      response.data = snakeToCamelObject<Case[]>(response.data);
+    }
+    return response;
   },
 
   /**
    * Merge cases
    */
   async mergeCases(targetCaseId: string, sourceCaseIds: string[]): Promise<ApiResponse<Case>> {
-    return apiClient.post<Case>(`/cases/${targetCaseId}/merge`, { sourceCaseIds });
+    const response = await apiClient.post<Case>(`/cases/${targetCaseId}/merge`, { sourceCaseIds });
+    if (response.success && response.data) {
+      response.data = snakeToCamelObject<Case>(response.data);
+    }
+    return response;
   },
 
   /**

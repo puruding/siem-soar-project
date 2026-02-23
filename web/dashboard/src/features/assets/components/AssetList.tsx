@@ -28,6 +28,8 @@ import {
   TreePine,
   LayoutGrid,
   ChevronRight,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import type { Asset, AssetFilters, ViewMode } from '../types';
@@ -54,6 +56,8 @@ const statusStyles: Record<Asset['status'], string> = {
 export function AssetList() {
   const {
     assets,
+    isLoading,
+    error,
     groups,
     selectedAssets,
     deleteAssets,
@@ -264,6 +268,19 @@ export function AssetList() {
         </CardHeader>
 
         <CardContent>
+          {isLoading && (
+            <div className="flex items-center justify-center py-12 text-muted-foreground">
+              <Loader2 className="w-6 h-6 mr-2 animate-spin" />
+              <span>자산 목록을 불러오는 중...</span>
+            </div>
+          )}
+          {error && !isLoading && (
+            <div className="flex items-center justify-center py-12 text-destructive">
+              <AlertCircle className="w-5 h-5 mr-2" />
+              <span>{error}</span>
+            </div>
+          )}
+          {!isLoading && !error && (
           <ScrollArea className="h-[calc(100vh-320px)]">
             {viewMode === 'tree' ? (
               <AssetTree
@@ -289,6 +306,7 @@ export function AssetList() {
                     <TableHead>Asset</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead>IP Address</TableHead>
+                    <TableHead>Product</TableHead>
                     <TableHead>Criticality</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Last Seen</TableHead>
@@ -336,6 +354,16 @@ export function AssetList() {
                         )}
                       </TableCell>
                       <TableCell>
+                        {asset.productName ? (
+                          <div>
+                            <p className="text-sm font-medium">{asset.vendorName || ''}</p>
+                            <p className="text-xs text-muted-foreground font-mono">{asset.productName}</p>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         <Badge
                           variant="outline"
                           className={cn('capitalize', criticalityStyles[asset.criticality])}
@@ -363,6 +391,7 @@ export function AssetList() {
               </Table>
             )}
           </ScrollArea>
+          )}
         </CardContent>
       </Card>
 

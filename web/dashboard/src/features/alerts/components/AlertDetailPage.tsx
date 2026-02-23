@@ -56,12 +56,16 @@ import { Message } from '@/features/copilot/components/MessageBubble';
 import { useToast } from '@/components/ui/toaster';
 import { useUEBAStore, ANOMALY_TYPES, UEBA_TO_MITRE } from '@/features/ueba';
 import { GroupStatistics } from './GroupStatistics';
+import { ThreatLifecycleTimeline, LifecycleStageType } from './ThreatLifecycleTimeline';
 import {
   calculateGroupStatistics,
   formatEventTime,
   formatDurationBetween,
   formatFullTimestamp,
 } from '../utils/groupStats';
+import { useSOARStatusWebSocket } from '../hooks/useSOARStatusWebSocket';
+import { useSOARStatusStore } from '../stores/soarStatusStore';
+import { soarApi, type SOARExecution } from '@/api/soar';
 
 interface MLModelInfo {
   model_id: string;
@@ -501,6 +505,13 @@ export function AlertDetailPage() {
   const [executionStatus, setExecutionStatus] = useState<string | null>(null);
   const [relatedAlerts, setRelatedAlerts] = useState<RelatedAlert[]>([]);
   const [groupedInfo, setGroupedInfo] = useState<GroupedAlertInfo | null>(null);
+  const [currentSoarStatus, setCurrentSoarStatus] = useState<{
+    playbookName: string;
+    playbookId: string;
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused' | 'waiting_approval';
+    progress: number;
+    startTime?: string;
+  } | null>(null);
 
   // MITRE ATT&CK popup state
   const [selectedMITRE, setSelectedMITRE] = useState<MITREItemDetail | null>(null);
@@ -524,6 +535,37 @@ export function AlertDetailPage() {
   // Timeline state
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
 
+  // SOAR Status Store
+  const updateSOARStatus = useSOARStatusStore((state) => state.updateStatus);
+
+  // WebSocket for real-time SOAR status updates
+  const { status: realtimeSOARStatus, isConnected: isSOARWebSocketConnected } = useSOARStatusWebSocket({
+    alertId: id || '',
+    enabled: !!id && import.meta.env.VITE_SOAR_REALTIME_ENABLED !== 'false',
+    onStatusChange: (status) => {
+      // Update local state when WebSocket status changes
+      setCurrentSoarStatus({
+        playbookName: status.playbookName,
+        playbookId: status.playbookId,
+        status: status.status,
+        progress: status.progress,
+        startTime: status.startedAt,
+      });
+
+      // Update global store
+      if (id) {
+        updateSOARStatus(id, status);
+      }
+
+      // Add timeline entry for significant status changes
+      if (status.status === 'completed') {
+        addTimelineEntry(`Playbook "${status.playbookName}" completed`, 'playbook');
+      } else if (status.status === 'failed') {
+        addTimelineEntry(`Playbook "${status.playbookName}" failed: ${status.error || 'Unknown error'}`, 'playbook');
+      }
+    },
+  });
+
   // Matched Events state
   const [matchedEvents, setMatchedEvents] = useState<MatchedEvent[]>([]);
   const [matchedEventsExpanded, setMatchedEventsExpanded] = useState(false);
@@ -538,6 +580,10 @@ export function AlertDetailPage() {
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysisResponse | null>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
   const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
+
+  // SOAR Execution History state
+  const [executionHistory, setExecutionHistory] = useState<SOARExecution[]>([]);
+  const [executionHistoryLoading, setExecutionHistoryLoading] = useState(false);
 
   // Calculate statistics from related events using useMemo
   const eventStatistics = useMemo(() => {
@@ -762,6 +808,53 @@ export function AlertDetailPage() {
 
     fetchRelatedAlerts();
   }, [id]);
+
+  // Fetch SOAR execution history on page load
+  useEffect(() => {
+    const fetchExecutionHistory = async () => {
+      if (!id) return;
+
+      setExecutionHistoryLoading(true);
+      try {
+        const executions = await soarApi.getAlertExecutions(id);
+        setExecutionHistory(executions);
+
+        // If we have executions, set the latest one as current SOAR status
+        if (executions.length > 0 && executions[0]) {
+          const latest = executions[0];
+          // Map status to the expected union type
+          const mappedStatus = latest.status as 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused' | 'waiting_approval';
+
+          setCurrentSoarStatus({
+            playbookName: latest.playbook_name,
+            playbookId: latest.playbook_id,
+            status: mappedStatus,
+            progress: soarApi.calculateProgress(latest),
+            startTime: latest.started_at,
+          });
+
+          // Update global store
+          updateSOARStatus(id, {
+            executionId: latest.id,
+            playbookId: latest.playbook_id,
+            playbookName: latest.playbook_name,
+            status: mappedStatus,
+            progress: soarApi.calculateProgress(latest),
+            currentStep: latest.current_step,
+            error: latest.error,
+            startedAt: latest.started_at,
+            completedAt: latest.completed_at,
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to fetch execution history:', err);
+      } finally {
+        setExecutionHistoryLoading(false);
+      }
+    };
+
+    fetchExecutionHistory();
+  }, [id, updateSOARStatus]);
 
   // Fetch Threat Intelligence data from TI service
   useEffect(() => {
@@ -1273,6 +1366,24 @@ export function AlertDetailPage() {
   const executePlaybook = async (playbook: Playbook) => {
     if (!alert) return;
     setExecutionStatus('running');
+
+    // Set initial SOAR status
+    setCurrentSoarStatus({
+      playbookName: playbook.name,
+      playbookId: playbook.id,
+      status: 'running',
+      progress: 0,
+      startTime: new Date().toISOString(),
+    });
+
+    // Simulate progress updates
+    const progressInterval = setInterval(() => {
+      setCurrentSoarStatus(prev => {
+        if (!prev || prev.progress >= 90) return prev;
+        return { ...prev, progress: prev.progress + 10 };
+      });
+    }, 500);
+
     try {
       const response = await fetch(`/api/v1/playbooks/run/${playbook.id}`, {
         method: 'POST',
@@ -1282,7 +1393,9 @@ export function AlertDetailPage() {
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
+          clearInterval(progressInterval);
           setExecutionStatus('completed');
+          setCurrentSoarStatus(prev => prev ? { ...prev, status: 'completed', progress: 100 } : null);
           addTimelineEntry(`Playbook "${playbook.name}" completed`, 'playbook');
           toast({
             title: 'Playbook Executed',
@@ -1292,7 +1405,9 @@ export function AlertDetailPage() {
       } else {
         // Mock success for demo
         setTimeout(() => {
+          clearInterval(progressInterval);
           setExecutionStatus('completed');
+          setCurrentSoarStatus(prev => prev ? { ...prev, status: 'completed', progress: 100 } : null);
           addTimelineEntry(`Playbook "${playbook.name}" completed`, 'playbook');
           toast({
             title: 'Playbook Executed',
@@ -1301,7 +1416,9 @@ export function AlertDetailPage() {
         }, 2000);
       }
     } catch (error) {
+      clearInterval(progressInterval);
       setExecutionStatus('failed');
+      setCurrentSoarStatus(prev => prev ? { ...prev, status: 'failed' } : null);
       console.error('Failed to execute playbook:', error);
     }
   };
@@ -1338,6 +1455,21 @@ export function AlertDetailPage() {
     // Fetch fresh AI analysis when dialog opens
     if (!aiAnalysis || aiAnalysis.alert_id !== alert?.id) {
       await fetchAIAnalysis();
+    }
+  };
+
+  // Handle lifecycle stage click - scroll to relevant section
+  const handleLifecycleStageClick = (stage: LifecycleStageType, scrollTarget?: string) => {
+    if (!scrollTarget) return;
+
+    const element = document.getElementById(scrollTarget);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Add highlight effect
+      element.classList.add('ring-2', 'ring-primary', 'ring-offset-2');
+      setTimeout(() => {
+        element.classList.remove('ring-2', 'ring-primary', 'ring-offset-2');
+      }, 2000);
     }
   };
 
@@ -1647,11 +1779,35 @@ export function AlertDetailPage() {
         </div>
       </div>
 
+      {/* Threat Lifecycle Timeline */}
+      <div className="w-full">
+        <ThreatLifecycleTimeline
+          alert={{
+            id: alert.id,
+            timestamp: alert.timestamp,
+            detection_reason: alert.detection_reason,
+            mitre_tactics: alert.mitre_tactics,
+            mitre_techniques: alert.mitre_techniques,
+            rule_id: alert.rule_id,
+            rule_name: alert.rule_name,
+            fields: alert.fields,
+          }}
+          groupedInfo={groupedInfo ? {
+            eventCount: groupedInfo.eventCount,
+            firstEventTime: groupedInfo.firstEventTime,
+            lastEventTime: groupedInfo.lastEventTime,
+          } : undefined}
+          soarStatus={currentSoarStatus}
+          caseId={undefined}
+          onStageClick={handleLifecycleStageClick}
+        />
+      </div>
+
       <div className="grid grid-cols-3 gap-6">
         {/* Main Content */}
         <div className="col-span-2 space-y-6">
           {/* Overview Card */}
-          <Card>
+          <Card id="detection-details">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Shield className="w-5 h-5" />
@@ -2028,7 +2184,7 @@ export function AlertDetailPage() {
 
                     {/* ML Analysis */}
                     {alert.detection_reason.ml_analysis && (
-                      <div className="p-2 bg-neon-cyan/10 border border-neon-cyan/20 rounded-lg space-y-2">
+                      <div id="ml-analysis" className="p-2 bg-neon-cyan/10 border border-neon-cyan/20 rounded-lg space-y-2">
                         <div className="flex items-center gap-2">
                           <Activity className="w-3 h-3 text-neon-cyan" />
                           <span className="text-xs font-medium text-neon-cyan">ML Analysis</span>
@@ -2448,7 +2604,7 @@ export function AlertDetailPage() {
           </Card>
 
           {/* Related Events Card */}
-          <Card>
+          <Card id="grouped-events">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
@@ -2682,7 +2838,7 @@ export function AlertDetailPage() {
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Quick Actions */}
-          <Card>
+          <Card id="soar-playbook">
             <CardHeader>
               <CardTitle>Quick Actions</CardTitle>
             </CardHeader>

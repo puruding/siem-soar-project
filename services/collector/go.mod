@@ -1,6 +1,6 @@
 module github.com/siem-soar-platform/services/collector
 
-go 1.23.0
+go 1.23
 
 require (
 	github.com/IBM/sarama v1.43.3
@@ -8,6 +8,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.0
+	github.com/google/uuid v1.6.0
+	github.com/siem-soar-platform/pkg/observability v0.0.0
+	github.com/siem-soar-platform/pkg/schema v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.58.0
 )
 
 require (
@@ -31,6 +35,8 @@ require (
 	github.com/eapache/go-xerial-snappy v0.0.0-20230731223053-c322873962e3 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
+	github.com/hashicorp/errwrap v1.0.0 // indirect
+	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect
 	github.com/jcmturner/dnsutils/v2 v2.0.0 // indirect
@@ -49,4 +55,6 @@ replace (
 	github.com/siem-soar-platform/pkg/connector => ../../pkg/connector
 	github.com/siem-soar-platform/pkg/errors => ../../pkg/errors
 	github.com/siem-soar-platform/pkg/logger => ../../pkg/logger
+	github.com/siem-soar-platform/pkg/observability => ../../pkg/observability
+	github.com/siem-soar-platform/pkg/schema => ../../pkg/schema
 )

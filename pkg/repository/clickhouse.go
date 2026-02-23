@@ -36,7 +36,7 @@ func DefaultClickHouseConfig() ClickHouseConfig {
 	return ClickHouseConfig{
 		Hosts:             []string{"localhost:9000"},
 		Database:          "siem",
-		Username:          "siem_app",
+		Username:          "siem",
 		DialTimeout:       10 * time.Second,
 		MaxOpenConns:      20,
 		MaxIdleConns:      5,
@@ -218,7 +218,7 @@ func (r *clickHouseEventRepository) GetByID(ctx context.Context, tenantID, event
 			event_id, tenant_id, timestamp, event_type, vendor_name, product_name,
 			security_severity, principal_hostname, principal_ip, principal_user_id,
 			target_hostname, target_ip, security_action, security_rule_name, description, raw_log
-		FROM events_distributed
+		FROM events
 		WHERE tenant_id = ? AND event_id = ?
 		LIMIT 1
 	`
@@ -226,7 +226,7 @@ func (r *clickHouseEventRepository) GetByID(ctx context.Context, tenantID, event
 	row := r.conn.conn.QueryRow(ctx, query, tenantID, eventID)
 
 	var e Event
-	var principalIP, targetIP []string
+	var principalIP, targetIP string
 
 	err := row.Scan(
 		&e.EventID, &e.TenantID, &e.Timestamp, &e.EventType, &e.VendorName, &e.ProductName,
@@ -240,8 +240,13 @@ func (r *clickHouseEventRepository) GetByID(ctx context.Context, tenantID, event
 		return nil, fmt.Errorf("failed to scan event: %w", err)
 	}
 
-	e.PrincipalIP = principalIP
-	e.TargetIP = targetIP
+	// Schema has String fields, wrap in slices for API compatibility
+	if principalIP != "" {
+		e.PrincipalIP = []string{principalIP}
+	}
+	if targetIP != "" {
+		e.TargetIP = []string{targetIP}
+	}
 	return &e, nil
 }
 
@@ -272,7 +277,7 @@ func (r *clickHouseEventRepository) Search(ctx context.Context, filter EventFilt
 		}
 	}
 	if len(filter.PrincipalIPs) > 0 {
-		conditions = append(conditions, fmt.Sprintf("hasAny(principal_ip, [%s])", placeholders(len(filter.PrincipalIPs))))
+		conditions = append(conditions, fmt.Sprintf("principal_ip IN (%s)", placeholders(len(filter.PrincipalIPs))))
 		for _, ip := range filter.PrincipalIPs {
 			args = append(args, ip)
 		}
@@ -299,8 +304,8 @@ func (r *clickHouseEventRepository) Search(ctx context.Context, filter EventFilt
 	whereClause := strings.Join(conditions, " AND ")
 
 	// Count query
-	countQuery := fmt.Sprintf("SELECT count() FROM events_distributed WHERE %s", whereClause)
-	var total int64
+	countQuery := fmt.Sprintf("SELECT count() FROM events WHERE %s", whereClause)
+	var total uint64
 	row := r.conn.conn.QueryRow(ctx, countQuery, args...)
 	if err := row.Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count events: %w", err)
@@ -321,8 +326,8 @@ func (r *clickHouseEventRepository) Search(ctx context.Context, filter EventFilt
 		SELECT
 			event_id, tenant_id, timestamp, event_type, vendor_name, product_name,
 			security_severity, principal_hostname, principal_ip, principal_user_id,
-			target_hostname, target_ip, security_action, security_rule_name, description
-		FROM events_distributed
+			target_hostname, target_ip, security_action, security_rule_name, description, raw_log
+		FROM events
 		WHERE %s
 		ORDER BY %s
 		LIMIT ? OFFSET ?
@@ -339,23 +344,28 @@ func (r *clickHouseEventRepository) Search(ctx context.Context, filter EventFilt
 	var events []*Event
 	for rows.Next() {
 		var e Event
-		var principalIP, targetIP []string
+		var principalIP, targetIP string
 
 		err := rows.Scan(
 			&e.EventID, &e.TenantID, &e.Timestamp, &e.EventType, &e.VendorName, &e.ProductName,
 			&e.Severity, &e.PrincipalHostname, &principalIP, &e.PrincipalUserID,
-			&e.TargetHostname, &targetIP, &e.SecurityAction, &e.SecurityRuleName, &e.Description,
+			&e.TargetHostname, &targetIP, &e.SecurityAction, &e.SecurityRuleName, &e.Description, &e.RawLog,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan event row: %w", err)
 		}
 
-		e.PrincipalIP = principalIP
-		e.TargetIP = targetIP
+		// Schema has String fields, wrap in slices for API compatibility
+		if principalIP != "" {
+			e.PrincipalIP = []string{principalIP}
+		}
+		if targetIP != "" {
+			e.TargetIP = []string{targetIP}
+		}
 		events = append(events, &e)
 	}
 
-	return events, total, nil
+	return events, int64(total), nil
 }
 
 // GetStats retrieves event statistics.
@@ -381,7 +391,7 @@ func (r *clickHouseEventRepository) GetStats(ctx context.Context, filter EventFi
 			uniq(principal_user_id) AS unique_users,
 			sum(ti_matched) AS ti_matches,
 			sum(length(raw_log)) AS bytes_total
-		FROM events_distributed
+		FROM events
 		WHERE %s
 	`, whereClause)
 
@@ -433,7 +443,7 @@ func (r *clickHouseEventRepository) CountByField(ctx context.Context, filter Eve
 
 	query := fmt.Sprintf(`
 		SELECT %s, count() AS cnt
-		FROM events_distributed
+		FROM events
 		WHERE %s
 		GROUP BY %s
 		ORDER BY cnt DESC
@@ -449,11 +459,11 @@ func (r *clickHouseEventRepository) CountByField(ctx context.Context, filter Eve
 	result := make(map[string]int64)
 	for rows.Next() {
 		var key string
-		var count int64
+		var count uint64
 		if err := rows.Scan(&key, &count); err != nil {
 			return nil, fmt.Errorf("failed to scan count result: %w", err)
 		}
-		result[key] = count
+		result[key] = int64(count)
 	}
 
 	return result, nil
@@ -490,7 +500,7 @@ func (r *clickHouseEventRepository) Timeline(ctx context.Context, filter EventFi
 
 	query := fmt.Sprintf(`
 		SELECT %s(timestamp) AS time_bucket, count() AS cnt
-		FROM events_distributed
+		FROM events
 		WHERE %s
 		GROUP BY time_bucket
 		ORDER BY time_bucket
@@ -600,7 +610,7 @@ func (r *clickHouseAlertRepository) GetByID(ctx context.Context, tenantID, alert
 			alert_id, tenant_id, created_at, alert_name, alert_type, severity, status,
 			resolution, rule_id, rule_name, event_count, assignee_id, case_id,
 			ai_triage_score, ai_triage_label
-		FROM alerts_distributed
+		FROM alerts
 		WHERE tenant_id = ? AND alert_id = ?
 		LIMIT 1
 	`
@@ -658,8 +668,8 @@ func (r *clickHouseAlertRepository) Search(ctx context.Context, filter AlertFilt
 	whereClause := strings.Join(conditions, " AND ")
 
 	// Count query
-	countQuery := fmt.Sprintf("SELECT count() FROM alerts_distributed WHERE %s", whereClause)
-	var total int64
+	countQuery := fmt.Sprintf("SELECT count() FROM alerts WHERE %s", whereClause)
+	var total uint64
 	row := r.conn.conn.QueryRow(ctx, countQuery, args...)
 	if err := row.Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count alerts: %w", err)
@@ -680,7 +690,7 @@ func (r *clickHouseAlertRepository) Search(ctx context.Context, filter AlertFilt
 			alert_id, tenant_id, created_at, alert_name, alert_type, severity, status,
 			resolution, rule_id, rule_name, event_count, assignee_id, case_id,
 			ai_triage_score, ai_triage_label
-		FROM alerts_distributed
+		FROM alerts
 		WHERE %s
 		ORDER BY %s
 		LIMIT ? OFFSET ?
@@ -708,7 +718,7 @@ func (r *clickHouseAlertRepository) Search(ctx context.Context, filter AlertFilt
 		alerts = append(alerts, &a)
 	}
 
-	return alerts, total, nil
+	return alerts, int64(total), nil
 }
 
 // UpdateStatus updates alert status.
@@ -716,7 +726,7 @@ func (r *clickHouseAlertRepository) UpdateStatus(ctx context.Context, tenantID, 
 	// ClickHouse doesn't support UPDATE directly on MergeTree
 	// Use ALTER TABLE ... UPDATE for mutations (async) or use PostgreSQL for mutable data
 	query := `
-		ALTER TABLE alerts_distributed
+		ALTER TABLE alerts
 		UPDATE status = ?, resolution = ?, updated_at = now64(3)
 		WHERE tenant_id = ? AND alert_id = ?
 	`
@@ -726,7 +736,7 @@ func (r *clickHouseAlertRepository) UpdateStatus(ctx context.Context, tenantID, 
 // AssignTo assigns alert to a user.
 func (r *clickHouseAlertRepository) AssignTo(ctx context.Context, tenantID, alertID, assigneeID string) error {
 	query := `
-		ALTER TABLE alerts_distributed
+		ALTER TABLE alerts
 		UPDATE assignee_id = ?, updated_at = now64(3)
 		WHERE tenant_id = ? AND alert_id = ?
 	`
@@ -736,7 +746,7 @@ func (r *clickHouseAlertRepository) AssignTo(ctx context.Context, tenantID, aler
 // LinkToCase links alert to a case.
 func (r *clickHouseAlertRepository) LinkToCase(ctx context.Context, tenantID, alertID, caseID string) error {
 	query := `
-		ALTER TABLE alerts_distributed
+		ALTER TABLE alerts
 		UPDATE case_id = ?, updated_at = now64(3)
 		WHERE tenant_id = ? AND alert_id = ?
 	`
@@ -765,7 +775,7 @@ func (r *clickHouseAlertRepository) GetStats(ctx context.Context, filter AlertFi
 			countIf(status IN ('OPEN', 'TRIAGED', 'IN_PROGRESS')) AS open_alerts,
 			avg(ai_triage_score) AS avg_triage_score,
 			countIf(sla_breached = 1) AS sla_breached
-		FROM alerts_distributed
+		FROM alerts
 		WHERE %s
 	`, whereClause)
 
@@ -779,7 +789,7 @@ func (r *clickHouseAlertRepository) GetStats(ctx context.Context, filter AlertFi
 	// Get counts by status
 	stats.AlertsByStatus = make(map[string]int64)
 	statusQuery := fmt.Sprintf(`
-		SELECT status, count() FROM alerts_distributed WHERE %s GROUP BY status
+		SELECT status, count() FROM alerts WHERE %s GROUP BY status
 	`, whereClause)
 	rows, err := r.conn.conn.Query(ctx, statusQuery, args...)
 	if err == nil {
@@ -796,7 +806,7 @@ func (r *clickHouseAlertRepository) GetStats(ctx context.Context, filter AlertFi
 	// Get counts by severity
 	stats.AlertsBySeverity = make(map[string]int64)
 	sevQuery := fmt.Sprintf(`
-		SELECT severity, count() FROM alerts_distributed WHERE %s GROUP BY severity
+		SELECT severity, count() FROM alerts WHERE %s GROUP BY severity
 	`, whereClause)
 	rows, err = r.conn.conn.Query(ctx, sevQuery, args...)
 	if err == nil {

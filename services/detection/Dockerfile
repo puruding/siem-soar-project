@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Set up directory structure to match go.mod replace paths
 WORKDIR /app/services/detection
@@ -14,7 +14,7 @@ RUN go mod download || true
 # Copy service source code
 COPY services/detection/ ./
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /detection .
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /detection .
 
 # Runtime stage
 FROM gcr.io/distroless/static-debian12

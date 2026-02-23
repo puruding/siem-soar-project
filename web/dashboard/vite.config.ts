@@ -34,7 +34,7 @@ export default defineConfig({
         target: 'http://localhost:8001',
         changeOrigin: true,
       },
-      // ML Gateway API - routes to ml-gateway service
+      // ML Gateway API - routes to Python ml-gateway service (port 8000)
       '/api/v1/dga': {
         target: 'http://localhost:8000',
         changeOrigin: true,
@@ -56,16 +56,94 @@ export default defineConfig({
         target: 'http://localhost:8082',
         changeOrigin: true,
       },
+      // Assets API - routes to Gateway service
+      '/api/v1/assets': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      // Products API - routes to Gateway service
+      '/api/v1/products': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      // Parsers API - routes to Gateway service
+      '/api/v1/parsers': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      // Alerts API - routes to Gateway (which routes to Alert service)
+      '/api/v1/alerts': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      // Detection API - routes to Detection service
+      '/api/v1/detection': {
+        target: 'http://localhost:8081',
+        changeOrigin: true,
+      },
+      // Rules API - routes to Gateway service (for demo/dev)
+      '/api/v1/rules': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      // Dashboard API - routes to Gateway service
+      '/api/v1/dashboard': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      // Query API - routes to Gateway (temporary until Query service is implemented)
+      '/api/v1/query': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      // Cases API - routes to Gateway service (for demo/dev)
+      '/api/v1/cases': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      // Events API - routes to Gateway service
+      '/api/v1/events': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      // Pipeline Orchestrator API - routes to pipeline service
+      '/api/v1/pipeline': {
+        target: 'http://localhost:8095',
+        changeOrigin: true,
+      },
+      // Threat Intelligence API - routes to Gateway service (for demo/dev)
+      '/api/v1/ti': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
       // Default API - routes to gateway service
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
-      // WebSocket for streaming chat
-      '/ws': {
+      // WebSocket for streaming chat (Copilot)
+      '/ws/chat': {
         target: 'ws://localhost:8001',
         ws: true,
         changeOrigin: true,
+      },
+      // WebSocket for Pipeline events
+      '/ws/pipeline': {
+        target: 'ws://localhost:8095',
+        ws: true,
+        changeOrigin: true,
+      },
+      // WebSocket for SOAR status updates
+      '/ws/soar': {
+        target: 'ws://localhost:8082',
+        ws: true,
+        changeOrigin: true,
+      },
+      // ClickHouse HTTP API
+      '/clickhouse': {
+        target: 'http://localhost:8123',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/clickhouse/, ''),
       },
     },
   },

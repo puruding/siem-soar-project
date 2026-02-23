@@ -299,8 +299,10 @@ func (d *ClickHouseDestination) flush(ctx context.Context, events []*routing.Eve
 func (d *ClickHouseDestination) insertBatch(ctx context.Context, events []*routing.Event) error {
 	batch, err := d.conn.PrepareBatch(ctx, fmt.Sprintf(`
 		INSERT INTO %s (
-			event_id, tenant_id, timestamp, event_type, source_type,
-			severity, fields, raw_log
+			tenant_id, timestamp, event_type, vendor_name, product_name,
+			security_severity, principal_hostname, principal_ip, principal_user_id,
+			target_hostname, target_ip, security_action, security_rule_name,
+			description, raw_log
 		)
 	`, d.config.Table))
 	if err != nil {
@@ -309,16 +311,39 @@ func (d *ClickHouseDestination) insertBatch(ctx context.Context, events []*routi
 	}
 
 	for _, event := range events {
-		fieldsJSON, _ := encodeFields(event.Fields)
+		// Extract UDM fields from event.Fields map
+		vendorName := getFieldString(event.Fields, "vendor_name", event.SourceType)
+		productName := getFieldString(event.Fields, "product_name", event.SourceType)
+		principalHostname := getFieldString(event.Fields, "principal_hostname", "")
+		principalIP := getFieldString(event.Fields, "principal_ip", "")
+		principalUserID := getFieldString(event.Fields, "principal_user_id", "")
+		targetHostname := getFieldString(event.Fields, "target_hostname", "")
+		targetIP := getFieldString(event.Fields, "target_ip", "")
+		securityAction := getFieldString(event.Fields, "security_action", "UNKNOWN")
+		securityRuleName := getFieldString(event.Fields, "security_rule_name", "")
+		description := getFieldString(event.Fields, "description", "")
+
+		// Map severity
+		severity := event.Severity
+		if severity == "" {
+			severity = "UNKNOWN"
+		}
 
 		err := batch.Append(
-			event.ID,
 			event.TenantID,
 			event.Timestamp,
 			event.EventType,
-			event.SourceType,
-			event.Severity,
-			string(fieldsJSON),
+			vendorName,
+			productName,
+			severity,
+			principalHostname,
+			principalIP,
+			principalUserID,
+			targetHostname,
+			targetIP,
+			securityAction,
+			securityRuleName,
+			description,
 			string(event.RawData),
 		)
 		if err != nil {
@@ -333,6 +358,19 @@ func (d *ClickHouseDestination) insertBatch(ctx context.Context, events []*routi
 
 	d.healthy.Store(true)
 	return nil
+}
+
+// getFieldString safely extracts a string value from a fields map
+func getFieldString(fields map[string]interface{}, key, defaultVal string) string {
+	if fields == nil {
+		return defaultVal
+	}
+	if val, ok := fields[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return defaultVal
 }
 
 func encodeFields(fields map[string]interface{}) ([]byte, error) {

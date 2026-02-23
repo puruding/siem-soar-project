@@ -5,7 +5,10 @@ go 1.23.0
 require (
 	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.5.1
+	github.com/siem-soar-platform/pkg/observability v0.0.0
+	github.com/siem-soar-platform/pkg/schema v0.0.0-00010101000000-000000000000
 	github.com/twmb/franz-go v1.16.1
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.58.0
 )
 
 require (
@@ -14,4 +17,9 @@ require (
 	github.com/klauspost/compress v1.17.8 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.7.0 // indirect
+)
+
+replace (
+	github.com/siem-soar-platform/pkg/observability => ../../pkg/observability
+	github.com/siem-soar-platform/pkg/schema => ../../pkg/schema
 )

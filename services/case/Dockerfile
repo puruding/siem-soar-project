@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app/services/case
 
@@ -13,7 +13,7 @@ RUN go mod download || true
 # Copy service source code
 COPY services/case/ ./
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /case .
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /case .
 
 # Runtime stage
 FROM gcr.io/distroless/static-debian12

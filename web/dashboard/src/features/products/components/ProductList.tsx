@@ -39,6 +39,7 @@ import {
   statusColors,
   type ProductFilters,
 } from '../hooks/useProducts';
+import { updateProduct } from '../api/productsApi';
 import { ProductDetail } from './ProductDetail';
 import { ProductForm } from './ProductForm';
 import { VendorFilter } from './VendorFilter';
@@ -106,13 +107,21 @@ export function ProductList() {
 
   const handleFormSubmit = (data: ProductFormData) => {
     if (editingProduct) {
-      // Update existing product
-      console.log('Updating product:', editingProduct.id, data);
+      // Update existing product via PATCH API
+      updateProduct(editingProduct.id, {
+        vendor: editingProduct.vendor.name,
+        version: data.version,
+      })
+        .then(() => refetch())
+        .catch((err: unknown) => {
+          console.error('Failed to update product:', err);
+          refetch();
+        });
     } else {
       // Create new product
       console.log('Creating product:', data);
+      refetch();
     }
-    refetch();
   };
 
   const getVendorLogo = (vendorId: string) => {
@@ -256,6 +265,7 @@ export function ProductList() {
                       <TableHead>Vendor</TableHead>
                       <TableHead>Category</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Parser</TableHead>
                       <TableHead>Log Formats</TableHead>
                       <TableHead className="w-[40px]"></TableHead>
                     </TableRow>
@@ -263,7 +273,7 @@ export function ProductList() {
                   <TableBody>
                     {products.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8">
+                        <TableCell colSpan={9} className="text-center py-8">
                           <p className="text-muted-foreground">No products found</p>
                           <Button
                             variant="link"
@@ -327,6 +337,18 @@ export function ProductList() {
                             >
                               {statusLabels[product.status]}
                             </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {product.parserType ? (
+                              <Badge
+                                variant="outline"
+                                className="text-xs bg-neon-cyan/10 text-neon-cyan border-neon-cyan/40 uppercase"
+                              >
+                                {product.parserType}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">-</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-1 max-w-[200px]">

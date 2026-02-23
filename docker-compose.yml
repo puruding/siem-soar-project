@@ -116,6 +116,75 @@ services:
       - siem-network
 
   # ===================
+  # OBSERVABILITY
+  # ===================
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    container_name: siem-jaeger
+    ports:
+      - "16686:16686"  # UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+      - "14250:14250"  # gRPC (legacy)
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - siem-network
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: siem-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/monitoring/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    networks:
+      - siem-network
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: siem-grafana
+    ports:
+      - "3004:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/monitoring/docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/monitoring/docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - jaeger
+    networks:
+      - siem-network
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.91.0
+    container_name: siem-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./infra/monitoring/docker/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4319:4317"    # OTLP gRPC (exposed on different port)
+      - "4320:4318"    # OTLP HTTP (exposed on different port)
+      - "8888:8888"    # Prometheus metrics (collector itself)
+      - "8889:8889"    # Prometheus exporter
+    depends_on:
+      - jaeger
+      - prometheus
+    networks:
+      - siem-network
+
+  # ===================
   # GO SERVICES
   # ===================
 
@@ -134,6 +203,10 @@ services:
       - POSTGRES_USER=siem
       - POSTGRES_PASSWORD=siem_password
       - POSTGRES_DB=siem_soar
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_SERVICE_NAME=gateway
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=prometheus
     depends_on:
       - redis
       - postgres
@@ -151,6 +224,10 @@ services:
       - CLICKHOUSE_USER=siem
       - CLICKHOUSE_PASSWORD=siem_password
       - CLICKHOUSE_DB=siem
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_SERVICE_NAME=detection
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=prometheus
     depends_on:
       kafka:
         condition: service_healthy
@@ -172,6 +249,10 @@ services:
       - POSTGRES_DB=siem_soar
       - KAFKA_BROKERS=kafka:9092
       - TEMPORAL_HOST=temporal:7233
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_SERVICE_NAME=soar
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=prometheus
     depends_on:
       - postgres
       - kafka
@@ -190,8 +271,13 @@ services:
       - POSTGRES_USER=siem
       - POSTGRES_PASSWORD=siem_password
       - POSTGRES_DB=siem_soar
+      - POSTGRES_DSN=postgres://siem:siem_password@postgres:5432/siem_soar?sslmode=disable
       - REDIS_ADDR=redis:6379
       - REDIS_PASSWORD=siem_password
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_SERVICE_NAME=ti
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=prometheus
     depends_on:
       - postgres
       - redis
@@ -208,6 +294,10 @@ services:
       - CLICKHOUSE_USER=siem
       - CLICKHOUSE_PASSWORD=siem_password
       - CLICKHOUSE_DB=siem
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_SERVICE_NAME=query
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=prometheus
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -225,6 +315,10 @@ services:
       - POSTGRES_USER=siem
       - POSTGRES_PASSWORD=siem_password
       - POSTGRES_DB=siem_soar
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_SERVICE_NAME=case
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=prometheus
     depends_on:
       - postgres
     networks:
@@ -241,6 +335,10 @@ services:
       - "8087:8087"
     environment:
       - KAFKA_BROKERS=kafka:9092
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_SERVICE_NAME=collector
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=prometheus
     depends_on:
       kafka:
         condition: service_healthy
@@ -258,6 +356,10 @@ services:
       - CLICKHOUSE_USER=siem
       - CLICKHOUSE_PASSWORD=siem_password
       - CLICKHOUSE_DB=siem
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_SERVICE_NAME=pipeline
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=prometheus
     depends_on:
       - kafka
       - clickhouse
@@ -271,10 +373,14 @@ services:
     container_name: siem-parser
     environment:
       - KAFKA_BROKERS=kafka:9092
-      - KAFKA_INPUT_TOPIC=logs.raw
+      - KAFKA_INPUT_TOPIC=raw-logs
       - KAFKA_OUTPUT_TOPIC=logs.parsed
       - REDIS_ADDR=redis:6379
       - REDIS_PASSWORD=siem_password
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_SERVICE_NAME=parser
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=prometheus
     depends_on:
       kafka:
         condition: service_healthy
@@ -290,7 +396,7 @@ services:
   ml-gateway:
     build:
       context: ./ai
-      dockerfile: ./services/ml-gateway/Dockerfile
+      dockerfile: ./services/ml_gateway/Dockerfile
     container_name: siem-ml-gateway
     ports:
       - "8000:8080"
@@ -299,6 +405,10 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=siem_password
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_SERVICE_NAME=ml-gateway
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=prometheus
     depends_on:
       - kafka
       - redis
@@ -327,6 +437,10 @@ services:
       - POSTGRES_USER=siem
       - POSTGRES_PASSWORD=siem_password
       - POSTGRES_DB=siem_soar
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_SERVICE_NAME=copilot
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=prometheus
     depends_on:
       - kafka
       - redis
@@ -368,3 +482,5 @@ volumes:
   postgres_data:
   redis_data:
   kafka_data:
+  prometheus_data:
+  grafana_data:

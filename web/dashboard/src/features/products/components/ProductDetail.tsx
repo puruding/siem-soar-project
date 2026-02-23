@@ -1,8 +1,19 @@
+import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   X,
   Edit2,
@@ -10,28 +21,17 @@ import {
   Building2,
   Tag,
   Clock,
-  FileText,
   FileCode2,
   ExternalLink,
+  Plus,
+  ChevronRight,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { formatTimestamp, cn } from '@/lib/utils';
 import type { Product } from '../types';
 import { categoryLabels, categoryColors, statusLabels, statusColors } from '../hooks/useProducts';
-
-// Parser name mapping (linked to actual parser data)
-const parserNameMap: Record<string, { name: string; format: string }> = {
-  'parser-001': { name: 'Syslog RFC5424', format: 'grok' },
-  'parser-002': { name: 'AWS CloudTrail', format: 'json' },
-  'parser-003': { name: 'Windows Security Event', format: 'cef' },
-  'parser-004': { name: 'Palo Alto Firewall', format: 'leef' },
-  'parser-005': { name: 'Apache Access Log', format: 'grok' },
-  'parser-006': { name: 'Nginx Error Log', format: 'regex' },
-  'parser-007': { name: 'Cisco ASA Syslog', format: 'grok' },
-  'parser-008': { name: 'Key-Value Generic', format: 'kv' },
-  'parser-009': { name: 'CrowdStrike Falcon', format: 'json' },
-  'parser-010': { name: 'Okta System Log', format: 'json' },
-};
+import { useProductParsers } from '@/features/parsers/hooks/useParsers';
+import { FormatSelector, FormatBadge } from '@/features/parsers/components/FormatSelector';
+import type { ParserFormat } from '@/features/parsers/types';
 
 const formatColors: Record<string, string> = {
   grok: 'bg-purple-500/20 text-purple-400 border-purple-500/50',
@@ -50,11 +50,34 @@ interface ProductDetailProps {
 }
 
 export function ProductDetail({ product, onClose, onEdit, onDelete }: ProductDetailProps) {
-  const navigate = useNavigate();
+  const { parsers, isLoading: parsersLoading, createParser, deleteParser } = useProductParsers(product.id);
 
-  const handleParserClick = (parserId: string) => {
-    navigate('/parsers');
-  };
+  const navigate = useNavigate();
+  const [showAddParserDialog, setShowAddParserDialog] = useState(false);
+  const [newParserName, setNewParserName] = useState('');
+  const [newParserFormat, setNewParserFormat] = useState<ParserFormat>('grok');
+  const [addingParser, setAddingParser] = useState(false);
+
+  const handleParserClick = useCallback((parserId: string) => {
+    navigate(`/parsers?id=${parserId}`);
+  }, [navigate]);
+
+  const handleAddParser = useCallback(async () => {
+    if (!newParserName.trim()) return;
+    setAddingParser(true);
+    try {
+      await createParser(newParserName.trim(), newParserFormat);
+      setShowAddParserDialog(false);
+      setNewParserName('');
+      setNewParserFormat('grok');
+    } finally {
+      setAddingParser(false);
+    }
+  }, [newParserName, newParserFormat, createParser]);
+
+  const handleDeleteParser = useCallback(async (parserId: string) => {
+    await deleteParser(parserId);
+  }, [deleteParser]);
 
   return (
     <Card className="w-[420px] flex flex-col h-[calc(100vh-180px)] sticky top-6">
@@ -133,71 +156,92 @@ export function ProductDetail({ product, onClose, onEdit, onDelete }: ProductDet
 
           <Separator />
 
-          {/* Integration Config */}
+          {/* Parsers Section */}
           <div>
-            <h4 className="text-sm font-medium mb-3">Integration Configuration</h4>
-            <div className="space-y-4">
-              <div>
-                <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                  <FileText className="w-4 h-4" />
-                  <span className="text-xs">Log Formats</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {product.logFormats.map((format) => (
-                    <Badge
-                      key={format}
-                      variant="outline"
-                      className="bg-primary/10 text-primary border-primary/30"
-                    >
-                      {format}
-                    </Badge>
-                  ))}
-                </div>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium flex items-center gap-2">
+                <FileCode2 className="w-4 h-4" />
+                Parsers
+                {!parsersLoading && (
+                  <Badge variant="outline" className="text-xs ml-1">
+                    {parsers.length}
+                  </Badge>
+                )}
+              </h4>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setShowAddParserDialog(true)}
+              >
+                <Plus className="w-3 h-3 mr-1" />
+                Add Parser
+              </Button>
+            </div>
+
+            {parsersLoading ? (
+              <p className="text-sm text-muted-foreground">Loading parsers...</p>
+            ) : parsers.length === 0 ? (
+              <div className="text-center py-4 border border-dashed border-border/50 rounded-lg">
+                <p className="text-sm text-muted-foreground mb-2">No parsers configured</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAddParserDialog(true)}
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add First Parser
+                </Button>
               </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Associated Parsers */}
-          <div>
-            <h4 className="text-sm font-medium mb-3">Associated Parsers</h4>
-            <div className="space-y-2">
-              {product.parserIds.length > 0 ? (
-                product.parserIds.map((parserId) => {
-                  const parserInfo = parserNameMap[parserId];
-                  return (
-                    <div
-                      key={parserId}
-                      onClick={() => handleParserClick(parserId)}
-                      className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-primary/10">
-                          <FileCode2 className="w-4 h-4 text-primary" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">
-                            {parserInfo?.name || parserId}
-                          </p>
-                          {parserInfo && (
-                            <Badge
-                              variant="outline"
-                              className={cn('text-2xs mt-1', formatColors[parserInfo.format])}
-                            >
-                              {parserInfo.format.toUpperCase()}
-                            </Badge>
-                          )}
-                        </div>
+            ) : (
+              <div className="space-y-2">
+                {parsers.map((parser) => (
+                  <div
+                    key={parser.id}
+                    className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors group cursor-pointer"
+                    onClick={() => handleParserClick(parser.id)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === 'Enter' && handleParserClick(parser.id)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <FormatBadge format={parser.format} />
+                        <span className="text-sm font-medium truncate">{parser.name}</span>
                       </div>
-                      <ExternalLink className="w-4 h-4 text-muted-foreground" />
+                      <div className="flex items-center gap-2 mt-1">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'text-2xs px-1.5 py-0',
+                            parser.status === 'active'
+                              ? 'bg-neon-green/20 text-neon-green border-neon-green/50'
+                              : parser.status === 'testing'
+                              ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/50'
+                              : 'bg-muted/50 text-muted-foreground'
+                          )}
+                        >
+                          {parser.status}
+                        </Badge>
+                        <span className="text-2xs text-muted-foreground">v{parser.version}</span>
+                      </div>
                     </div>
-                  );
-                })
-              ) : (
-                <p className="text-sm text-muted-foreground">No parsers associated</p>
-              )}
-            </div>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-300 hover:bg-red-400/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteParser(parser.id);
+                      }}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <Separator />
@@ -234,6 +278,50 @@ export function ProductDetail({ product, onClose, onEdit, onDelete }: ProductDet
           </Button>
         </CardContent>
       </ScrollArea>
+
+      {/* Add Parser Dialog */}
+      <Dialog open={showAddParserDialog} onOpenChange={setShowAddParserDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Parser to {product.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="parser-name">Parser Name</Label>
+              <Input
+                id="parser-name"
+                value={newParserName}
+                onChange={(e) => setNewParserName(e.target.value)}
+                placeholder="e.g., Firewall Syslog Parser"
+                className="bg-background/50"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Format</Label>
+              <FormatSelector
+                value={newParserFormat}
+                onChange={setNewParserFormat}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowAddParserDialog(false)}
+              disabled={addingParser}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddParser}
+              disabled={!newParserName.trim() || addingParser}
+              className="bg-gradient-to-r from-[#00A4A6] to-[#00A4A6]/80"
+            >
+              {addingParser ? 'Adding...' : 'Add Parser'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

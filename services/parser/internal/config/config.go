@@ -54,7 +54,7 @@ func Load() *Config {
 
 		// Kafka
 		KafkaBrokers:       strings.Split(getEnv("KAFKA_BROKERS", "localhost:9092"), ","),
-		KafkaInputTopic:    getEnv("KAFKA_INPUT_TOPIC", "logs.raw"),
+		KafkaInputTopic:    getEnv("KAFKA_INPUT_TOPIC", "raw-logs"),
 		KafkaOutputTopic:   getEnv("KAFKA_OUTPUT_TOPIC", "logs.parsed"),
 		KafkaDLQTopic:      getEnv("KAFKA_DLQ_TOPIC", "logs.dlq.parser"),
 		KafkaConsumerGroup: getEnv("KAFKA_CONSUMER_GROUP", "parser-service"),

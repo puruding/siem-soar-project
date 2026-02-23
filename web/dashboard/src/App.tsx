@@ -12,9 +12,11 @@ import { PlaybookEditor } from '@/features/playbooks/components/PlaybookEditor';
 import { ProductList } from '@/features/products';
 import { ParsersPage } from '@/features/parsers';
 import { AssetList } from '@/features/assets';
-import { RulesPage } from '@/features/rules';
+import { RulesPage, RuleDetailPage } from '@/features/rules';
+import { EventLogsPage } from '@/features/events';
 import { CopilotPage } from '@/features/copilot';
 import { SettingsPage } from '@/features/settings';
+import { PipelinePage } from '@/features/pipeline';
 import { useThemeStore } from '@/stores/themeStore';
 import { useEffect } from 'react';
 
@@ -44,8 +46,11 @@ function App() {
           <Route path="parsers" element={<ParsersPage />} />
           <Route path="assets" element={<AssetList />} />
           <Route path="rules" element={<RulesPage />} />
+          <Route path="rules/:id" element={<RuleDetailPage />} />
           <Route path="copilot" element={<CopilotPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="pipeline" element={<PipelinePage />} />
+          <Route path="events" element={<EventLogsPage />} />
         </Route>
       </Routes>
       <Toaster />

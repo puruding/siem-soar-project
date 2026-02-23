@@ -2,7 +2,7 @@
 export type { Parser, FieldMapping, TestResult, ParserFormat, ParserStatus } from './types';
 
 // Hooks
-export { useParsers, useParserTest } from './hooks/useParsers';
+export { useParsers, useParserTest, useProductParsers } from './hooks/useParsers';
 
 // Components
 export { ParserList } from './components/ParserList';

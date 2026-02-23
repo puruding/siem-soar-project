@@ -108,7 +108,7 @@ import { TemplateEditor } from './editor';
 import { useExecutionWebSocket, useNodeOutputSchema, useProcessingMetrics } from '../hooks';
 import { useExecutionStore } from '../stores/executionStore';
 import { useProcessingStore } from '../stores/processingStore';
-import { mockWebSocketService } from '../services/mockWebSocketService';
+import { webSocketService } from '../services/webSocketService';
 import {
   deployPlaybook,
   convertNodesToSteps,
@@ -1198,7 +1198,7 @@ export function PlaybookEditor() {
 
     // IMPORTANT: Register the message handler BEFORE starting execution
     // to ensure all events are captured in correct order
-    const unsubscribe = mockWebSocketService.onMessage((message) => {
+    const unsubscribe = webSocketService.onMessage((message) => {
       if (message.executionId === executionId) {
         executionStore.handleWSMessage(message);
 
@@ -1228,7 +1228,7 @@ export function PlaybookEditor() {
     });
 
     // Start mock WebSocket execution in background (for ExecutionPanel demo)
-    mockWebSocketService.startExecution(executionId, nodes, edges).finally(() => {
+    webSocketService.startExecution(executionId, nodes, edges).finally(() => {
       // Cleanup handler when execution completes
       unsubscribe();
 
@@ -1633,7 +1633,7 @@ export function PlaybookEditor() {
     // Resume the execution via WebSocket
     const execution = executionHistory.find((e) => e.id === executionId);
     if (execution?.approval?.nodeId) {
-      mockWebSocketService.approveNode(executionId, execution.approval.nodeId, comment);
+      webSocketService.approveNode(executionId, execution.approval.nodeId, comment);
     }
 
     toast({
@@ -1670,7 +1670,7 @@ export function PlaybookEditor() {
     // Reject the execution via WebSocket
     const execution = executionHistory.find((e) => e.id === executionId);
     if (execution?.approval?.nodeId) {
-      mockWebSocketService.rejectNode(executionId, execution.approval.nodeId, comment);
+      webSocketService.rejectNode(executionId, execution.approval.nodeId, comment);
     }
 
     toast({

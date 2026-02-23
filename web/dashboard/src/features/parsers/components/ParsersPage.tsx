@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -18,6 +19,7 @@ import { FormatSelector } from './FormatSelector';
 import type { ParserFormat, Parser } from '../types';
 
 export function ParsersPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     parsers,
     selectedParser,
@@ -25,7 +27,21 @@ export function ParsersPage() {
     createParser,
     updateParser,
     deleteParser,
+    isLoading,
   } = useParsers();
+
+  // Handle URL parameter for parser selection
+  useEffect(() => {
+    const parserId = searchParams.get('id');
+    if (parserId && parsers.length > 0 && !isLoading) {
+      const parser = parsers.find(p => p.id === parserId);
+      if (parser) {
+        setSelectedParser(parser);
+        // Clear the URL parameter after selection
+        setSearchParams({}, { replace: true });
+      }
+    }
+  }, [searchParams, parsers, isLoading, setSelectedParser, setSearchParams]);
 
   const { isRunning, result, runTest, clearResult } = useParserTest();
 
@@ -34,10 +50,11 @@ export function ParsersPage() {
   const [newParserFormat, setNewParserFormat] = useState<ParserFormat>('grok');
   const [isListCollapsed, setIsListCollapsed] = useState(false);
 
-  const handleCreateParser = useCallback(() => {
+  const handleCreateParser = useCallback(async () => {
     if (newParserName.trim()) {
-      const parser = createParser({
+      const parser = await createParser({
         name: newParserName.trim(),
+        productId: undefined,
         format: newParserFormat,
         pattern: '',
         fieldMappings: [],
@@ -52,17 +69,17 @@ export function ParsersPage() {
   }, [newParserName, newParserFormat, createParser, setSelectedParser]);
 
   const handleSaveParser = useCallback(
-    (updates: Partial<Parser>) => {
+    async (updates: Partial<Parser>) => {
       if (selectedParser) {
-        updateParser(selectedParser.id, updates);
+        await updateParser(selectedParser.id, updates);
       }
     },
     [selectedParser, updateParser]
   );
 
-  const handleDeleteParser = useCallback(() => {
+  const handleDeleteParser = useCallback(async () => {
     if (selectedParser) {
-      deleteParser(selectedParser.id);
+      await deleteParser(selectedParser.id);
     }
   }, [selectedParser, deleteParser]);
 

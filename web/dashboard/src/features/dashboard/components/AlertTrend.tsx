@@ -1,9 +1,14 @@
+import { useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Loader2 } from 'lucide-react';
+import { useAlertTrend } from '../hooks/useDashboardData';
 
 export function AlertTrend() {
-  const option = {
+  const { alertTrend, isLoading, error } = useAlertTrend();
+
+  const option = useMemo(() => ({
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
@@ -38,7 +43,9 @@ export function AlertTrend() {
     xAxis: {
       type: 'category',
       boundaryGap: false,
-      data: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00', '24:00'],
+      data: alertTrend.timestamps.length > 0
+        ? alertTrend.timestamps
+        : ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00', '24:00'],
       axisLine: {
         lineStyle: {
           color: 'hsl(222 30% 18%)',
@@ -91,7 +98,7 @@ export function AlertTrend() {
             ],
           },
         },
-        data: [5, 3, 8, 12, 7, 4, 6],
+        data: alertTrend.critical.length > 0 ? alertTrend.critical : [5, 3, 8, 12, 7, 4, 6],
       },
       {
         name: 'High',
@@ -116,7 +123,7 @@ export function AlertTrend() {
             ],
           },
         },
-        data: [18, 15, 22, 28, 25, 19, 21],
+        data: alertTrend.high.length > 0 ? alertTrend.high : [18, 15, 22, 28, 25, 19, 21],
       },
       {
         name: 'Medium',
@@ -141,7 +148,7 @@ export function AlertTrend() {
             ],
           },
         },
-        data: [45, 38, 52, 68, 55, 42, 48],
+        data: alertTrend.medium.length > 0 ? alertTrend.medium : [45, 38, 52, 68, 55, 42, 48],
       },
       {
         name: 'Low',
@@ -166,10 +173,10 @@ export function AlertTrend() {
             ],
           },
         },
-        data: [85, 72, 95, 120, 98, 78, 88],
+        data: alertTrend.low.length > 0 ? alertTrend.low : [85, 72, 95, 120, 98, 78, 88],
       },
     ],
-  };
+  }), [alertTrend]);
 
   return (
     <Card className="h-full">
@@ -192,11 +199,21 @@ export function AlertTrend() {
         </div>
       </CardHeader>
       <CardContent>
-        <ReactECharts
-          option={option}
-          style={{ height: '300px' }}
-          notMerge={true}
-        />
+        {isLoading ? (
+          <div className="flex items-center justify-center h-[300px]">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : error ? (
+          <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+            Failed to load trend data
+          </div>
+        ) : (
+          <ReactECharts
+            option={option}
+            style={{ height: '300px' }}
+            notMerge={true}
+          />
+        )}
       </CardContent>
     </Card>
   );

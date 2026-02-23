@@ -21,6 +21,9 @@ type Config struct {
 	// ClickHouse settings
 	ClickHouse ClickHouseConfig
 
+	// ML Gateway settings
+	MLGateway MLGatewayConfig
+
 	// Engine settings
 	Workers      int
 	BatchSize    int
@@ -29,6 +32,24 @@ type Config struct {
 	// Rules settings
 	RulesDirectory     string
 	RuleReloadInterval time.Duration
+}
+
+// MLGatewayConfig holds ML Gateway connection settings.
+type MLGatewayConfig struct {
+	BaseURL       string
+	Timeout       time.Duration
+	Enabled       bool // Feature flag default
+	CacheEnabled  bool
+	CacheTTL      time.Duration
+	RedisAddr     string
+	RedisPassword string
+	RedisDB       int
+
+	// Circuit breaker settings
+	CBMaxRequests  uint32
+	CBInterval     time.Duration
+	CBTimeout      time.Duration
+	CBFailureRatio float64
 }
 
 // KafkaConfig holds Kafka connection settings.
@@ -98,6 +119,21 @@ func Load() *Config {
 			Password: getEnv("CLICKHOUSE_PASSWORD", ""),
 			Database: getEnv("CLICKHOUSE_DATABASE", "siem"),
 			Debug:    getEnvAsBool("CLICKHOUSE_DEBUG", false),
+		},
+
+		MLGateway: MLGatewayConfig{
+			BaseURL:        getEnv("ML_GATEWAY_URL", "http://ml-gateway:8000"),
+			Timeout:        getEnvAsDuration("ML_GATEWAY_TIMEOUT", 5*time.Second),
+			Enabled:        getEnvAsBool("ML_GATEWAY_ENABLED", true),
+			CacheEnabled:   getEnvAsBool("ML_GATEWAY_CACHE_ENABLED", true),
+			CacheTTL:       getEnvAsDuration("ML_GATEWAY_CACHE_TTL", 5*time.Minute),
+			RedisAddr:      getEnv("ML_GATEWAY_REDIS_ADDR", "localhost:6379"),
+			RedisPassword:  getEnv("ML_GATEWAY_REDIS_PASSWORD", ""),
+			RedisDB:        getEnvAsInt("ML_GATEWAY_REDIS_DB", 0),
+			CBMaxRequests:  uint32(getEnvAsInt("ML_GATEWAY_CB_MAX_REQUESTS", 5)),
+			CBInterval:     getEnvAsDuration("ML_GATEWAY_CB_INTERVAL", 10*time.Second),
+			CBTimeout:      getEnvAsDuration("ML_GATEWAY_CB_TIMEOUT", 30*time.Second),
+			CBFailureRatio: getEnvAsFloat("ML_GATEWAY_CB_FAILURE_RATIO", 0.5),
 		},
 
 		Workers:            getEnvAsInt("WORKERS", 8),
@@ -187,6 +223,15 @@ func getEnvAsSlice(key string, defaultValue []string) []string {
 		}
 		if len(result) > 0 {
 			return result
+		}
+	}
+	return defaultValue
+}
+
+func getEnvAsFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+			return floatVal
 		}
 	}
 	return defaultValue

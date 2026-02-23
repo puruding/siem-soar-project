@@ -178,7 +178,7 @@
 
     <!-- Memory Settings -->
     <max_server_memory_usage_to_ram_ratio>0.9</max_server_memory_usage_to_ram_ratio>
-    <max_memory_usage_for_user>0</max_memory_usage_for_user>
+    <!-- Note: max_memory_usage_for_user is a user-level setting and should be in users.xml -->
 
     <!-- Compression -->
     <compression>

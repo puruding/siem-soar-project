@@ -1,203 +1,53 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { Parser, TestResult } from '../types';
+import {
+  fetchParsers,
+  fetchProductParsers,
+  createParser as apiCreateParser,
+  updateParser as apiUpdateParser,
+  deleteParser as apiDeleteParser,
+  type ApiParser,
+} from '../api/parsersApi';
 
-const mockParsers: Parser[] = [
-  {
-    id: 'parser-001',
-    name: 'Syslog RFC5424',
-    productId: 'SYSLOG',
-    format: 'grok',
-    pattern: '%{SYSLOG5424PRI}%{NONNEGINT:syslog5424_ver} +(?:%{TIMESTAMP_ISO8601:syslog5424_ts}|-) +(?:%{IPORHOST:syslog5424_host}|-) +(?:%{SYSLOG5424PRINTASCII:syslog5424_app}|-) +(?:%{SYSLOG5424PRINTASCII:syslog5424_proc}|-) +(?:%{SYSLOG5424PRINTASCII:syslog5424_msgid}|-) +(?:%{SYSLOG5424SD:syslog5424_sd}|-|) +%{GREEDYDATA:syslog5424_msg}',
-    fieldMappings: [
-      { sourceField: 'syslog5424_host', targetField: 'principal.hostname' },
-      { sourceField: 'syslog5424_ts', targetField: 'metadata.event_timestamp', transformation: 'parse_date' },
-      { sourceField: 'syslog5424_app', targetField: 'target.application' },
-    ],
-    sampleLogs: [
-      '<165>1 2024-01-15T14:32:15.003Z mymachine.example.com evntslog - ID47 [exampleSDID@32473 iut="3" eventSource="Application"] An application event log entry...',
-    ],
-    status: 'active',
-    version: 3,
-    createdAt: new Date('2024-01-01'),
-    updatedAt: new Date('2024-01-15'),
-  },
-  {
-    id: 'parser-002',
-    name: 'AWS CloudTrail',
-    productId: 'AWS_CLOUDTRAIL',
-    format: 'json',
-    pattern: '{"eventVersion": "%{DATA:eventVersion}", "userIdentity": %{GREEDYDATA:userIdentity}, "eventTime": "%{TIMESTAMP_ISO8601:eventTime}", "eventSource": "%{DATA:eventSource}", "eventName": "%{DATA:eventName}", "awsRegion": "%{DATA:awsRegion}"}',
-    fieldMappings: [
-      { sourceField: 'eventSource', targetField: 'target.application' },
-      { sourceField: 'eventName', targetField: 'metadata.product_event_type' },
-      { sourceField: 'awsRegion', targetField: 'principal.location.name' },
-      { sourceField: 'eventTime', targetField: 'metadata.event_timestamp', transformation: 'parse_date' },
-    ],
-    sampleLogs: [
-      '{"eventVersion": "1.08", "userIdentity": {"type": "IAMUser", "userName": "alice"}, "eventTime": "2024-01-15T14:32:15Z", "eventSource": "s3.amazonaws.com", "eventName": "GetObject", "awsRegion": "us-east-1"}',
-    ],
-    status: 'active',
-    version: 5,
-    createdAt: new Date('2023-11-20'),
-    updatedAt: new Date('2024-01-10'),
-  },
-  {
-    id: 'parser-003',
-    name: 'Windows Security Event',
-    productId: 'WINDOWS_SEC',
-    format: 'cef',
-    pattern: 'CEF:%{INT:cefVersion}|%{DATA:deviceVendor}|%{DATA:deviceProduct}|%{DATA:deviceVersion}|%{DATA:signatureId}|%{DATA:name}|%{DATA:severity}|%{GREEDYDATA:extension}',
-    fieldMappings: [
-      { sourceField: 'deviceVendor', targetField: 'metadata.vendor_name' },
-      { sourceField: 'deviceProduct', targetField: 'metadata.product_name' },
-      { sourceField: 'signatureId', targetField: 'security_result.rule_id' },
-      { sourceField: 'severity', targetField: 'security_result.severity' },
-    ],
-    sampleLogs: [
-      'CEF:0|Microsoft|Windows|10.0|4624|An account was successfully logged on|5|src=192.168.1.100 dst=10.0.0.5 suser=admin shost=WORKSTATION1',
-    ],
-    status: 'active',
-    version: 2,
-    createdAt: new Date('2023-12-05'),
-    updatedAt: new Date('2024-01-12'),
-  },
-  {
-    id: 'parser-004',
-    name: 'Palo Alto Firewall',
-    productId: 'PAN_FW',
-    format: 'leef',
-    pattern: 'LEEF:%{DATA:leefVersion}|%{DATA:vendor}|%{DATA:product}|%{DATA:version}|%{DATA:eventId}|%{GREEDYDATA:attributes}',
-    fieldMappings: [
-      { sourceField: 'vendor', targetField: 'metadata.vendor_name' },
-      { sourceField: 'product', targetField: 'metadata.product_name' },
-      { sourceField: 'eventId', targetField: 'metadata.product_event_type' },
-    ],
-    sampleLogs: [
-      'LEEF:2.0|Palo Alto Networks|PAN-OS|10.1|TRAFFIC|cat=TRAFFIC\tdevTime=Jan 15 2024 14:32:15\tsrc=192.168.1.50\tdst=8.8.8.8\tproto=TCP\tdstPort=443',
-    ],
-    status: 'testing',
-    version: 1,
-    createdAt: new Date('2024-01-10'),
-    updatedAt: new Date('2024-01-14'),
-  },
-  {
-    id: 'parser-005',
-    name: 'Apache Access Log',
-    productId: 'APACHE_ACCESS',
-    format: 'grok',
-    pattern: '%{IPORHOST:clientip} %{USER:ident} %{USER:auth} \\[%{HTTPDATE:timestamp}\\] "%{WORD:verb} %{URIPATHPARAM:request} HTTP/%{NUMBER:httpversion}" %{NUMBER:response} (?:%{NUMBER:bytes}|-)',
-    fieldMappings: [
-      { sourceField: 'clientip', targetField: 'principal.ip' },
-      { sourceField: 'timestamp', targetField: 'metadata.event_timestamp', transformation: 'parse_date' },
-      { sourceField: 'verb', targetField: 'network.http.method', transformation: 'uppercase' },
-      { sourceField: 'request', targetField: 'target.url' },
-      { sourceField: 'response', targetField: 'network.http.response_code' },
-    ],
-    sampleLogs: [
-      '192.168.1.100 - admin [15/Jan/2024:14:32:15 +0000] "GET /api/users HTTP/1.1" 200 1234',
-    ],
-    status: 'active',
-    version: 4,
-    createdAt: new Date('2023-10-15'),
-    updatedAt: new Date('2024-01-08'),
-  },
-  {
-    id: 'parser-006',
-    name: 'Nginx Error Log',
-    productId: 'NGINX_ERROR',
-    format: 'regex',
-    pattern: '(?<timestamp>\\d{4}/\\d{2}/\\d{2} \\d{2}:\\d{2}:\\d{2}) \\[(?<level>\\w+)\\] (?<pid>\\d+)#(?<tid>\\d+): \\*(?<cid>\\d+) (?<message>.+)',
-    fieldMappings: [
-      { sourceField: 'timestamp', targetField: 'metadata.event_timestamp', transformation: 'parse_date' },
-      { sourceField: 'level', targetField: 'security_result.severity', transformation: 'uppercase' },
-      { sourceField: 'message', targetField: 'security_result.description' },
-    ],
-    sampleLogs: [
-      '2024/01/15 14:32:15 [error] 1234#5678: *9999 connect() failed (111: Connection refused) while connecting to upstream',
-    ],
-    status: 'draft',
-    version: 1,
-    createdAt: new Date('2024-01-14'),
-    updatedAt: new Date('2024-01-14'),
-  },
-  {
-    id: 'parser-007',
-    name: 'Cisco ASA Syslog',
-    productId: 'CISCO_ASA',
-    format: 'grok',
-    pattern: '%{CISCOTIMESTAMP:timestamp} %{SYSLOGHOST:device} %%{CISCOTAG:ciscotag}: %{GREEDYDATA:message}',
-    fieldMappings: [
-      { sourceField: 'timestamp', targetField: 'metadata.event_timestamp', transformation: 'parse_date' },
-      { sourceField: 'device', targetField: 'principal.hostname' },
-      { sourceField: 'ciscotag', targetField: 'metadata.product_event_type' },
-      { sourceField: 'message', targetField: 'security_result.description' },
-    ],
-    sampleLogs: [
-      'Jan 15 14:32:15 fw01 %ASA-6-302013: Built inbound TCP connection 12345 for outside:192.168.1.100/54321 to inside:10.0.0.5/443',
-    ],
-    status: 'active',
-    version: 6,
-    createdAt: new Date('2023-08-20'),
-    updatedAt: new Date('2024-01-05'),
-  },
-  {
-    id: 'parser-008',
-    name: 'Key-Value Generic',
-    productId: 'GENERIC_KV',
-    format: 'kv',
-    pattern: '%{GREEDYDATA:kvpairs}',
-    fieldMappings: [
-      { sourceField: 'src', targetField: 'principal.ip' },
-      { sourceField: 'dst', targetField: 'target.ip' },
-      { sourceField: 'user', targetField: 'principal.user.userid', transformation: 'lowercase' },
-      { sourceField: 'action', targetField: 'security_result.action' },
-    ],
-    sampleLogs: [
-      'timestamp=2024-01-15T14:32:15Z src=192.168.1.100 dst=10.0.0.5 user=ADMIN action=ALLOW proto=TCP dport=443',
-    ],
-    status: 'disabled',
-    version: 2,
-    createdAt: new Date('2023-09-10'),
-    updatedAt: new Date('2023-12-20'),
-  },
-  {
-    id: 'parser-009',
-    name: 'CrowdStrike Falcon',
-    productId: 'CROWDSTRIKE',
-    format: 'json',
-    pattern: '{"metadata": {"eventType": "%{DATA:eventType}", "eventCreationTime": %{NUMBER:eventCreationTime}}, "event": %{GREEDYDATA:event}}',
-    fieldMappings: [
-      { sourceField: 'eventType', targetField: 'metadata.product_event_type' },
-      { sourceField: 'eventCreationTime', targetField: 'metadata.event_timestamp' },
-    ],
-    sampleLogs: [
-      '{"metadata": {"eventType": "DetectionSummaryEvent", "eventCreationTime": 1705329135000}, "event": {"DetectName": "Malware.Generic", "Severity": 4, "ComputerName": "WORKSTATION1"}}',
-    ],
-    status: 'active',
-    version: 3,
-    createdAt: new Date('2023-11-01'),
-    updatedAt: new Date('2024-01-13'),
-  },
-  {
-    id: 'parser-010',
-    name: 'Okta System Log',
-    productId: 'OKTA',
-    format: 'json',
-    pattern: '{"uuid": "%{DATA:uuid}", "published": "%{TIMESTAMP_ISO8601:published}", "eventType": "%{DATA:eventType}", "actor": %{GREEDYDATA:actor}}',
-    fieldMappings: [
-      { sourceField: 'uuid', targetField: 'metadata.product_log_id' },
-      { sourceField: 'published', targetField: 'metadata.event_timestamp', transformation: 'parse_date' },
-      { sourceField: 'eventType', targetField: 'metadata.product_event_type' },
-    ],
-    sampleLogs: [
-      '{"uuid": "abc123", "published": "2024-01-15T14:32:15.000Z", "eventType": "user.session.start", "actor": {"id": "00u1abcd", "type": "User", "displayName": "John Doe"}}',
-    ],
-    status: 'testing',
-    version: 2,
-    createdAt: new Date('2024-01-05'),
-    updatedAt: new Date('2024-01-15'),
-  },
-];
+// Map API parser_type to Parser format
+function mapParserType(parserType: string | null): Parser['format'] {
+  if (!parserType) return 'grok';
+  const lower = parserType.toLowerCase();
+  if (lower === 'json') return 'json';
+  if (lower === 'cef') return 'cef';
+  if (lower === 'leef') return 'leef';
+  if (lower === 'regex' || lower === 'regexp') return 'regex';
+  if (lower === 'kv' || lower === 'key_value') return 'kv';
+  return 'grok';
+}
+
+// Map API status to Parser status
+function mapParserStatus(status: string): Parser['status'] {
+  const lower = status.toLowerCase();
+  if (lower === 'active') return 'active';
+  if (lower === 'inactive' || lower === 'disabled') return 'disabled';
+  if (lower === 'testing') return 'testing';
+  return 'draft';
+}
+
+// Convert API parser to frontend Parser type
+export function mapApiParserToParser(apiParser: ApiParser): Parser {
+  return {
+    id: apiParser.id,
+    name: apiParser.name,
+    productId: apiParser.data_source_id,
+    productName: apiParser.product_name ?? undefined,
+    vendorName: apiParser.vendor_name ?? undefined,
+    format: mapParserType(apiParser.parser_type),
+    pattern: apiParser.pattern ?? '',
+    fieldMappings: [],
+    sampleLogs: apiParser.sample_logs ?? [],
+    status: mapParserStatus(apiParser.status),
+    version: apiParser.version,
+    createdAt: apiParser.created_at ? new Date(apiParser.created_at) : new Date(),
+    updatedAt: apiParser.updated_at ? new Date(apiParser.updated_at) : new Date(),
+  };
+}
 
 // Simulate Grok pattern parsing for test results
 const grokPatternFields: Record<string, string[]> = {
@@ -211,52 +61,91 @@ const grokPatternFields: Record<string, string[]> = {
 };
 
 export function useParsers() {
-  const [parsers, setParsers] = useState<Parser[]>(mockParsers);
+  const [parsers, setParsers] = useState<Parser[]>([]);
   const [selectedParser, setSelectedParser] = useState<Parser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  const createParser = useCallback((parser: Omit<Parser, 'id' | 'version' | 'createdAt' | 'updatedAt'>) => {
-    const newParser: Parser = {
-      ...parser,
-      id: `parser-${Date.now()}`,
-      version: 1,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+
+    fetchParsers()
+      .then((data) => {
+        if (!cancelled) {
+          setParsers(data.map(mapApiParserToParser));
+          setIsLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err : new Error('Failed to fetch parsers'));
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
     };
-    setParsers((prev) => [...prev, newParser]);
-    return newParser;
   }, []);
 
-  const updateParser = useCallback((id: string, updates: Partial<Parser>) => {
-    setParsers((prev) =>
-      prev.map((p) =>
-        p.id === id
-          ? { ...p, ...updates, version: p.version + 1, updatedAt: new Date() }
-          : p
-      )
-    );
+  const createParser = useCallback(async (parser: Omit<Parser, 'id' | 'version' | 'createdAt' | 'updatedAt'>) => {
+    const created = await apiCreateParser({
+      data_source_id: parser.productId ?? '',
+      name: parser.name,
+      parser_type: parser.format,
+      pattern: parser.pattern || null,
+      parser_config: null,
+      field_mapping: null,
+      sample_logs: parser.sampleLogs.length > 0 ? parser.sampleLogs : null,
+      status: parser.status === 'active' ? 'ACTIVE' : parser.status === 'disabled' ? 'INACTIVE' : 'DRAFT',
+    });
+    const mapped = mapApiParserToParser(created);
+    setParsers((prev) => [...prev, mapped]);
+    return mapped;
   }, []);
 
-  const deleteParser = useCallback((id: string) => {
+  const updateParser = useCallback(async (id: string, updates: Partial<Parser>) => {
+    const apiUpdates: Record<string, unknown> = {};
+    if (updates.name !== undefined) apiUpdates.name = updates.name;
+    if (updates.format !== undefined) apiUpdates.parser_type = updates.format;
+    if (updates.pattern !== undefined) apiUpdates.pattern = updates.pattern;
+    if (updates.sampleLogs !== undefined) apiUpdates.sample_logs = updates.sampleLogs;
+    if (updates.status !== undefined) {
+      apiUpdates.status = updates.status === 'active' ? 'ACTIVE' : updates.status === 'disabled' ? 'INACTIVE' : updates.status.toUpperCase();
+    }
+
+    const updated = await apiUpdateParser(id, apiUpdates);
+    const mapped = mapApiParserToParser(updated);
+    setParsers((prev) => prev.map((p) => p.id === id ? mapped : p));
+    return mapped;
+  }, []);
+
+  const deleteParser = useCallback(async (id: string) => {
+    await apiDeleteParser(id);
     setParsers((prev) => prev.filter((p) => p.id !== id));
     if (selectedParser?.id === id) {
       setSelectedParser(null);
     }
   }, [selectedParser]);
 
-  const duplicateParser = useCallback((id: string) => {
+  const duplicateParser = useCallback(async (id: string) => {
     const parser = parsers.find((p) => p.id === id);
     if (parser) {
-      const newParser: Parser = {
-        ...parser,
-        id: `parser-${Date.now()}`,
+      const created = await apiCreateParser({
+        data_source_id: parser.productId ?? '',
         name: `${parser.name} (Copy)`,
-        status: 'draft',
-        version: 1,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      setParsers((prev) => [...prev, newParser]);
-      return newParser;
+        parser_type: parser.format,
+        pattern: parser.pattern || null,
+        parser_config: null,
+        field_mapping: null,
+        sample_logs: parser.sampleLogs.length > 0 ? parser.sampleLogs : null,
+        status: 'DRAFT',
+      });
+      const mapped = mapApiParserToParser(created);
+      setParsers((prev) => [...prev, mapped]);
+      return mapped;
     }
     return null;
   }, [parsers]);
@@ -269,6 +158,67 @@ export function useParsers() {
     updateParser,
     deleteParser,
     duplicateParser,
+    isLoading,
+    error,
+  };
+}
+
+export function useProductParsers(productId: string) {
+  const [parsers, setParsers] = useState<Parser[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const refetch = useCallback(() => {
+    if (!productId) {
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+
+    fetchProductParsers(productId)
+      .then((data) => {
+        setParsers(data.map(mapApiParserToParser));
+        setIsLoading(false);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err : new Error('Failed to fetch product parsers'));
+        setIsLoading(false);
+      });
+  }, [productId]);
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+
+  const createParser = useCallback(async (name: string, format: Parser['format']) => {
+    const created = await apiCreateParser({
+      data_source_id: productId,
+      name,
+      parser_type: format,
+      pattern: null,
+      parser_config: null,
+      field_mapping: null,
+      sample_logs: null,
+      status: 'DRAFT',
+    });
+    const mapped = mapApiParserToParser(created);
+    setParsers((prev) => [...prev, mapped]);
+    return mapped;
+  }, [productId]);
+
+  const deleteParser = useCallback(async (id: string) => {
+    await apiDeleteParser(id);
+    setParsers((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
+  return {
+    parsers,
+    isLoading,
+    error,
+    refetch,
+    createParser,
+    deleteParser,
   };
 }
 
@@ -312,7 +262,7 @@ export function useParserTest() {
           break;
         case 'json':
           try {
-            const parsed = JSON.parse(sampleLog);
+            const parsed = JSON.parse(sampleLog) as Record<string, unknown>;
             matchedFields = Object.keys(parsed).slice(0, 8);
             extractedData = parsed;
           } catch {
@@ -328,7 +278,7 @@ export function useParserTest() {
         case 'regex':
           matchedFields = grokPatternFields.NGINX || [];
           break;
-        case 'kv':
+        case 'kv': {
           matchedFields = grokPatternFields.KV || [];
           const kvPairs = sampleLog.match(/(\w+)=([^\s]+)/g) || [];
           kvPairs.forEach((pair) => {
@@ -340,6 +290,7 @@ export function useParserTest() {
             }
           });
           break;
+        }
       }
 
       // Generate mock extracted data if not already set

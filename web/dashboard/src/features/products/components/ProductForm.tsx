@@ -17,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Product, ProductFormData, ProductCategory, ProductStatus } from '../types';
 import { useVendors, categoryLabels, categoryColors, statusLabels, statusColors } from '../hooks/useProducts';
@@ -35,18 +34,15 @@ const initialFormData: ProductFormData = {
   version: '',
   category: 'siem',
   status: 'active',
-  logFormats: [],
   description: '',
 };
 
 const categoryOptions: ProductCategory[] = ['siem', 'edr', 'firewall', 'iam', 'dlp', 'ndr', 'custom'];
 const statusOptions: ProductStatus[] = ['active', 'inactive', 'deprecated'];
-const commonLogFormats = ['JSON', 'Syslog', 'CEF', 'LEEF', 'CSV', 'XML', 'ECS'];
 
 export function ProductForm({ open, onOpenChange, product, onSubmit }: ProductFormProps) {
   const { vendors } = useVendors();
   const [formData, setFormData] = useState<ProductFormData>(initialFormData);
-  const [newLogFormat, setNewLogFormat] = useState('');
   const [errors, setErrors] = useState<Partial<Record<keyof ProductFormData, string>>>({});
 
   const isEditMode = !!product;
@@ -59,7 +55,6 @@ export function ProductForm({ open, onOpenChange, product, onSubmit }: ProductFo
         version: product.version,
         category: product.category,
         status: product.status,
-        logFormats: [...product.logFormats],
         description: product.description || '',
       });
     } else {
@@ -83,10 +78,6 @@ export function ProductForm({ open, onOpenChange, product, onSubmit }: ProductFo
       newErrors.version = 'Version is required';
     }
 
-    if (formData.logFormats.length === 0) {
-      newErrors.logFormats = 'At least one log format is required';
-    }
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -96,31 +87,6 @@ export function ProductForm({ open, onOpenChange, product, onSubmit }: ProductFo
     if (validateForm()) {
       onSubmit(formData);
       onOpenChange(false);
-    }
-  };
-
-  const addLogFormat = (format: string) => {
-    const trimmedFormat = format.trim().toUpperCase();
-    if (trimmedFormat && !formData.logFormats.includes(trimmedFormat)) {
-      setFormData((prev) => ({
-        ...prev,
-        logFormats: [...prev.logFormats, trimmedFormat],
-      }));
-      setNewLogFormat('');
-    }
-  };
-
-  const removeLogFormat = (format: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      logFormats: prev.logFormats.filter((f) => f !== format),
-    }));
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      addLogFormat(newLogFormat);
     }
   };
 
@@ -236,66 +202,6 @@ export function ProductForm({ open, onOpenChange, product, onSubmit }: ProductFo
             </div>
           </div>
 
-          {/* Log Formats */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Log Formats *</label>
-            <div className="flex flex-wrap gap-2 mb-2">
-              {formData.logFormats.map((format) => (
-                <Badge
-                  key={format}
-                  variant="outline"
-                  className="bg-primary/10 text-primary border-primary/30 pr-1"
-                >
-                  {format}
-                  <button
-                    type="button"
-                    onClick={() => removeLogFormat(format)}
-                    className="ml-1 hover:bg-primary/20 rounded p-0.5"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <Input
-                value={newLogFormat}
-                onChange={(e) => setNewLogFormat(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Add log format..."
-                className="flex-1"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => addLogFormat(newLogFormat)}
-                disabled={!newLogFormat.trim()}
-              >
-                Add
-              </Button>
-            </div>
-            <div className="flex flex-wrap gap-1 mt-2">
-              <span className="text-xs text-muted-foreground mr-1">Quick add:</span>
-              {commonLogFormats
-                .filter((f) => !formData.logFormats.includes(f))
-                .slice(0, 5)
-                .map((format) => (
-                  <button
-                    key={format}
-                    type="button"
-                    onClick={() => addLogFormat(format)}
-                    className="text-xs text-primary hover:underline"
-                  >
-                    +{format}
-                  </button>
-                ))}
-            </div>
-            {errors.logFormats && (
-              <p className="text-xs text-red-400">{errors.logFormats}</p>
-            )}
-          </div>
-
           {/* Description */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Description</label>
@@ -306,6 +212,13 @@ export function ProductForm({ open, onOpenChange, product, onSubmit }: ProductFo
               rows={3}
             />
           </div>
+
+          {/* Parsers note (edit mode only) */}
+          {isEditMode && (
+            <div className="text-sm text-muted-foreground bg-muted/30 p-3 rounded-md">
+              <p>Parsers are managed separately in the product detail view.</p>
+            </div>
+          )}
 
           <DialogFooter className="pt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

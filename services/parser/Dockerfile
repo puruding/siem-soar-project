@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
@@ -16,7 +16,7 @@ RUN go mod download || true
 COPY services/parser/ ./
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /parser .
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /parser .
 
 # Final stage
 FROM alpine:3.19

@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -9,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ScrollArea } from '@/components/ui/scroll-area';
+// ScrollArea removed - using native overflow-auto for better height calculation
 import { Switch } from '@/components/ui/switch';
 import {
   Table,
@@ -40,8 +41,8 @@ import { ATTACK_TACTICS, STATUS_STYLES, SEVERITY_COLORS } from '../types';
 
 interface RuleListProps {
   rules: SigmaRule[];
-  selectedRule: SigmaRule | null;
-  onSelectRule: (rule: SigmaRule) => void;
+  selectedRule?: SigmaRule | null;
+  onSelectRule?: (rule: SigmaRule) => void;
   onToggleEnabled: (ruleId: string) => void;
   filters: {
     search: string;
@@ -56,6 +57,7 @@ interface RuleListProps {
     tactic: string;
   }) => void;
   onCreateRule?: () => void;
+  navigateToDetail?: boolean;
 }
 
 export function RuleList({
@@ -66,7 +68,9 @@ export function RuleList({
   filters,
   onFiltersChange,
   onCreateRule,
+  navigateToDetail = true,
 }: RuleListProps) {
+  const navigate = useNavigate();
   const severityBadgeVariant = (
     severity: SigmaRule['severity']
   ): 'critical' | 'high' | 'medium' | 'low' | 'info' => {
@@ -75,7 +79,7 @@ export function RuleList({
   };
 
   return (
-    <Card className="flex-1 flex flex-col">
+    <Card>
       <CardHeader className="pb-4 space-y-4">
         {/* Filters */}
         <div className="flex items-center gap-4">
@@ -167,8 +171,16 @@ export function RuleList({
           </span>
         </div>
       </CardHeader>
-      <CardContent className="flex-1 min-h-0">
-        <ScrollArea className="h-full">
+      <CardContent className="p-0">
+        <div
+          className="px-6 pb-6"
+          style={{
+            height: '350px',
+            overflowY: 'scroll',
+            scrollbarWidth: 'thin',
+            scrollbarColor: '#888 #333'
+          }}
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -187,10 +199,16 @@ export function RuleList({
                 <TableRow
                   key={rule.id}
                   className={cn(
-                    'cursor-pointer',
+                    'cursor-pointer hover:bg-muted/50',
                     selectedRule?.id === rule.id && 'bg-primary/5'
                   )}
-                  onClick={() => onSelectRule(rule)}
+                  onClick={() => {
+                    if (navigateToDetail) {
+                      navigate(`/rules/${rule.id}`);
+                    } else if (onSelectRule) {
+                      onSelectRule(rule);
+                    }
+                  }}
                 >
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <TooltipProvider>
@@ -275,7 +293,7 @@ export function RuleList({
               ))}
             </TableBody>
           </Table>
-        </ScrollArea>
+        </div>
       </CardContent>
     </Card>
   );

@@ -115,12 +115,12 @@ export function AttackMatrix({
         <CollapsibleContent>
           <CardContent className="pt-0">
             <ScrollArea className="w-full overflow-x-auto">
-              <div className="min-w-max">
+              <div className="w-full min-w-[900px]">
                 {/* Tactic Headers */}
                 <div
                   className="grid gap-1 mb-2"
                   style={{
-                    gridTemplateColumns: `repeat(${matrixData.length}, minmax(120px, 1fr))`,
+                    gridTemplateColumns: `repeat(${matrixData.length}, minmax(0, 1fr))`,
                   }}
                 >
                   {matrixData.map((column) => (
@@ -155,9 +155,9 @@ export function AttackMatrix({
 
                 {/* Technique Grid */}
                 <div
-                  className="grid gap-1"
+                  className="grid gap-1 items-start"
                   style={{
-                    gridTemplateColumns: `repeat(${matrixData.length}, minmax(120px, 1fr))`,
+                    gridTemplateColumns: `repeat(${matrixData.length}, minmax(0, 1fr))`,
                   }}
                 >
                   {matrixData.map((column) => (
@@ -184,10 +184,10 @@ export function AttackMatrix({
                                     isSelected
                                       ? 'border-primary bg-primary/20 ring-1 ring-primary'
                                       : hasRules
-                                      ? highCoverage
-                                        ? 'bg-primary/30 border-primary/40'
-                                        : 'bg-primary/15 border-primary/30'
-                                      : 'bg-muted/20 border-border hover:bg-muted/30'
+                                        ? highCoverage
+                                          ? 'bg-primary/30 border-primary/40'
+                                          : 'bg-primary/15 border-primary/30'
+                                        : 'bg-muted/20 border-border hover:bg-muted/30'
                                   )}
                                 >
                                   <p
@@ -232,16 +232,11 @@ export function AttackMatrix({
                                         {technique.ruleCount} rule(s):
                                       </p>
                                       <ul className="text-xs space-y-0.5">
-                                        {technique.rules.slice(0, 3).map((rule) => (
+                                        {technique.rules.map((rule) => (
                                           <li key={rule.id} className="truncate">
                                             - {rule.title}
                                           </li>
                                         ))}
-                                        {technique.rules.length > 3 && (
-                                          <li className="text-muted-foreground">
-                                            +{technique.rules.length - 3} more
-                                          </li>
-                                        )}
                                       </ul>
                                     </div>
                                   ) : (
@@ -250,9 +245,8 @@ export function AttackMatrix({
                                     </p>
                                   )}
                                   <a
-                                    href={`https://attack.mitre.org/techniques/${technique.id}${
-                                      technique.subtechnique ? `/${technique.subtechnique}` : ''
-                                    }/`}
+                                    href={`https://attack.mitre.org/techniques/${technique.id}${technique.subtechnique ? `/${technique.subtechnique}` : ''
+                                      }/`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="flex items-center gap-1 text-xs text-primary hover:underline"

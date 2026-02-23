@@ -8,6 +8,8 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import Field
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from starlette.responses import Response
 
 from common import get_logger, get_settings, setup_logging
 from common.models import BaseModel, BaseRequest, BaseResponse, HealthResponse
@@ -20,6 +22,18 @@ from .context import ContextManager, ContextType
 
 settings = get_settings()
 logger = get_logger(__name__)
+
+# Prometheus metrics
+REQUEST_COUNT = Counter(
+    "copilot_requests_total",
+    "Total copilot requests",
+    ["endpoint", "status"]
+)
+REQUEST_LATENCY = Histogram(
+    "copilot_request_latency_seconds",
+    "Request latency in seconds",
+    ["endpoint"]
+)
 
 
 class QueryType(str, Enum):
@@ -165,6 +179,12 @@ async def health_check() -> HealthResponse:
             "recommend_service": recommend_service is not None,
         },
     )
+
+
+@app.get("/metrics")
+async def metrics():
+    """Expose Prometheus metrics."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.post("/api/v1/chat", response_model=BaseResponse[CopilotResponse])

@@ -15,7 +15,9 @@ export interface TestResult {
 export interface Parser {
   id: string;
   name: string;
-  productId?: string;
+  productId?: string;        // data_source_id
+  productName?: string;      // For display
+  vendorName?: string;       // For display
   format: 'grok' | 'json' | 'cef' | 'leef' | 'regex' | 'kv';
   pattern: string;
   fieldMappings: FieldMapping[];

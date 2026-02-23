@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -50,16 +50,41 @@ import {
   PieChartIcon,
   LineChartIcon,
   LayoutGrid,
+  XCircle,
+  Timer,
 } from 'lucide-react';
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { formatDuration } from '@/lib/utils';
 import { CopilotChat, CopilotConfig } from '@/features/copilot/components/CopilotChat';
 import { QueryResultData } from '@/features/copilot/components/QueryResult';
 import { useToast } from '@/components/ui/toaster';
+import {
+  executeQuery,
+  getQueryHistory,
+  getSavedQueries,
+  saveQuery,
+  deleteSavedQuery,
+  getSchema,
+  validateQuery,
+  downloadQueryResults,
+  rowsToObjects,
+  type QueryHistoryItem as ApiQueryHistoryItem,
+  type SavedQuery as ApiSavedQuery,
+  type SchemaTable as ApiSchemaTable,
+  type QueryLanguage,
+} from '../api/queryApi';
 
 const defaultQuery = `-- Query security events from ClickHouse
 SELECT
@@ -103,33 +128,118 @@ const mockDataStore: Record<string, Record<string, unknown>[]> = {
   ],
 };
 
+// Extract date/time parts from a datetime string (handles ClickHouse toHour/toDate etc.)
+function extractDatePart(dateStr: string, part: 'hour' | 'date' | 'month' | 'year' | 'dayofweek'): string | number {
+  try {
+    const date = new Date(dateStr.replace(' ', 'T'));
+    switch (part) {
+      case 'hour':
+        return date.getHours();
+      case 'date':
+        return date.toISOString().split('T')[0] ?? dateStr;
+      case 'month':
+        return date.getMonth() + 1;
+      case 'year':
+        return date.getFullYear();
+      case 'dayofweek':
+        return date.getDay();
+      default:
+        return dateStr;
+    }
+  } catch {
+    return 'unknown';
+  }
+}
+
 // Parse SQL query and generate mock results
 function generateMockResults(sqlQuery: string): Record<string, unknown>[] {
-  const normalizedQuery = sqlQuery.replace(/\s+/g, ' ').trim().toLowerCase();
+  // Remove SQL comments before parsing
+  const queryWithoutComments = sqlQuery
+    .replace(/--.*$/gm, '')           // Remove single-line comments (-- ...)
+    .replace(/\/\*[\s\S]*?\*\//g, ''); // Remove multi-line comments (/* ... */)
+
+  const normalizedQuery = queryWithoutComments.replace(/\s+/g, ' ').trim().toLowerCase();
 
   // Extract table name
   const fromMatch = normalizedQuery.match(/from\s+(\w+)/i);
   const tableName = fromMatch?.[1]?.toLowerCase() ?? 'events';
 
-  // Get base data for the table
-  const baseData = mockDataStore[tableName] ?? mockDataStore.events ?? [];
+  // Check table existence
+  const validTables = Object.keys(mockDataStore);
+  if (!validTables.includes(tableName)) {
+    throw new Error(`Table '${tableName}' does not exist. Available tables: ${validTables.join(', ')}`);
+  }
 
-  // Check if it's a COUNT query
+  // Get base data for the table
+  const baseData = mockDataStore[tableName];
+
+  // Guard against undefined baseData
+  if (!baseData) {
+    throw new Error(`No data found for table '${tableName}'`);
+  }
+
+  // Check if it's a COUNT query with GROUP BY
   if (normalizedQuery.includes('count(*)') || normalizedQuery.includes('count(1)')) {
-    // Check for GROUP BY
-    const groupByMatch = normalizedQuery.match(/group\s+by\s+(\w+)/i);
+    const groupByMatch = normalizedQuery.match(/group\s+by\s+([\w,\s]+?)(?=\s+order\s|\s+limit\s|\s+having\s|\s*$)/i);
+
     if (groupByMatch?.[1]) {
-      const groupByColumn = groupByMatch[1];
+      const groupByColumn = groupByMatch[1].trim();
+
+      // Check for function aliases in SELECT clause
+      // e.g., toHour(event_time) as hour → need to apply toHour to event_time
+      const selectClause = normalizedQuery.match(/select\s+([\s\S]+?)\s+from/i)?.[1] || '';
+
+      // Parse function mappings: toHour(col) as alias, toDate(col) as alias
+      const functionMappings: Record<string, { func: string; column: string }> = {};
+      const funcPattern = /to(hour|date|month|year|dayofweek)\s*\(\s*(\w+)\s*\)\s+as\s+(\w+)/gi;
+      let funcMatch;
+      while ((funcMatch = funcPattern.exec(selectClause)) !== null) {
+        const funcName = (funcMatch[1] ?? '').toLowerCase();
+        const sourceColumn = funcMatch[2] ?? '';
+        const alias = (funcMatch[3] ?? '').toLowerCase();
+        if (funcName && sourceColumn && alias) {
+          functionMappings[alias] = { func: funcName, column: sourceColumn };
+        }
+      }
+
       const grouped: Record<string, number> = {};
       baseData.forEach((row) => {
-        const key = String(row[groupByColumn] ?? 'unknown');
-        grouped[key] = (grouped[key] ?? 0) + 1;
+        let key: string | number;
+
+        // Check if groupByColumn is a function alias
+        if (functionMappings[groupByColumn]) {
+          const { func, column } = functionMappings[groupByColumn];
+          const sourceValue = String(row[column] ?? '');
+          key = extractDatePart(sourceValue, func as 'hour' | 'date' | 'month' | 'year' | 'dayofweek');
+        } else {
+          // Direct column access
+          key = String(row[groupByColumn] ?? 'unknown');
+        }
+
+        const keyStr = String(key);
+        grouped[keyStr] = (grouped[keyStr] ?? 0) + 1;
       });
-      return Object.entries(grouped).map(([key, count]) => ({
-        [groupByColumn]: key,
-        count: count,
+
+      // Sort results numerically if possible, otherwise alphabetically
+      const sortedEntries = Object.entries(grouped).sort((a, b) => {
+        const aNum = Number(a[0]);
+        const bNum = Number(b[0]);
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+          return aNum - bNum;
+        }
+        return a[0].localeCompare(b[0]);
+      });
+
+      // Use the alias from SELECT if available (e.g., error_count instead of count)
+      const countAliasMatch = selectClause.match(/count\s*\(\s*\*\s*\)\s+as\s+(\w+)/i);
+      const countAlias = countAliasMatch?.[1] || 'count';
+
+      return sortedEntries.map(([key, count]) => ({
+        [groupByColumn]: isNaN(Number(key)) ? key : Number(key),
+        [countAlias]: count,
       }));
     }
+
     return [{ count: baseData.length }];
   }
 
@@ -206,34 +316,16 @@ function generateMockResults(sqlQuery: string): Record<string, unknown>[] {
   return filteredData;
 }
 
-const savedQueries = [
-  {
-    id: '1',
-    name: 'Critical Alerts - Last Hour',
-    query: 'SELECT * FROM alerts WHERE severity = "critical" AND ...',
-    updated: '2h ago',
-  },
-  {
-    id: '2',
-    name: 'Failed Login Attempts',
-    query: 'SELECT * FROM events WHERE event_type = "failed_login" ...',
-    updated: '1d ago',
-  },
-  {
-    id: '3',
-    name: 'Network Traffic Analysis',
-    query: 'SELECT source_ip, destination_ip, COUNT(*) ...',
-    updated: '3d ago',
-  },
-];
-
-const queryHistory = [
+// Default query history (used as fallback when localStorage is empty)
+const queryHistory: LocalQueryHistoryItem[] = [
   {
     id: '1',
     query: 'SELECT * FROM events WHERE severity = "critical" LIMIT 100',
     duration: 245,
     rows: 47,
     time: '5m ago',
+    timestamp: Date.now() - 5 * 60 * 1000,
+    language: 'sql',
   },
   {
     id: '2',
@@ -241,6 +333,8 @@ const queryHistory = [
     duration: 89,
     rows: 4,
     time: '15m ago',
+    timestamp: Date.now() - 15 * 60 * 1000,
+    language: 'sql',
   },
   {
     id: '3',
@@ -248,6 +342,8 @@ const queryHistory = [
     duration: 156,
     rows: 23,
     time: '1h ago',
+    timestamp: Date.now() - 60 * 60 * 1000,
+    language: 'sql',
   },
 ];
 
@@ -395,21 +491,156 @@ const copilotConfig: CopilotConfig = {
 
 // API configuration
 const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true' || !import.meta.env.VITE_QUERY_API_URL;
-const QUERY_API_URL = import.meta.env.VITE_QUERY_API_URL || '/api/v1/query';
 
-interface QueryHistoryItem {
+// Local history item type (extended from API type for UI state)
+interface LocalQueryHistoryItem {
   id: string;
   query: string;
   duration: number;
   rows: number;
   time: string;
   timestamp: number;
+  language?: QueryLanguage;
 }
 
 interface QueryError {
   message: string;
   code?: string;
   details?: string;
+}
+
+interface LocalValidationError {
+  code: string;
+  message: string;
+  position?: number;
+  line?: number;
+  severity: 'error' | 'warning';
+}
+
+// Client-side SQL syntax validator
+function validateSQLLocal(sql: string): LocalValidationError[] {
+  const errors: LocalValidationError[] = [];
+  const trimmed = sql.trim();
+
+  if (!trimmed) return errors;
+
+  // Strip comment lines for keyword analysis
+  const withoutComments = trimmed
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
+
+  const upper = withoutComments.toUpperCase().replace(/\s+/g, ' ').trim();
+
+  // Must start with a valid DML/DDL keyword
+  const validStartKeywords = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'WITH', 'EXPLAIN', 'SHOW', 'DESCRIBE', 'DESC', 'CREATE', 'DROP', 'ALTER', 'TRUNCATE'];
+  const startsWithValid = validStartKeywords.some((kw) => upper.startsWith(kw));
+
+  if (!startsWithValid) {
+    // Try to detect common typos like SELEC, SLECT, etc.
+    const firstWord = upper.split(/\s+/)[0] ?? '';
+    errors.push({
+      code: 'INVALID_KEYWORD',
+      message: `Syntax error at line 1, position 0: Unknown keyword '${firstWord}'`,
+      line: 1,
+      position: 0,
+      severity: 'error',
+    });
+    return errors;
+  }
+
+  // For SELECT queries: require FROM clause (unless SELECT 1 / SELECT now() style)
+  if (upper.startsWith('SELECT')) {
+    const hasFrom = /\bFROM\b/.test(upper);
+    const hasSubqueryOrConst = /^SELECT\s+[\d'"]/.test(upper) || /^SELECT\s+\w+\s*\(/.test(upper);
+
+    if (!hasFrom && !hasSubqueryOrConst) {
+      // Find approximate line number of FROM absence
+      errors.push({
+        code: 'MISSING_FROM',
+        message: "Syntax error: SELECT statement is missing a FROM clause",
+        severity: 'error',
+      });
+    }
+
+    // Check for unbalanced parentheses
+    let depth = 0;
+    let errorPos: number | undefined;
+    for (let i = 0; i < trimmed.length; i++) {
+      if (trimmed[i] === '(') depth++;
+      else if (trimmed[i] === ')') {
+        depth--;
+        if (depth < 0) {
+          errorPos = i;
+          break;
+        }
+      }
+    }
+    if (depth !== 0 || errorPos !== undefined) {
+      const lines = trimmed.substring(0, errorPos ?? trimmed.length).split('\n');
+      errors.push({
+        code: 'UNBALANCED_PARENS',
+        message: `Syntax error: Unbalanced parentheses${errorPos !== undefined ? ` at position ${errorPos}` : ''}`,
+        line: lines.length,
+        position: errorPos,
+        severity: 'error',
+      });
+    }
+
+    // Warn about SELECT * in large queries
+    if (/SELECT\s+\*/.test(upper) && /WHERE/.test(upper) === false) {
+      errors.push({
+        code: 'SELECT_STAR_NO_WHERE',
+        message: "Warning: SELECT * without WHERE clause may return very large result sets",
+        severity: 'warning',
+      });
+    }
+  }
+
+  // Check for unknown table names in FROM clause
+  const tableMatch = withoutComments.match(/from\s+(\w+)/i);
+  if (tableMatch?.[1]) {
+    const tableName = tableMatch[1].toLowerCase();
+    const knownTables = ['events', 'alerts', 'cases', 'assets', 'users', 'threats', 'logs', 'network_flows', 'threat_intel'];
+    if (!knownTables.includes(tableName)) {
+      const normalizedForPos = withoutComments.toUpperCase().replace(/\s+/g, ' ').trim();
+      errors.push({
+        code: 'UNKNOWN_TABLE',
+        message: `Unknown table '${tableMatch[1]}'. Known tables: ${knownTables.join(', ')}`,
+        severity: 'error',
+        line: 1,
+        position: normalizedForPos.indexOf(tableMatch[1].toUpperCase()) + 1,
+      });
+    }
+  }
+
+  // Check for common misspelled keywords (nearby to valid keywords)
+  const misspellings: Array<{ pattern: RegExp; suggestion: string; keyword: string }> = [
+    { pattern: /\bSELEC\b/, suggestion: 'SELECT', keyword: 'SELEC' },
+    { pattern: /\bSELECT\b.*\bFROM\b.*\bWHER\b(?!E)/, suggestion: 'WHERE', keyword: 'WHER' },
+    { pattern: /\bFRON\b/, suggestion: 'FROM', keyword: 'FRON' },
+    { pattern: /\bORDED\b/, suggestion: 'ORDER', keyword: 'ORDED' },
+    { pattern: /\bGROUB\b/, suggestion: 'GROUP', keyword: 'GROUB' },
+    { pattern: /\bHAVING\b.*\bWHEEE\b/, suggestion: 'WHERE', keyword: 'WHEEE' },
+    { pattern: /\bLIMT\b/, suggestion: 'LIMIT', keyword: 'LIMT' },
+    { pattern: /\bINSERT\s+INOT\b/, suggestion: 'INTO', keyword: 'INOT' },
+  ];
+
+  for (const { pattern, suggestion, keyword } of misspellings) {
+    if (pattern.test(upper)) {
+      const idx = upper.indexOf(keyword);
+      const linesBefore = trimmed.substring(0, idx).split('\n');
+      errors.push({
+        code: 'MISSPELLED_KEYWORD',
+        message: `Syntax error: Unknown keyword '${keyword}'. Did you mean '${suggestion}'?`,
+        line: linesBefore.length,
+        position: idx,
+        severity: 'error',
+      });
+    }
+  }
+
+  return errors;
 }
 
 export function QueryConsole() {
@@ -425,11 +656,14 @@ export function QueryConsole() {
   const [showSchema, setShowSchema] = useState(false);
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set(['events']));
   const [error, setError] = useState<QueryError | null>(null);
-  const [localHistory, setLocalHistory] = useState<QueryHistoryItem[]>(() => {
+  const [localHistory, setLocalHistory] = useState<LocalQueryHistoryItem[]>(() => {
     // Load history from localStorage
     const saved = localStorage.getItem('query-history');
     return saved ? JSON.parse(saved) : queryHistory;
   });
+  const [savedQueriesState, setSavedQueriesState] = useState<ApiSavedQuery[]>([]);
+  const [isLoadingSaved, setIsLoadingSaved] = useState(false);
+  const [queryLanguage, setQueryLanguage] = useState<QueryLanguage>('sql');
 
   // NL2SQL state
   const [nlQuery, setNlQuery] = useState('');
@@ -439,9 +673,18 @@ export function QueryConsole() {
     explanation: string;
   } | null>(null);
 
+  // Validation state
+  const [validationErrors, setValidationErrors] = useState<LocalValidationError[]>([]);
+
   // Visualization state
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
   const [chartType, setChartType] = useState<'bar' | 'pie' | 'line'>('bar');
+
+  // Timeout and cancellation state
+  const [queryTimeout, setQueryTimeout] = useState<number>(30);
+  const [elapsedTime, setElapsedTime] = useState<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const elapsedIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Read URL query parameters on mount
   useEffect(() => {
@@ -463,17 +706,82 @@ export function QueryConsole() {
     localStorage.setItem('query-history', JSON.stringify(localHistory));
   }, [localHistory]);
 
-  const addToHistory = useCallback((queryText: string, duration: number, rows: number) => {
-    const newEntry: QueryHistoryItem = {
+  // Debounced client-side SQL validation (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!query.trim()) {
+        setValidationErrors([]);
+        return;
+      }
+      const errors = validateSQLLocal(query);
+      setValidationErrors(errors);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  // Load saved queries from API
+  useEffect(() => {
+    const loadSavedQueries = async () => {
+      setIsLoadingSaved(true);
+      try {
+        const response = await getSavedQueries();
+        if (response.success && response.data) {
+          setSavedQueriesState(response.data.items ?? []);
+        }
+      } catch (err) {
+        console.error('Failed to load saved queries:', err);
+      } finally {
+        setIsLoadingSaved(false);
+      }
+    };
+    loadSavedQueries();
+  }, []);
+
+  // Elapsed time tracking during query execution
+  useEffect(() => {
+    if (isRunning) {
+      setElapsedTime(0);
+      elapsedIntervalRef.current = setInterval(() => {
+        setElapsedTime(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (elapsedIntervalRef.current) {
+        clearInterval(elapsedIntervalRef.current);
+        elapsedIntervalRef.current = null;
+      }
+    }
+    return () => {
+      if (elapsedIntervalRef.current) {
+        clearInterval(elapsedIntervalRef.current);
+      }
+    };
+  }, [isRunning]);
+
+  const addToHistory = useCallback((queryText: string, duration: number, rows: number, language: QueryLanguage = 'sql') => {
+    const newEntry: LocalQueryHistoryItem = {
       id: Date.now().toString(),
       query: queryText,
       duration,
       rows,
       time: 'just now',
       timestamp: Date.now(),
+      language,
     };
     setLocalHistory((prev) => [newEntry, ...prev.slice(0, 49)]); // Keep last 50 queries
   }, []);
+
+  // Cancel query execution
+  const cancelQuery = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsRunning(false);
+      toast({
+        title: 'Query Cancelled',
+        description: 'Query execution was cancelled by user.',
+      });
+    }
+  }, [toast]);
 
   // NL2SQL conversion function
   const convertNL2SQL = useCallback(async () => {
@@ -643,6 +951,82 @@ ORDER BY event_time DESC
 LIMIT 100`;
     }
 
+    // Time-based error/event count (hourly analysis)
+    if ((lower.includes('시간대별') || lower.includes('hourly') || lower.includes('by hour') || lower.includes('시간별')) &&
+        (lower.includes('오류') || lower.includes('에러') || lower.includes('error'))) {
+      let timeFilter = 'event_time >= now() - INTERVAL 1 DAY';
+      if (lower.includes('한달') || lower.includes('1개월') || lower.includes('month')) {
+        timeFilter = 'event_time >= now() - INTERVAL 1 MONTH';
+      } else if (lower.includes('일주일') || lower.includes('1주') || lower.includes('week')) {
+        timeFilter = 'event_time >= now() - INTERVAL 1 WEEK';
+      }
+
+      return `SELECT
+  toHour(event_time) as hour,
+  COUNT(*) as error_count
+FROM events
+WHERE ${timeFilter}
+  AND (event_type LIKE '%error%' OR severity IN ('critical', 'high'))
+GROUP BY hour
+ORDER BY hour`;
+    }
+
+    // Daily error/event count
+    if ((lower.includes('일별') || lower.includes('daily') || lower.includes('날짜별') || lower.includes('일자별')) &&
+        (lower.includes('오류') || lower.includes('에러') || lower.includes('error') || lower.includes('발생'))) {
+      let timeFilter = 'event_time >= now() - INTERVAL 1 MONTH';
+      if (lower.includes('일주일') || lower.includes('1주') || lower.includes('week')) {
+        timeFilter = 'event_time >= now() - INTERVAL 1 WEEK';
+      }
+
+      return `SELECT
+  toDate(event_time) as date,
+  COUNT(*) as error_count
+FROM events
+WHERE ${timeFilter}
+  AND (event_type LIKE '%error%' OR severity IN ('critical', 'high'))
+GROUP BY date
+ORDER BY date`;
+    }
+
+    // Last month
+    if (lower.includes('한달') || lower.includes('1개월') || lower.includes('last month') || lower.includes('지난달')) {
+      return `SELECT id, event_time, event_type, source_ip, severity, description
+FROM events
+WHERE event_time >= now() - INTERVAL 1 MONTH
+ORDER BY event_time DESC
+LIMIT 100`;
+    }
+
+    // Last week
+    if (lower.includes('일주일') || lower.includes('1주') || lower.includes('last week') || lower.includes('지난주')) {
+      return `SELECT id, event_time, event_type, source_ip, severity, description
+FROM events
+WHERE event_time >= now() - INTERVAL 1 WEEK
+ORDER BY event_time DESC
+LIMIT 100`;
+    }
+
+    // Error events
+    if (lower.includes('오류') || lower.includes('에러') || lower.includes('error')) {
+      return `SELECT id, event_time, event_type, source_ip, severity, description
+FROM events
+WHERE event_type LIKE '%error%' OR severity IN ('critical', 'high')
+ORDER BY event_time DESC
+LIMIT 100`;
+    }
+
+    // Hourly statistics (generic)
+    if (lower.includes('시간대별') || lower.includes('시간별') || lower.includes('hourly') || lower.includes('by hour')) {
+      return `SELECT
+  toHour(event_time) as hour,
+  COUNT(*) as event_count
+FROM events
+WHERE event_time >= now() - INTERVAL 1 DAY
+GROUP BY hour
+ORDER BY hour`;
+    }
+
     // Count by severity
     if (lower.includes('count') || lower.includes('개수') || lower.includes('통계')) {
       return `SELECT severity, COUNT(*) as count
@@ -689,60 +1073,90 @@ LIMIT 100`;
     if (!query.trim()) {
       toast({
         title: 'Empty Query',
-        description: 'Please enter a SQL query to execute.',
+        description: 'Please enter a query to execute.',
         variant: 'destructive',
       });
       return;
     }
 
+    // Double-check validation before execution
+    const preRunErrors = validateSQLLocal(query);
+    const hasErrors = preRunErrors.some((e) => e.severity === 'error');
+    if (hasErrors) {
+      toast({
+        title: 'Syntax Error',
+        description: 'Please fix the syntax errors before running the query.',
+        variant: 'destructive',
+      });
+      setValidationErrors(preRunErrors);
+      return;
+    }
+
+    // Initialize abort controller for cancellation
+    abortControllerRef.current = new AbortController();
     setIsRunning(true);
     setError(null);
     const startTime = performance.now();
 
     try {
       if (USE_MOCK_DATA) {
-        // Simulate query execution with mock data
-        await new Promise((resolve) => setTimeout(resolve, 300 + Math.random() * 500));
+        // Simulate query execution with mock data (cancellable with timeout)
+        // Use longer duration (2-5s) to demonstrate loading UI, progress bar, and cancel functionality
+        const simulatedDuration = 2000 + Math.random() * 3000;
+
+        await Promise.race([
+          new Promise<void>((resolve, reject) => {
+            const timeoutId = setTimeout(resolve, simulatedDuration);
+            abortControllerRef.current?.signal.addEventListener('abort', () => {
+              clearTimeout(timeoutId);
+              reject(new DOMException('Query cancelled', 'AbortError'));
+            });
+          }),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => {
+              reject(new Error(`Query timeout after ${queryTimeout}s`));
+            }, queryTimeout * 1000);
+          }),
+        ]);
+
         const duration = Math.round(performance.now() - startTime);
         const mockResults = generateMockResults(query);
         setResults(mockResults);
         setQueryStats({ duration, rows: mockResults.length });
-        addToHistory(query, duration, mockResults.length);
+        addToHistory(query, duration, mockResults.length, queryLanguage);
         toast({
           title: 'Query Executed',
           description: `Returned ${mockResults.length} rows in ${formatDuration(duration)}`,
         });
       } else {
-        // Make actual API call
-        const response = await fetch(QUERY_API_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            query: query.trim(),
-            timeout: 30000, // 30 second timeout
-            format: 'json',
-          }),
+        // Use the new Query API
+        const response = await executeQuery({
+          query: query.trim(),
+          language: queryLanguage,
+          limit: 1000,
+          timeout: queryTimeout * 1000,
         });
 
         const duration = Math.round(performance.now() - startTime);
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.message || `Query failed with status ${response.status}`);
+        if (!response.success || !response.data) {
+          throw new Error(response.error?.message || 'Query execution failed');
         }
 
-        const data = await response.json();
+        const queryResponse = response.data;
 
-        // Handle different response formats
-        const rows = data.rows || data.data || data.results || [];
-        const totalRows = data.total_rows || data.totalRows || rows.length;
-        const executionTime = data.execution_time || data.executionTime || duration;
+        if (!queryResponse.success) {
+          throw new Error(queryResponse.error || 'Query execution failed');
+        }
+
+        // Convert rows from array format to object format using the helper
+        const rows = rowsToObjects(queryResponse.data.columns, queryResponse.data.rows);
+        const totalRows = queryResponse.data.total;
+        const executionTime = queryResponse.data.executionTimeMs || duration;
 
         setResults(rows);
         setQueryStats({ duration: executionTime, rows: totalRows });
-        addToHistory(query, executionTime, totalRows);
+        addToHistory(query, executionTime, totalRows, queryLanguage);
 
         toast({
           title: 'Query Executed',
@@ -750,20 +1164,32 @@ LIMIT 100`;
         });
       }
     } catch (err) {
+      // Handle abort/cancellation
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // Already handled by cancelQuery, just return
+        return;
+      }
+
+      // Check if it's a timeout error
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      const isTimeoutError = errorMessage.includes('timeout') || errorMessage.includes('Timeout');
+
       setError({
-        message: errorMessage,
-        details: err instanceof Error ? err.stack : undefined,
+        message: isTimeoutError ? `Query timeout after ${queryTimeout}s` : errorMessage,
+        details: isTimeoutError
+          ? 'The query exceeded the configured timeout limit. Try optimizing your query or increasing the timeout.'
+          : err instanceof Error ? err.stack : undefined,
       });
       toast({
-        title: 'Query Failed',
-        description: errorMessage,
+        title: isTimeoutError ? 'Query Timeout' : 'Query Failed',
+        description: isTimeoutError ? `Query exceeded ${queryTimeout}s timeout limit` : errorMessage,
         variant: 'destructive',
       });
     } finally {
       setIsRunning(false);
+      abortControllerRef.current = null;
     }
-  }, [query, toast, addToHistory]);
+  }, [query, queryTimeout, toast, addToHistory]);
 
   const handleQueryResult = useCallback((data: QueryResultData) => {
     // When AI generates a query, update the editor and run it
@@ -788,6 +1214,107 @@ LIMIT 100`;
     }
   }, [runQuery]);
 
+  // Handle saving a query
+  const handleSaveQuery = useCallback(async () => {
+    if (!query.trim()) {
+      toast({
+        title: 'Empty Query',
+        description: 'Cannot save an empty query.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Simple prompt for query name (in production, use a proper dialog)
+    const name = window.prompt('Enter a name for this query:');
+    if (!name) return;
+
+    const description = window.prompt('Enter a description (optional):') || '';
+
+    try {
+      const response = await saveQuery({
+        name,
+        description,
+        query: query.trim(),
+        language: queryLanguage,
+      });
+
+      if (response.success && response.data) {
+        setSavedQueriesState((prev) => [response.data!, ...prev]);
+        toast({
+          title: 'Query Saved',
+          description: `Query "${name}" has been saved.`,
+        });
+      } else {
+        throw new Error(response.error?.message || 'Failed to save query');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to save query';
+      toast({
+        title: 'Save Failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    }
+  }, [query, queryLanguage, toast]);
+
+  // Handle deleting a saved query
+  const handleDeleteSavedQuery = useCallback(async (id: string, name: string) => {
+    if (!window.confirm(`Delete saved query "${name}"?`)) return;
+
+    try {
+      const response = await deleteSavedQuery(id);
+      if (response.success) {
+        setSavedQueriesState((prev) => prev.filter((q) => q.id !== id));
+        toast({
+          title: 'Query Deleted',
+          description: `Query "${name}" has been deleted.`,
+        });
+      } else {
+        throw new Error(response.error?.message || 'Failed to delete query');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to delete query';
+      toast({
+        title: 'Delete Failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    }
+  }, [toast]);
+
+  // Handle exporting query results
+  const handleExportResults = useCallback(async (format: 'csv' | 'json' | 'xlsx') => {
+    if (!query.trim() || !results || results.length === 0) {
+      toast({
+        title: 'No Results',
+        description: 'Run a query first to export results.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      await downloadQueryResults({
+        query: query.trim(),
+        language: queryLanguage,
+        format,
+        filename: `query_results_${new Date().toISOString().split('T')[0]}`,
+      });
+      toast({
+        title: 'Export Complete',
+        description: `Results exported as ${format.toUpperCase()}.`,
+      });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Export failed';
+      toast({
+        title: 'Export Failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    }
+  }, [query, queryLanguage, results, toast]);
+
   // Format relative time
   const formatRelativeTime = (timestamp: number) => {
     const diff = Date.now() - timestamp;
@@ -807,10 +1334,12 @@ LIMIT 100`;
     const firstRow = results[0];
     if (!firstRow) return false;
     const keys = Object.keys(firstRow);
-    // Need at least one string column (label) and one number column (value)
-    const hasStringCol = keys.some(k => typeof firstRow[k] === 'string');
-    const hasNumberCol = keys.some(k => typeof firstRow[k] === 'number');
-    return hasStringCol && hasNumberCol && results.length <= 50;
+    // Need at least 2 columns - one for label (string or number) and one number for value
+    // Allow numeric labels (e.g., hour 0-23, month 1-12)
+    const hasLabelCol = keys.some(k => typeof firstRow[k] === 'string' || typeof firstRow[k] === 'number');
+    const hasValueCol = keys.some(k => typeof firstRow[k] === 'number');
+    // Need at least 2 columns for chart (label + value)
+    return hasLabelCol && hasValueCol && keys.length >= 2 && results.length <= 50;
   }, [results]);
 
   // Prepare chart data from results
@@ -821,14 +1350,16 @@ LIMIT 100`;
     if (!firstRow) return null;
 
     const keys = Object.keys(firstRow);
-    // Find label column (first string column)
-    const labelKey = keys.find(k => typeof firstRow[k] === 'string') || keys[0];
-    // Find value column (first number column, or 'count')
-    const valueKey = keys.find(k => k.toLowerCase() === 'count') ||
-                     keys.find(k => typeof firstRow[k] === 'number') ||
-                     keys[1];
 
-    if (!labelKey || !valueKey) return null;
+    // Find value column first (prioritize columns with 'count', 'total', 'sum', 'avg' in name)
+    const valueKey = keys.find(k => /count|total|sum|avg|amount|quantity/i.test(k)) ||
+                     keys.find((k, i) => i > 0 && typeof firstRow[k] === 'number') ||
+                     keys[keys.length - 1];
+
+    // Find label column (first column that's not the value column)
+    const labelKey = keys.find(k => k !== valueKey) || keys[0];
+
+    if (!labelKey || !valueKey || labelKey === valueKey) return null;
 
     const labels = results.map(row => String(row[labelKey] || 'Unknown'));
     const values = results.map(row => Number(row[valueKey]) || 0);
@@ -842,7 +1373,11 @@ LIMIT 100`;
     // For line chart (time series detection)
     const isTimeSeries = labelKey.toLowerCase().includes('time') ||
                          labelKey.toLowerCase().includes('date') ||
-                         labelKey.toLowerCase().includes('timestamp');
+                         labelKey.toLowerCase().includes('timestamp') ||
+                         labelKey.toLowerCase().includes('hour') ||
+                         labelKey.toLowerCase().includes('month') ||
+                         labelKey.toLowerCase().includes('year') ||
+                         labelKey.toLowerCase().includes('day');
 
     return {
       labels,
@@ -987,26 +1522,73 @@ LIMIT 100`;
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">Query Editor</CardTitle>
                 <div className="flex items-center gap-2">
+                  {/* Timeout Setting */}
+                  <div className="flex items-center gap-2 mr-2">
+                    <Label htmlFor="timeout" className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Timer className="w-3.5 h-3.5" />
+                      Timeout:
+                    </Label>
+                    <Select
+                      value={String(queryTimeout)}
+                      onValueChange={(v) => setQueryTimeout(Number(v))}
+                      disabled={isRunning}
+                    >
+                      <SelectTrigger className="w-20 h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="10">10s</SelectItem>
+                        <SelectItem value="30">30s</SelectItem>
+                        <SelectItem value="60">60s</SelectItem>
+                        <SelectItem value="120">2min</SelectItem>
+                        <SelectItem value="300">5min</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {/* Language Selector */}
+                  <div className="flex items-center gap-2 mr-2">
+                    <Label htmlFor="language" className="text-xs text-muted-foreground">
+                      Lang:
+                    </Label>
+                    <Select
+                      value={queryLanguage}
+                      onValueChange={(v) => setQueryLanguage(v as QueryLanguage)}
+                      disabled={isRunning}
+                    >
+                      <SelectTrigger className="w-20 h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="sql">SQL</SelectItem>
+                        <SelectItem value="kql">KQL</SelectItem>
+                        <SelectItem value="spl">SPL</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setQuery('')}
+                    disabled={isRunning}
                   >
                     <Trash2 className="w-4 h-4 mr-2" />
                     Clear
                   </Button>
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="sm" disabled={isRunning || !query.trim()} onClick={handleSaveQuery}>
                     <Save className="w-4 h-4 mr-2" />
                     Save
                   </Button>
-                  <Button size="sm" onClick={runQuery} disabled={isRunning || !query.trim()}>
-                    {isRunning ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
+                  {isRunning ? (
+                    <Button size="sm" variant="destructive" onClick={cancelQuery}>
+                      <XCircle className="w-4 h-4 mr-2" />
+                      Cancel
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={runQuery} disabled={!query.trim() || validationErrors.some((e) => e.severity === 'error')}>
                       <Play className="w-4 h-4 mr-2" />
-                    )}
-                    {isRunning ? 'Running...' : 'Run Query'}
-                  </Button>
+                      Run Query
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -1023,11 +1605,64 @@ LIMIT 100`;
                 placeholder="Enter SQL query... (Ctrl+Space for autocomplete)"
                 disabled={isRunning}
               />
+
+              {/* Inline validation error/warning panel */}
+              {validationErrors.length > 0 && (
+                <div className="border-t border-border">
+                  {validationErrors.map((ve, idx) => (
+                    <div
+                      key={idx}
+                      className={`flex items-start gap-3 px-4 py-2 text-sm ${
+                        ve.severity === 'error'
+                          ? 'bg-destructive/10 border-b border-destructive/20'
+                          : 'bg-amber-500/10 border-b border-amber-500/20'
+                      }`}
+                    >
+                      <AlertCircle
+                        className={`w-4 h-4 mt-0.5 shrink-0 ${
+                          ve.severity === 'error' ? 'text-destructive' : 'text-amber-500'
+                        }`}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <span
+                          className={
+                            ve.severity === 'error' ? 'text-destructive' : 'text-amber-500'
+                          }
+                        >
+                          {ve.message}
+                        </span>
+                        {(ve.line !== undefined || ve.position !== undefined) && (
+                          <span className="ml-2 text-xs text-muted-foreground font-mono">
+                            {ve.line !== undefined && `line ${ve.line}`}
+                            {ve.line !== undefined && ve.position !== undefined && ', '}
+                            {ve.position !== undefined && `col ${ve.position}`}
+                          </span>
+                        )}
+                      </div>
+                      {ve.severity === 'error' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="shrink-0 h-6 px-2 text-xs border-destructive/50 text-destructive hover:bg-destructive/10"
+                          onClick={() => {
+                            // Trigger NL2SQL to fix the query
+                            setNlQuery(`Fix this SQL syntax error: ${ve.message}\n\nQuery:\n${query}`);
+                            convertNL2SQL();
+                          }}
+                        >
+                          <Wand2 className="w-3 h-3 mr-1" />
+                          Fix with AI
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
           {/* Results */}
-          <Card className="flex-1 mt-4 flex flex-col min-h-0">
+          <Card className="flex-1 mt-4 flex flex-col min-h-[800px]">
             <CardHeader className="pb-2 shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -1104,11 +1739,23 @@ LIMIT 100`;
                       </div>
                     )}
 
-                    <Button variant="outline" size="sm">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (results) {
+                          navigator.clipboard.writeText(JSON.stringify(results, null, 2));
+                          toast({
+                            title: 'Copied',
+                            description: 'Results copied to clipboard as JSON.',
+                          });
+                        }
+                      }}
+                    >
                       <Copy className="w-4 h-4 mr-2" />
                       Copy
                     </Button>
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => handleExportResults('csv')}>
                       <Download className="w-4 h-4 mr-2" />
                       Export CSV
                     </Button>
@@ -1134,12 +1781,37 @@ LIMIT 100`;
                 </div>
               ) : isRunning ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground">
-                  <div className="text-center">
+                  <div className="text-center w-64">
                     <Loader2 className="w-12 h-12 mx-auto mb-4 animate-spin text-primary" />
-                    <p>Executing query...</p>
-                    <p className="text-sm text-muted-foreground">
-                      This may take a few seconds
+                    <p className="font-medium text-foreground">Running... {elapsedTime}s</p>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Timeout: {queryTimeout}s
                     </p>
+                    {/* Progress Bar */}
+                    <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                      <div
+                        className={`h-2 rounded-full transition-all duration-1000 ${
+                          elapsedTime / queryTimeout > 0.8
+                            ? 'bg-destructive'
+                            : elapsedTime / queryTimeout > 0.5
+                              ? 'bg-amber-500'
+                              : 'bg-primary'
+                        }`}
+                        style={{ width: `${Math.min((elapsedTime / queryTimeout) * 100, 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {Math.round((elapsedTime / queryTimeout) * 100)}% of timeout
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-4"
+                      onClick={cancelQuery}
+                    >
+                      <XCircle className="w-4 h-4 mr-2" />
+                      Cancel Query
+                    </Button>
                   </div>
                 </div>
               ) : results && results.length > 0 ? (
@@ -1279,23 +1951,60 @@ LIMIT 100`;
                 <CardContent className="pt-6">
                   <ScrollArea className="h-full">
                     <div className="space-y-2">
-                      {savedQueries.map((q) => (
-                        <div
-                          key={q.id}
-                          className="p-3 rounded-lg bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"
-                          onClick={() => setQuery(q.query)}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <p className="font-medium text-sm">{q.name}</p>
-                            <span className="text-xs text-muted-foreground">
-                              {q.updated}
-                            </span>
-                          </div>
-                          <p className="text-xs text-muted-foreground font-mono truncate">
-                            {q.query}
-                          </p>
+                      {isLoadingSaved ? (
+                        <div className="text-center text-muted-foreground py-8">
+                          <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin opacity-30" />
+                          <p className="text-sm">Loading saved queries...</p>
                         </div>
-                      ))}
+                      ) : !savedQueriesState || savedQueriesState.length === 0 ? (
+                        <div className="text-center text-muted-foreground py-8">
+                          <BookMarked className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                          <p className="text-sm">No saved queries yet</p>
+                          <p className="text-xs mt-1">Save a query to see it here</p>
+                        </div>
+                      ) : (
+                        savedQueriesState.map((q) => (
+                          <div
+                            key={q.id}
+                            className="p-3 rounded-lg bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors group"
+                            onClick={() => {
+                              setQuery(q.query);
+                              setQueryLanguage(q.language as QueryLanguage);
+                            }}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="font-medium text-sm">{q.name}</p>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="text-[10px] px-1 py-0">
+                                  {q.language.toUpperCase()}
+                                </Badge>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteSavedQuery(q.id, q.name);
+                                  }}
+                                >
+                                  <Trash2 className="w-3 h-3 text-destructive" />
+                                </Button>
+                              </div>
+                            </div>
+                            {q.description && (
+                              <p className="text-xs text-muted-foreground mb-1">
+                                {q.description}
+                              </p>
+                            )}
+                            <p className="text-xs text-muted-foreground font-mono truncate">
+                              {q.query}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              Created {new Date(q.createdAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </ScrollArea>
                 </CardContent>

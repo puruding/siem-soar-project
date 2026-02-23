@@ -1,5 +1,6 @@
 export * from './types';
 export * from './hooks/useAssets';
+export * from './api/assetsApi';
 export * from './components/AssetList';
 export * from './components/AssetTree';
 export * from './components/AssetDetail';

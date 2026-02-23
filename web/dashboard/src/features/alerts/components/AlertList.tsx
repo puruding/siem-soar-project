@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -45,11 +46,14 @@ import {
   Eye,
 } from 'lucide-react';
 import { formatRelativeTime, cn } from '@/lib/utils';
-import { AlertDetail } from './AlertDetail';
+import { formatEventTime } from '@/features/events/api/eventsApi';
+// AlertDetail removed - now using full AlertDetailPage at /alerts/{id}
 import { RelatedEventsDrawer } from './RelatedEventsDrawer';
 import { useToast } from '@/components/ui/toaster';
 import { useUEBAStore, ANOMALY_TYPES, UEBA_TO_MITRE } from '@/features/ueba';
 import { type RelatedEvent, formatDurationBetween } from '../utils/groupStats';
+import { useAlerts } from '../hooks/useAlerts';
+import type { Alert, AlertSeverity, AlertStatus } from '@/types/alert';
 
 // MITRE tactic names for UEBA mapping
 const UEBA_MITRE_TACTICS: Record<string, string> = {
@@ -62,20 +66,8 @@ const UEBA_MITRE_TACTICS: Record<string, string> = {
   TA0010: 'Exfiltration',
 };
 
-interface Alert {
-  id: string;
-  title: string;
-  description: string;
-  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-  status: 'new' | 'acknowledged' | 'investigating' | 'resolved' | 'closed';
-  source: string;
-  target: string;
-  timestamp: Date;
-  tactic?: string;
-  technique?: string;
-  mitre_tactics?: string[];
-  mitre_techniques?: string[];
-  // UEBA specific data
+// Local interface for UEBA-specific alert data
+interface UEBAAlert extends Alert {
   uebaData?: {
     anomalyType: string;
     score: number;
@@ -84,7 +76,7 @@ interface Alert {
 }
 
 // Extended type for grouped alerts
-interface GroupedAlert extends Alert {
+interface GroupedAlert extends UEBAAlert {
   isGrouped: boolean;
   groupId?: string;
   eventCount: number;
@@ -96,7 +88,7 @@ interface GroupedAlert extends Alert {
 }
 
 // Type guard to check if alert is grouped
-function isGroupedAlert(alert: Alert | GroupedAlert): alert is GroupedAlert {
+function isGroupedAlert(alert: Alert | UEBAAlert | GroupedAlert): alert is GroupedAlert {
   return 'isGrouped' in alert && alert.isGrouped && 'eventCount' in alert;
 }
 
@@ -115,11 +107,12 @@ function generateMockRelatedEvents(alert: GroupedAlert): RelatedEvent[] {
 
   for (let i = 0; i < alert.eventCount; i++) {
     const eventTime = new Date(startTime + Math.random() * timeRange);
+    const targetValue = typeof alert.target === 'string' ? alert.target : alert.target.identifier;
     events.push({
       id: `event-${alert.id}-${i}`,
       timestamp: eventTime.toISOString(),
       sourceIp: sourceIPs[Math.floor(Math.random() * sourceIPs.length)],
-      destinationIp: alert.groupByValues?.['target.ip'] || alert.target,
+      destinationIp: alert.groupByValues?.['target.ip'] || targetValue,
       user: users[Math.floor(Math.random() * users.length)],
       action: 'SSH_LOGIN',
       status: statuses[Math.floor(Math.random() * statuses.length)],
@@ -161,7 +154,7 @@ const statusStyles: Record<string, string> = {
 interface CreateAlertForm {
   title: string;
   description: string;
-  severity: Alert['severity'];
+  severity: AlertSeverity;
   source: string;
   target: string;
   tactic: string;
@@ -180,6 +173,19 @@ const initialFormState: CreateAlertForm = {
 
 export function AlertList() {
   const { toast } = useToast();
+  const navigate = useNavigate();
+
+  // Use the new useAlerts hook
+  const {
+    alerts: apiAlerts,
+    loading: apiLoading,
+    error: apiError,
+    fetchAlerts,
+    bulkAcknowledge: apiBulkAcknowledge,
+    bulkClose: apiBulkClose,
+    escalateToCase,
+  } = useAlerts({ autoRefresh: true, refreshInterval: 10000 });
+
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [selectedAlerts, setSelectedAlerts] = useState<Set<string>>(new Set());
   const [severityFilter, setSeverityFilter] = useState<string>('all');
@@ -187,13 +193,14 @@ export function AlertList() {
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<GroupFilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [groupedAlerts, setGroupedAlerts] = useState<GroupedAlert[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [createForm, setCreateForm] = useState<CreateAlertForm>(initialFormState);
+
+  // Expose loading and error from hook
+  const loading = apiLoading;
+  const error = apiError;
 
   // Related events drawer state
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -204,7 +211,7 @@ export function AlertList() {
   const uebaAlertsRaw = useUEBAStore((state) => state.alerts);
 
   // Convert UEBA alerts to standard Alert format
-  const uebaAlerts = useMemo((): Alert[] => {
+  const uebaAlerts = useMemo((): UEBAAlert[] => {
     if (!uebaAlertsRaw || !Array.isArray(uebaAlertsRaw)) {
       return [];
     }
@@ -214,13 +221,13 @@ export function AlertList() {
         id: alert.id,
         title: alert.title || `${ANOMALY_TYPES[alert.anomalyType] || alert.anomalyType} - ${alert.entityId}`,
         description: alert.explanation,
-        severity: alert.severity as Alert['severity'],
-        status: alert.status as Alert['status'],
-        source: 'UEBA',
-        target: alert.entityId,
+        severity: alert.severity as AlertSeverity,
+        status: alert.status as AlertStatus,
+        source: { type: 'custom', name: 'UEBA' },
+        target: { type: 'user', identifier: alert.entityId },
         timestamp: new Date(alert.detectedAt),
-        tactic: tacticId ? UEBA_MITRE_TACTICS[tacticId] : undefined,
-        technique: undefined,
+        lastUpdated: new Date(alert.detectedAt),
+        tags: [],
         uebaData: {
           anomalyType: alert.anomalyType,
           score: alert.score,
@@ -230,74 +237,7 @@ export function AlertList() {
     });
   }, [uebaAlertsRaw]);
 
-  // Fetch alerts from API
-  const fetchAlerts = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await fetch('/api/v1/alerts');
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      const data = await response.json();
-
-      // Map API response to Alert interface
-      const mappedAlerts: Alert[] = (data.alerts || []).map((alert: any) => {
-        // Extract target from fields
-        let target = alert.source_type || 'Unknown';
-        if (alert.fields?.user) {
-          target = alert.fields.user;
-        } else if (alert.fields?.source_ip) {
-          target = alert.fields.source_ip;
-        } else if (alert.matched_fields) {
-          const firstKey = Object.keys(alert.matched_fields)[0];
-          if (firstKey) {
-            target = String(alert.matched_fields[firstKey]);
-          }
-        }
-
-        // Build description
-        let description = `Alert from ${alert.source_type}`;
-        if (alert.matched_fields && Object.keys(alert.matched_fields).length > 0) {
-          description += `: ${JSON.stringify(alert.matched_fields)}`;
-        }
-
-        // Get tactic name
-        let tactic: string | undefined;
-        if (alert.mitre_tactics && alert.mitre_tactics.length > 0) {
-          const tacticId = alert.mitre_tactics[0];
-          tactic = MITRE_TACTICS[tacticId] || tacticId;
-        }
-
-        return {
-          id: alert.id || alert.alert_id,
-          title: alert.rule_name || alert.title || 'Unknown Alert',
-          description,
-          severity: (alert.severity || 'medium').toLowerCase() as Alert['severity'],
-          status: (alert.status || 'new').toLowerCase() as Alert['status'],
-          source: alert.source || 'Detection',
-          target,
-          timestamp: new Date(alert.timestamp),
-          tactic,
-          technique: alert.mitre_techniques?.[0],
-          mitre_tactics: alert.mitre_tactics || [],
-          mitre_techniques: alert.mitre_techniques || [],
-        };
-      });
-
-      setAlerts(mappedAlerts);
-    } catch (err) {
-      console.error('Failed to fetch alerts:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch alerts');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Initial fetch
-  useEffect(() => {
-    fetchAlerts();
-  }, []);
+  // No need for fetchAlerts function - handled by useAlerts hook
 
   // Initialize sample grouped alerts for testing TC-UI-022
   useEffect(() => {
@@ -308,13 +248,11 @@ export function AlertList() {
         description: 'Grouped alerts for repeated authentication failures from same source',
         severity: 'high',
         status: 'new',
-        source: 'IAM',
-        target: '192.168.1.100',
+        source: { type: 'siem', name: 'IAM' },
+        target: { type: 'host', identifier: '192.168.1.100' },
         timestamp: new Date(Date.now() - 5 * 60 * 1000),
-        tactic: 'Credential Access',
-        technique: 'T1110',
-        mitre_tactics: ['TA0006'],
-        mitre_techniques: ['T1110'],
+        lastUpdated: new Date(Date.now() - 2 * 60 * 1000),
+        tags: ['authentication', 'brute-force'],
         isGrouped: true,
         groupId: 'grp-auth-001',
         eventCount: 47,
@@ -333,13 +271,11 @@ export function AlertList() {
         description: 'Port scanning activity detected from internal host',
         severity: 'medium',
         status: 'new',
-        source: 'NDR',
-        target: '10.0.0.0/24',
+        source: { type: 'ndr', name: 'NDR' },
+        target: { type: 'network', identifier: '10.0.0.0/24' },
         timestamp: new Date(Date.now() - 15 * 60 * 1000),
-        tactic: 'Discovery',
-        technique: 'T1046',
-        mitre_tactics: ['TA0007'],
-        mitre_techniques: ['T1046'],
+        lastUpdated: new Date(Date.now() - 10 * 60 * 1000),
+        tags: ['scanning', 'discovery'],
         isGrouped: true,
         groupId: 'grp-scan-001',
         eventCount: 128,
@@ -358,13 +294,11 @@ export function AlertList() {
         description: 'Multiple C2 beacon attempts to same destination',
         severity: 'critical',
         status: 'new',
-        source: 'EDR',
-        target: '185.123.45.67',
+        source: { type: 'edr', name: 'EDR' },
+        target: { type: 'host', identifier: '185.123.45.67', ip: '185.123.45.67' },
         timestamp: new Date(Date.now() - 3 * 60 * 1000),
-        tactic: 'Command and Control',
-        technique: 'T1071',
-        mitre_tactics: ['TA0011'],
-        mitre_techniques: ['T1071', 'T1573'],
+        lastUpdated: new Date(Date.now() - 1 * 60 * 1000),
+        tags: ['malware', 'c2'],
         isGrouped: true,
         groupId: 'grp-c2-001',
         eventCount: 23,
@@ -383,13 +317,11 @@ export function AlertList() {
         description: 'Large data transfers to external destinations',
         severity: 'critical',
         status: 'investigating',
-        source: 'DLP',
-        target: 'external-storage.com',
+        source: { type: 'custom', name: 'DLP' },
+        target: { type: 'network', identifier: 'external-storage.com' },
         timestamp: new Date(Date.now() - 8 * 60 * 1000),
-        tactic: 'Exfiltration',
-        technique: 'T1048',
-        mitre_tactics: ['TA0010'],
-        mitre_techniques: ['T1048', 'T1567'],
+        lastUpdated: new Date(Date.now() - 5 * 60 * 1000),
+        tags: ['exfiltration', 'data-loss'],
         isGrouped: true,
         groupId: 'grp-exfil-001',
         eventCount: 15,
@@ -406,20 +338,16 @@ export function AlertList() {
     setGroupedAlerts(sampleGroupedAlerts);
   }, []);
 
-  // Auto-refresh every 10 seconds
-  useEffect(() => {
-    const interval = setInterval(fetchAlerts, 10000);
-    return () => clearInterval(interval);
-  }, []);
+  // Auto-refresh handled by useAlerts hook
 
-  // Merge alerts from Detection API, UEBA store, and grouped alerts
+  // Merge alerts from API, UEBA store, and grouped alerts
   const allAlerts = useMemo(() => {
-    const safeAlerts = Array.isArray(alerts) ? alerts : [];
+    const safeApiAlerts = Array.isArray(apiAlerts) ? apiAlerts : [];
     const safeUebaAlerts = Array.isArray(uebaAlerts) ? uebaAlerts : [];
     const safeGroupedAlerts = Array.isArray(groupedAlerts) ? groupedAlerts : [];
-    const combined = [...safeAlerts, ...safeUebaAlerts, ...safeGroupedAlerts];
+    const combined = [...safeApiAlerts, ...safeUebaAlerts, ...safeGroupedAlerts];
     // Remove duplicates by ID and sort by timestamp (newest first)
-    const uniqueMap = new Map<string, Alert | GroupedAlert>();
+    const uniqueMap = new Map<string, Alert | UEBAAlert | GroupedAlert>();
     combined.forEach((alert) => {
       if (alert && alert.id && !uniqueMap.has(alert.id)) {
         uniqueMap.set(alert.id, alert);
@@ -428,13 +356,17 @@ export function AlertList() {
     return Array.from(uniqueMap.values()).sort(
       (a, b) => (b.timestamp?.getTime() || 0) - (a.timestamp?.getTime() || 0)
     );
-  }, [alerts, uebaAlerts, groupedAlerts]);
+  }, [apiAlerts, uebaAlerts, groupedAlerts]);
 
   const filteredAlerts = allAlerts.filter((alert) => {
     if (severityFilter !== 'all' && alert.severity !== severityFilter)
       return false;
     if (statusFilter !== 'all' && alert.status !== statusFilter) return false;
-    if (sourceFilter !== 'all' && alert.source !== sourceFilter) return false;
+
+    // Source filter - check source.name for new Alert structure
+    const alertSourceName = typeof alert.source === 'string' ? alert.source : alert.source.name;
+    if (sourceFilter !== 'all' && alertSourceName !== sourceFilter) return false;
+
     if (
       searchQuery &&
       !alert.title.toLowerCase().includes(searchQuery.toLowerCase()) &&
@@ -465,7 +397,7 @@ export function AlertList() {
     // Update the grouped alert status
     setGroupedAlerts((prev) =>
       prev.map((a) =>
-        a.id === selectedGroupedAlert.id ? { ...a, status: 'acknowledged' } : a
+        a.id === selectedGroupedAlert.id ? { ...a, status: 'acknowledged' as AlertStatus } : a
       )
     );
 
@@ -552,31 +484,18 @@ export function AlertList() {
         throw new Error(`HTTP ${response.status}`);
       }
     } catch (err) {
-      // If API fails, create locally (mock mode)
-      const newAlert: Alert = {
-        id: `manual-${Date.now()}`,
-        title: createForm.title,
-        description: createForm.description || 'Manually created alert',
-        severity: createForm.severity,
-        status: 'new',
-        source: createForm.source || 'Manual',
-        target: createForm.target || 'N/A',
-        timestamp: new Date(),
-        tactic: createForm.tactic ? MITRE_TACTICS[createForm.tactic] || createForm.tactic : undefined,
-        technique: createForm.technique || undefined,
-      };
-
-      setAlerts((prev) => [newAlert, ...prev]);
+      // Show error message - API integration required
       toast({
-        title: 'Alert Created (Local)',
-        description: `Alert "${createForm.title}" has been created locally.`,
+        title: 'Error',
+        description: 'Failed to create alert. Please ensure the API is running.',
+        variant: 'destructive',
       });
       setIsCreateDialogOpen(false);
       setCreateForm(initialFormState);
     } finally {
       setIsCreating(false);
     }
-  }, [createForm, toast]);
+  }, [createForm, toast, fetchAlerts]);
 
   const handleFormChange = (field: keyof CreateAlertForm, value: string) => {
     setCreateForm((prev) => ({ ...prev, [field]: value }));
@@ -587,92 +506,47 @@ export function AlertList() {
     if (selectedAlerts.size === 0) return;
 
     const alertIds = Array.from(selectedAlerts);
-    let successCount = 0;
-    let failCount = 0;
+    const acknowledged = await apiBulkAcknowledge(alertIds);
 
-    for (const alertId of alertIds) {
-      try {
-        const response = await fetch(`/api/v1/alerts/${alertId}/status`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'acknowledged' }),
-        });
-
-        if (response.ok) {
-          successCount++;
-          // Update local state
-          setAlerts((prev) =>
-            prev.map((a) =>
-              a.id === alertId ? { ...a, status: 'acknowledged' } : a
-            )
-          );
-        } else {
-          failCount++;
-        }
-      } catch {
-        // If API fails, update locally
-        setAlerts((prev) =>
-          prev.map((a) =>
-            a.id === alertId ? { ...a, status: 'acknowledged' } : a
-          )
-        );
-        successCount++;
-      }
+    if (acknowledged > 0) {
+      toast({
+        title: 'Alerts Acknowledged',
+        description: `${acknowledged} alert(s) acknowledged successfully.`,
+        variant: 'success',
+      });
+    } else {
+      toast({
+        title: 'Error',
+        description: 'Failed to acknowledge alerts. Please try again.',
+        variant: 'destructive',
+      });
     }
 
-    toast({
-      title: 'Alerts Acknowledged',
-      description: `${successCount} alert(s) acknowledged successfully${failCount > 0 ? `, ${failCount} failed` : ''}.`,
-      variant: failCount > 0 ? 'destructive' : 'success',
-    });
-
     setSelectedAlerts(new Set());
-  }, [selectedAlerts, toast]);
+  }, [selectedAlerts, apiBulkAcknowledge, toast]);
 
   const handleBulkClose = useCallback(async () => {
     if (selectedAlerts.size === 0) return;
 
     const alertIds = Array.from(selectedAlerts);
-    let successCount = 0;
-    let failCount = 0;
+    const closed = await apiBulkClose(alertIds);
 
-    for (const alertId of alertIds) {
-      try {
-        const response = await fetch(`/api/v1/alerts/${alertId}/status`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'closed' }),
-        });
-
-        if (response.ok) {
-          successCount++;
-          setAlerts((prev) =>
-            prev.map((a) =>
-              a.id === alertId ? { ...a, status: 'closed' } : a
-            )
-          );
-        } else {
-          failCount++;
-        }
-      } catch {
-        // If API fails, update locally
-        setAlerts((prev) =>
-          prev.map((a) =>
-            a.id === alertId ? { ...a, status: 'closed' } : a
-          )
-        );
-        successCount++;
-      }
+    if (closed > 0) {
+      toast({
+        title: 'Alerts Closed',
+        description: `${closed} alert(s) closed successfully.`,
+        variant: 'success',
+      });
+    } else {
+      toast({
+        title: 'Error',
+        description: 'Failed to close alerts. Please try again.',
+        variant: 'destructive',
+      });
     }
 
-    toast({
-      title: 'Alerts Closed',
-      description: `${successCount} alert(s) closed successfully${failCount > 0 ? `, ${failCount} failed` : ''}.`,
-      variant: failCount > 0 ? 'destructive' : 'success',
-    });
-
     setSelectedAlerts(new Set());
-  }, [selectedAlerts, toast]);
+  }, [selectedAlerts, apiBulkClose, toast]);
 
   const handleBulkCreateCase = useCallback(async () => {
     if (selectedAlerts.size === 0) return;
@@ -680,51 +554,34 @@ export function AlertList() {
     const alertIds = Array.from(selectedAlerts);
     const selectedAlertsList = allAlerts.filter((a) => alertIds.includes(a.id));
 
-    // Get the highest severity from selected alerts
-    const severityOrder = ['critical', 'high', 'medium', 'low', 'info'];
-    const highestSeverity = selectedAlertsList.reduce((highest, alert) => {
-      const currentIndex = severityOrder.indexOf(alert.severity);
-      const highestIndex = severityOrder.indexOf(highest);
-      return currentIndex < highestIndex ? alert.severity : highest;
-    }, 'info' as Alert['severity']);
+    if (selectedAlertsList.length === 0) return;
 
-    try {
-      const firstAlert = selectedAlertsList[0];
-      const response = await fetch('/api/v1/cases', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: selectedAlertsList.length === 1 && firstAlert
-            ? `Case: ${firstAlert.title}`
-            : `Case: ${selectedAlertsList.length} Related Alerts`,
-          description: selectedAlertsList.map((a) => `- ${a.title} (${a.id})`).join('\n'),
-          severity: highestSeverity,
-          alert_ids: alertIds,
-          status: 'open',
-        }),
-      });
+    // Create case from first alert (will include all selected alerts)
+    const firstAlert = selectedAlertsList[0];
+    if (!firstAlert) return;
 
-      if (response.ok) {
-        const data = await response.json();
-        toast({
-          title: 'Case Created',
-          description: `Case ${data.case?.id || ''} created with ${selectedAlerts.size} alert(s).`,
-          variant: 'success',
-        });
-      } else {
-        throw new Error('API error');
-      }
-    } catch {
-      // Show success even if API fails (mock mode)
+    const caseTitle = selectedAlertsList.length === 1
+      ? `Case: ${firstAlert.title}`
+      : `Case: ${selectedAlertsList.length} Related Alerts`;
+
+    const result = await escalateToCase(firstAlert.id, caseTitle);
+
+    if (result) {
       toast({
         title: 'Case Created',
-        description: `Case created with ${selectedAlerts.size} alert(s).`,
+        description: `Case ${result.caseId} created with ${selectedAlerts.size} alert(s).`,
         variant: 'success',
+      });
+    } else {
+      toast({
+        title: 'Error',
+        description: 'Failed to create case. Please try again.',
+        variant: 'destructive',
       });
     }
 
     setSelectedAlerts(new Set());
-  }, [selectedAlerts, allAlerts, toast]);
+  }, [selectedAlerts, allAlerts, escalateToCase, toast]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -858,7 +715,7 @@ export function AlertList() {
               )}
             </CardHeader>
             <CardContent>
-              {loading && alerts.length === 0 ? (
+              {loading && apiAlerts.length === 0 ? (
                 <div className="flex items-center justify-center h-64">
                   <div className="flex flex-col items-center gap-3">
                     <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
@@ -883,7 +740,7 @@ export function AlertList() {
                     <AlertTriangle className="w-8 h-8 text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">No alerts found</p>
                     <p className="text-xs text-muted-foreground">
-                      {alerts.length === 0
+                      {apiAlerts.length === 0
                         ? 'Send log messages through the pipeline to generate alerts'
                         : 'Try adjusting your filters'}
                     </p>
@@ -905,12 +762,12 @@ export function AlertList() {
                             className="rounded border-border"
                           />
                         </TableHead>
+                        <TableHead className="w-[160px]">발생시간</TableHead>
                         <TableHead className="w-[100px]">Severity</TableHead>
                         <TableHead>Alert</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Source</TableHead>
                         <TableHead>Target</TableHead>
-                        <TableHead>Time</TableHead>
                         <TableHead className="w-[40px]"></TableHead>
                       </TableRow>
                     </TableHeader>
@@ -925,7 +782,7 @@ export function AlertList() {
                               selectedAlert?.id === alert.id && 'bg-primary/5',
                               grouped && 'bg-muted/30 hover:bg-muted/50'
                             )}
-                            onClick={() => setSelectedAlert(alert)}
+                            onClick={() => navigate(`/alerts/${alert.id}`)}
                           >
                             <TableCell onClick={(e) => e.stopPropagation()}>
                               <input
@@ -934,6 +791,9 @@ export function AlertList() {
                                 onChange={() => toggleAlertSelection(alert.id)}
                                 className="rounded border-border"
                               />
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
+                              {formatEventTime(alert.timestamp)}
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
@@ -987,8 +847,10 @@ export function AlertList() {
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
-                                <span className="text-sm">{alert.source}</span>
-                                {alert.source === 'UEBA' && (
+                                <span className="text-sm">
+                                  {typeof alert.source === 'string' ? alert.source : alert.source.name}
+                                </span>
+                                {(typeof alert.source === 'string' ? alert.source : alert.source.name) === 'UEBA' && (
                                   <Badge variant="outline" className="text-xs bg-primary/10">
                                     <Brain className="w-3 h-3 mr-1" />
                                     ML
@@ -997,29 +859,7 @@ export function AlertList() {
                               </div>
                             </TableCell>
                             <TableCell className="font-mono text-sm">
-                              {alert.target}
-                            </TableCell>
-                            <TableCell>
-                              {grouped ? (
-                                <div className="text-xs text-muted-foreground">
-                                  <div className="flex items-center gap-1">
-                                    <Clock className="w-3 h-3" />
-                                    <span>
-                                      {formatDurationBetween(
-                                        alert.firstEventTime,
-                                        alert.lastEventTime
-                                      )}
-                                    </span>
-                                  </div>
-                                  <span className="text-[10px]">
-                                    {formatRelativeTime(alert.timestamp)}
-                                  </span>
-                                </div>
-                              ) : (
-                                <span className="text-sm text-muted-foreground">
-                                  {formatRelativeTime(alert.timestamp)}
-                                </span>
-                              )}
+                              {typeof alert.target === 'string' ? alert.target : alert.target.identifier}
                             </TableCell>
                             <TableCell onClick={(e) => e.stopPropagation()}>
                               {grouped ? (
@@ -1047,34 +887,7 @@ export function AlertList() {
           </Card>
         </div>
 
-        {/* Detail panel */}
-        {selectedAlert && (
-          <AlertDetail
-            alert={selectedAlert}
-            onClose={() => setSelectedAlert(null)}
-            onStatusChange={(alertId, newStatus) => {
-              // Update alert status in local state
-              setAlerts(prev =>
-                prev.map(a =>
-                  a.id === alertId ? { ...a, status: newStatus as Alert['status'] } : a
-                )
-              );
-              // Update selected alert if it's the one being changed
-              if (selectedAlert.id === alertId) {
-                setSelectedAlert(prev =>
-                  prev ? { ...prev, status: newStatus as Alert['status'] } : null
-                );
-              }
-            }}
-            onAlertSelect={(alertId) => {
-              // Find and select the related alert
-              const relatedAlert = alerts.find(a => a.id === alertId);
-              if (relatedAlert) {
-                setSelectedAlert(relatedAlert);
-              }
-            }}
-          />
-        )}
+        {/* Detail panel removed - now navigates to /alerts/{id} detail page */}
       </div>
 
       {/* Create Alert Dialog */}

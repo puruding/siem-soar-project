@@ -55,21 +55,22 @@ func main() {
 		"port", cfg.Service.HTTPPort,
 	)
 
-	// Initialize PostgreSQL connection
+	// Initialize PostgreSQL connection (with fallback to mock mode)
+	var caseRepo repository.Repository
 	db, err := initDB(cfg)
 	if err != nil {
-		slog.Error("failed to initialize database", "error", err)
-		os.Exit(1)
+		slog.Warn("database not available, running in MOCK mode", "error", err)
+		caseRepo = repository.NewMockCaseRepository()
+	} else {
+		defer db.Close()
+		slog.Info("database connection established",
+			"host", cfg.Database.Host,
+			"database", cfg.Database.Database,
+		)
+		caseRepo = repository.NewCaseRepository(db)
 	}
-	defer db.Close()
-
-	slog.Info("database connection established",
-		"host", cfg.Database.Host,
-		"database", cfg.Database.Database,
-	)
 
 	// Initialize components
-	caseRepo := repository.NewCaseRepository(db)
 	timelineStore := timeline.NewMemoryStore()
 	timelineService := timeline.NewTimelineService(timelineStore)
 	caseService := service.NewCaseService(caseRepo, timelineService)
@@ -84,7 +85,7 @@ func main() {
 	router.Use(corsMiddleware(cfg.CORS))
 
 	// Register health and readiness endpoints
-	router.HandleFunc("/health", healthHandler(db)).Methods("GET")
+	router.HandleFunc("/health", healthHandler()).Methods("GET")
 	router.HandleFunc("/ready", readyHandler(db)).Methods("GET")
 
 	// Register API routes
@@ -117,7 +118,7 @@ func main() {
 	if cfg.Service.MetricsPort != "" && cfg.Service.MetricsPort != cfg.Service.HTTPPort {
 		metricsRouter := mux.NewRouter()
 		metricsRouter.HandleFunc("/metrics", metricsHandler).Methods("GET")
-		metricsRouter.HandleFunc("/health", healthHandler(db)).Methods("GET")
+		metricsRouter.HandleFunc("/health", healthHandler()).Methods("GET")
 
 		metricsServer = &http.Server{
 			Addr:         ":" + cfg.Service.MetricsPort,
@@ -276,7 +277,7 @@ func joinStrings(strs []string) string {
 
 // Handlers
 
-func healthHandler(db *sqlx.DB) http.HandlerFunc {
+func healthHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -288,15 +289,17 @@ func readyHandler(db *sqlx.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		// Check database connectivity
-		if err := db.Ping(); err != nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(w, `{"status":"not_ready","service":"case","error":"database connection failed"}`)
-			return
+		// Check database connectivity (if db is available)
+		if db != nil {
+			if err := db.Ping(); err != nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				fmt.Fprintf(w, `{"status":"not_ready","service":"case","error":"database connection failed"}`)
+				return
+			}
 		}
 
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"status":"ready","service":"case"}`)
+		fmt.Fprint(w, `{"status":"ready","service":"case","mode":"mock"}`)
 	}
 }
 

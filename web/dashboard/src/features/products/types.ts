@@ -17,6 +17,10 @@ export interface Product {
   description?: string;
   createdAt: Date;
   updatedAt: Date;
+  // Parser info (embedded)
+  parserType?: string;
+  parserConfig?: Record<string, unknown>;
+  fieldMapping?: Record<string, unknown>;
 }
 
 export type ProductCategory = Product['category'];
@@ -28,6 +32,5 @@ export interface ProductFormData {
   version: string;
   category: ProductCategory;
   status: ProductStatus;
-  logFormats: string[];
   description?: string;
 }

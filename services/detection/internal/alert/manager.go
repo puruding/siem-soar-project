@@ -52,14 +52,42 @@ type Alert struct {
 	Events        []*engine.Event        `json:"events"`
 	MatchedFields map[string]interface{} `json:"matched_fields,omitempty"`
 	ATTACKMapping *mitre.ATTACKMapping   `json:"attack_mapping,omitempty"`
+	MLAnalysis    *MLAnalysis            `json:"ml_analysis,omitempty"`
 	Tags          []string               `json:"tags,omitempty"`
 	Assignee      string                 `json:"assignee,omitempty"`
 	Source        AlertSource            `json:"source"`
+	TraceID       string                 `json:"trace_id,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at"`
 	ResolvedAt    *time.Time             `json:"resolved_at,omitempty"`
 	TTL           time.Duration          `json:"ttl,omitempty"`
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// MLAnalysis represents the ML Gateway analysis result.
+// This is embedded in Alert for Kafka message enrichment.
+type MLAnalysis struct {
+	Classification     *Classification `json:"classification,omitempty"`
+	RiskScore          float64         `json:"risk_score"`
+	Priority           string          `json:"priority"` // critical, high, medium, low
+	IsFalsePositive    bool            `json:"is_false_positive"`
+	FPConfidence       float64         `json:"fp_confidence"`
+	MITRETactics       []string        `json:"mitre_tactics,omitempty"`
+	MITRETechniques    []string        `json:"mitre_techniques,omitempty"`
+	RecommendedActions []string        `json:"recommended_actions,omitempty"`
+	ProcessedAt        time.Time       `json:"processed_at"`
+	TraceID            string          `json:"trace_id,omitempty"`
+	ModelID            string          `json:"model_id,omitempty"`
+	ModelVersion       string          `json:"model_version,omitempty"`
+	CacheHit           bool            `json:"cache_hit"`
+}
+
+// Classification represents ML classification result.
+type Classification struct {
+	Category           string  `json:"category"`
+	Severity           string  `json:"severity"`
+	CategoryConfidence float64 `json:"category_confidence"`
+	SeverityConfidence float64 `json:"severity_confidence"`
 }
 
 // AlertSource represents the source of an alert.
@@ -109,12 +137,36 @@ func DefaultManagerConfig() ManagerConfig {
 	}
 }
 
+// MLClient defines the interface for ML Gateway client.
+type MLClient interface {
+	TriageAlert(ctx context.Context, alertReq *MLAlertRequest) (*MLAnalysisResult, error)
+	IsAvailable() bool
+}
+
+// MLAlertRequest is the request format for ML Gateway.
+type MLAlertRequest struct {
+	AlertID       string                 `json:"alert_id"`
+	AlertType     string                 `json:"alert_type"`
+	Severity      string                 `json:"severity"`
+	Title         string                 `json:"title"`
+	Description   string                 `json:"description"`
+	RuleID        string                 `json:"rule_id"`
+	RuleName      string                 `json:"rule_name"`
+	Events        []map[string]any       `json:"events"`
+	MatchedFields map[string]interface{} `json:"matched_fields,omitempty"`
+	TraceID       string                 `json:"trace_id"`
+}
+
+// MLAnalysisResult is the result from ML Gateway.
+type MLAnalysisResult = MLAnalysis
+
 // Manager manages alert creation and lifecycle.
 type Manager struct {
 	config      ManagerConfig
 	mitreMapper *mitre.Mapper
 	dedup       *DedupCache
 	producer    AlertProducer
+	mlClient    MLClient
 	logger      *slog.Logger
 
 	ctx         context.Context
@@ -122,10 +174,11 @@ type Manager struct {
 	wg          sync.WaitGroup
 
 	// Metrics
-	alertsCreated   atomic.Uint64
-	alertsDeduped   atomic.Uint64
-	alertsPublished atomic.Uint64
-	errors          atomic.Uint64
+	alertsCreated    atomic.Uint64
+	alertsDeduped    atomic.Uint64
+	alertsPublished  atomic.Uint64
+	alertsMLEnriched atomic.Uint64
+	errors           atomic.Uint64
 }
 
 // AlertProducer defines the interface for publishing alerts.
@@ -152,6 +205,11 @@ func NewManager(cfg ManagerConfig, producer AlertProducer, logger *slog.Logger) 
 	}
 
 	return m
+}
+
+// SetMLClient sets the ML Gateway client for alert enrichment.
+func (m *Manager) SetMLClient(client MLClient) {
+	m.mlClient = client
 }
 
 // Start starts the alert manager.
@@ -226,7 +284,7 @@ func (m *Manager) CreateAlert(ctx context.Context, result *engine.DetectionResul
 
 	m.alertsCreated.Add(1)
 
-	// Publish alert
+	// Publish alert (initial, without ML analysis)
 	if m.producer != nil && m.config.KafkaEnabled {
 		if err := m.producer.Publish(ctx, alert); err != nil {
 			m.errors.Add(1)
@@ -236,7 +294,131 @@ func (m *Manager) CreateAlert(ctx context.Context, result *engine.DetectionResul
 		m.alertsPublished.Add(1)
 	}
 
+	// ML Enrichment (async, non-blocking)
+	if m.mlClient != nil {
+		go m.enrichWithML(alert)
+	}
+
 	return alert, nil
+}
+
+// enrichWithML asynchronously enriches an alert with ML analysis.
+func (m *Manager) enrichWithML(alert *Alert) {
+	mlCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Build ML request
+	req := &MLAlertRequest{
+		AlertID:       alert.ID,
+		AlertType:     string(alert.Source.Type),
+		Severity:      string(alert.Severity),
+		Title:         alert.Title,
+		Description:   alert.Description,
+		RuleID:        alert.RuleID,
+		RuleName:      alert.RuleName,
+		Events:        m.eventsToMaps(alert.Events),
+		MatchedFields: alert.MatchedFields,
+		TraceID:       alert.TraceID,
+	}
+
+	analysis, err := m.mlClient.TriageAlert(mlCtx, req)
+	if err != nil {
+		m.logger.Warn("ml_enrichment_failed", "alert_id", alert.ID, "error", err)
+		return
+	}
+
+	if analysis == nil {
+		// ML is disabled or circuit open - graceful degradation
+		m.logger.Debug("ml_enrichment_skipped", "alert_id", alert.ID)
+		return
+	}
+
+	// Update alert with ML analysis
+	alert.MLAnalysis = analysis
+	alert.UpdatedAt = time.Now()
+	m.alertsMLEnriched.Add(1)
+
+	// Update priority based on ML analysis
+	if analysis.Priority != "" {
+		m.updateAlertPriority(alert, analysis)
+	}
+
+	// Publish updated alert with ML analysis
+	if m.producer != nil && m.config.KafkaEnabled {
+		if err := m.producer.Publish(mlCtx, alert); err != nil {
+			m.logger.Warn("failed to publish ml-enriched alert", "alert_id", alert.ID, "error", err)
+		} else {
+			m.logger.Debug("ml_enriched_alert_published", "alert_id", alert.ID, "risk_score", analysis.RiskScore)
+		}
+	}
+}
+
+// eventsToMaps converts engine events to map format for ML request.
+func (m *Manager) eventsToMaps(events []*engine.Event) []map[string]any {
+	result := make([]map[string]any, 0, len(events))
+	for _, e := range events {
+		eventMap := make(map[string]any)
+		eventMap["event_id"] = e.EventID
+		eventMap["timestamp"] = e.Timestamp
+		eventMap["event_type"] = e.EventType
+
+		// Include effective data
+		for k, v := range e.GetEffectiveData() {
+			eventMap[k] = v
+		}
+
+		result = append(result, eventMap)
+	}
+	return result
+}
+
+// updateAlertPriority updates alert severity based on ML priority.
+func (m *Manager) updateAlertPriority(alert *Alert, analysis *MLAnalysis) {
+	// If ML suggests different priority, consider upgrading (not downgrading for safety)
+	mlSeverity := m.mapPriorityToSeverity(analysis.Priority)
+	if severityRank(mlSeverity) > severityRank(alert.Severity) {
+		alert.Severity = mlSeverity
+		alert.AddTag("ml_upgraded")
+	}
+
+	// Mark as potential false positive
+	if analysis.IsFalsePositive && analysis.FPConfidence > 0.8 {
+		alert.AddTag("ml_likely_fp")
+	}
+}
+
+// mapPriorityToSeverity maps ML priority to alert severity.
+func (m *Manager) mapPriorityToSeverity(priority string) Severity {
+	switch priority {
+	case "critical":
+		return SeverityCritical
+	case "high":
+		return SeverityHigh
+	case "medium":
+		return SeverityMedium
+	case "low":
+		return SeverityLow
+	default:
+		return SeverityMedium
+	}
+}
+
+// severityRank returns numeric rank for severity comparison.
+func severityRank(s Severity) int {
+	switch s {
+	case SeverityCritical:
+		return 5
+	case SeverityHigh:
+		return 4
+	case SeverityMedium:
+		return 3
+	case SeverityLow:
+		return 2
+	case SeverityInfo:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // CreateAlertFromMatch creates an alert from a Sigma rule match.
@@ -340,14 +522,20 @@ func (m *Manager) AggregateAlerts(alerts []*Alert) []*Alert {
 // Stats returns manager statistics.
 func (m *Manager) Stats() map[string]interface{} {
 	stats := map[string]interface{}{
-		"alerts_created":   m.alertsCreated.Load(),
-		"alerts_deduped":   m.alertsDeduped.Load(),
-		"alerts_published": m.alertsPublished.Load(),
-		"errors":           m.errors.Load(),
+		"alerts_created":     m.alertsCreated.Load(),
+		"alerts_deduped":     m.alertsDeduped.Load(),
+		"alerts_published":   m.alertsPublished.Load(),
+		"alerts_ml_enriched": m.alertsMLEnriched.Load(),
+		"errors":             m.errors.Load(),
+		"ml_client_enabled":  m.mlClient != nil,
 	}
 
 	if m.dedup != nil {
 		stats["dedup_cache_size"] = m.dedup.Size()
+	}
+
+	if m.mlClient != nil {
+		stats["ml_client_available"] = m.mlClient.IsAvailable()
 	}
 
 	return stats

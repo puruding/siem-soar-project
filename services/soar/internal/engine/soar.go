@@ -3,6 +3,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/siem-soar-platform/services/soar/internal/executor"
 	"github.com/siem-soar-platform/services/soar/internal/integration"
 	"github.com/siem-soar-platform/services/soar/internal/playbook"
+	"github.com/siem-soar-platform/services/soar/internal/websocket"
 )
 
 // SOAREngine is the main orchestration engine for SOAR operations.
@@ -30,6 +32,7 @@ type SOAREngine struct {
 	metricsRecorder MetricsRecorder
 	logger          *slog.Logger
 	config          *EngineConfig
+	wsHub           *websocket.Hub // WebSocket hub for real-time updates
 
 	mu               sync.RWMutex
 	autoTriggers     map[string]*AutoTrigger
@@ -276,6 +279,210 @@ func NewSOAREngine(
 		scheduledJobs:    make(map[string]*ScheduledJob),
 		rateLimiters:     make(map[string]*RateLimiter),
 		circuitBreakers:  make(map[string]*CircuitBreaker),
+	}
+}
+
+// SetWebSocketHub sets the WebSocket hub for real-time updates.
+func (e *SOAREngine) SetWebSocketHub(hub *websocket.Hub) {
+	e.wsHub = hub
+	e.logger.Info("WebSocket hub configured for real-time updates")
+}
+
+// GetWebSocketHub returns the WebSocket hub.
+func (e *SOAREngine) GetWebSocketHub() *websocket.Hub {
+	return e.wsHub
+}
+
+// broadcastExecutionStatus broadcasts execution status updates via WebSocket.
+func (e *SOAREngine) broadcastExecutionStatus(execution *playbook.Execution) {
+	if e.wsHub == nil {
+		return
+	}
+
+	msg := &websocket.ExecutionStatusMessage{
+		Type:         mapStatusToMsgType(execution.Status),
+		ExecutionID:  execution.ID,
+		AlertID:      execution.AlertID,
+		CaseID:       execution.CaseID,
+		PlaybookID:   execution.PlaybookID,
+		PlaybookName: execution.PlaybookName,
+		Status:       string(execution.Status),
+		Progress:     calculateProgress(execution),
+		CurrentStep:  execution.CurrentStep,
+		TotalSteps:   len(execution.StepResults),
+		Error:        execution.Error,
+		Timestamp:    time.Now(),
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		e.logger.Error("Failed to marshal execution status message", "error", err)
+		return
+	}
+
+	// Broadcast to multiple topics
+	e.wsHub.Broadcast(fmt.Sprintf("execution:%s", execution.ID), data)
+	if execution.AlertID != "" {
+		e.wsHub.Broadcast(fmt.Sprintf("alert:%s", execution.AlertID), data)
+	}
+	if execution.CaseID != "" {
+		e.wsHub.Broadcast(fmt.Sprintf("case:%s", execution.CaseID), data)
+	}
+	// Global execution updates topic
+	e.wsHub.Broadcast("executions", data)
+}
+
+// broadcastNodeStatus broadcasts individual node/step status updates via WebSocket.
+func (e *SOAREngine) broadcastNodeStatus(executionID string, stepResult *playbook.StepResult) {
+	if e.wsHub == nil {
+		return
+	}
+
+	msg := &websocket.NodeStatusMessage{
+		Type:        mapStepStatusToMsgType(stepResult.Status),
+		ExecutionID: executionID,
+		NodeID:      stepResult.StepID,
+		NodeName:    stepResult.StepName,
+		NodeType:    string(stepResult.StepType),
+		Status:      string(stepResult.Status),
+		StartedAt:   &stepResult.StartedAt,
+		CompletedAt: stepResult.CompletedAt,
+		DurationMs:  stepResult.Duration.Milliseconds(),
+		Output:      stepResult.Outputs,
+		Error:       stepResult.Error,
+		Timestamp:   time.Now(),
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		e.logger.Error("Failed to marshal node status message", "error", err)
+		return
+	}
+
+	e.wsHub.Broadcast(fmt.Sprintf("execution:%s", executionID), data)
+}
+
+// broadcastApprovalRequired broadcasts approval required notification via WebSocket.
+func (e *SOAREngine) broadcastApprovalRequired(executionID, nodeID, nodeName, message string, timeout int64) {
+	if e.wsHub == nil {
+		return
+	}
+
+	msg := &websocket.ApprovalMessage{
+		Type:         websocket.MsgTypeApprovalRequired,
+		ExecutionID:  executionID,
+		NodeID:       nodeID,
+		NodeName:     nodeName,
+		ApprovalType: "required",
+		Message:      message,
+		Timeout:      timeout,
+		Timestamp:    time.Now(),
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		e.logger.Error("Failed to marshal approval message", "error", err)
+		return
+	}
+
+	e.wsHub.Broadcast(fmt.Sprintf("execution:%s", executionID), data)
+	e.wsHub.Broadcast("approvals", data)
+}
+
+// broadcastApprovalReceived broadcasts approval received notification via WebSocket.
+func (e *SOAREngine) broadcastApprovalReceived(executionID, nodeID, nodeName, approvedBy string, approved bool) {
+	if e.wsHub == nil {
+		return
+	}
+
+	msgType := websocket.MsgTypeApprovalReceived
+	approvalType := "approved"
+	if !approved {
+		msgType = websocket.MsgTypeApprovalRejected
+		approvalType = "rejected"
+	}
+
+	msg := &websocket.ApprovalMessage{
+		Type:         msgType,
+		ExecutionID:  executionID,
+		NodeID:       nodeID,
+		NodeName:     nodeName,
+		ApprovalType: approvalType,
+		ApprovedBy:   approvedBy,
+		Timestamp:    time.Now(),
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		e.logger.Error("Failed to marshal approval message", "error", err)
+		return
+	}
+
+	e.wsHub.Broadcast(fmt.Sprintf("execution:%s", executionID), data)
+	e.wsHub.Broadcast("approvals", data)
+}
+
+// mapStatusToMsgType maps ExecutionStatus to WebSocket message type.
+func mapStatusToMsgType(status playbook.ExecutionStatus) string {
+	switch status {
+	case playbook.StatusPending:
+		return websocket.MsgTypeExecutionStarted
+	case playbook.StatusRunning:
+		return websocket.MsgTypeExecutionProgress
+	case playbook.StatusCompleted:
+		return websocket.MsgTypeExecutionCompleted
+	case playbook.StatusFailed:
+		return websocket.MsgTypeExecutionFailed
+	case playbook.StatusCancelled:
+		return websocket.MsgTypeExecutionCancelled
+	case playbook.StatusPaused:
+		return websocket.MsgTypeExecutionPaused
+	case playbook.StatusWaiting:
+		return websocket.MsgTypeApprovalRequired
+	default:
+		return websocket.MsgTypeExecutionProgress
+	}
+}
+
+// mapStepStatusToMsgType maps step ExecutionStatus to WebSocket message type.
+func mapStepStatusToMsgType(status playbook.ExecutionStatus) string {
+	switch status {
+	case playbook.StatusRunning, playbook.StatusPending:
+		return websocket.MsgTypeNodeStarted
+	case playbook.StatusCompleted:
+		return websocket.MsgTypeNodeCompleted
+	case playbook.StatusFailed:
+		return websocket.MsgTypeNodeFailed
+	default:
+		return websocket.MsgTypeNodeStarted
+	}
+}
+
+// calculateProgress calculates execution progress percentage (0-100).
+func calculateProgress(execution *playbook.Execution) float64 {
+	if len(execution.StepResults) == 0 {
+		return 0
+	}
+
+	completed := 0
+	for _, result := range execution.StepResults {
+		if result.Status == playbook.StatusCompleted || result.Status == playbook.StatusFailed {
+			completed++
+		}
+	}
+
+	// We don't know total steps upfront, so we estimate based on completed
+	// This is a simplified calculation - in production, we'd track total steps
+	switch execution.Status {
+	case playbook.StatusCompleted:
+		return 100
+	case playbook.StatusFailed, playbook.StatusCancelled:
+		return float64(completed) / float64(len(execution.StepResults)) * 100
+	default:
+		if len(execution.StepResults) > 0 {
+			return float64(completed) / float64(len(execution.StepResults)+1) * 100
+		}
+		return 0
 	}
 }
 

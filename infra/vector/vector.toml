@@ -8,27 +8,152 @@ address = "0.0.0.0:8686"
 # Source: Kafka Raw Logs
 [sources.kafka_raw]
 type = "kafka"
-# Use internal listener port 29092
-bootstrap_servers = "${KAFKA_BROKERS:-kafka:29092}"
+bootstrap_servers = "siem-kafka-dev:29092"
 group_id = "vector-raw-logs"
 topics = ["raw-logs"]
-auto_offset_reset = "latest"
+auto_offset_reset = "earliest"
 
 [sources.kafka_raw.decoding]
 codec = "json"
 
+# Transform: Map Kafka fields to ClickHouse schema
+[transforms.normalize_events]
+type = "remap"
+inputs = ["kafka_raw"]
+source = '''
+# Convert data field to raw_log string
+# data can be JSON object or string
+if exists(.data) {
+  if is_string(.data) {
+    .raw_log = string!(.data)
+  } else if is_object(.data) {
+    # Encode JSON object to string
+    .raw_log = encode_json(.data)
+
+    # Extract fields from data object
+    if exists(.data.hostname) {
+      .principal_hostname = string!(.data.hostname)
+    }
+    if exists(.data.host) {
+      .principal_hostname = string!(.data.host)
+    }
+    if exists(.data.user) {
+      .principal_user_id = string!(.data.user)
+    }
+    if exists(.data.username) {
+      .principal_user_id = string!(.data.username)
+    }
+    if exists(.data.src_ip) {
+      .principal_ip = string!(.data.src_ip)
+    }
+    if exists(.data.source_ip) {
+      .principal_ip = string!(.data.source_ip)
+    }
+    if exists(.data.dst_ip) {
+      .target_ip = string!(.data.dst_ip)
+    }
+    if exists(.data.dest_ip) {
+      .target_ip = string!(.data.dest_ip)
+    }
+    if exists(.data.event_type) {
+      .event_type = string!(.data.event_type)
+    }
+    if exists(.data.severity) {
+      .security_severity = string!(.data.severity)
+    }
+    if exists(.data.action) {
+      .security_action = string!(.data.action)
+    }
+    if exists(.data.message) {
+      .description = string!(.data.message)
+    }
+    if exists(.data.rule_name) {
+      .security_rule_name = string!(.data.rule_name)
+    }
+  } else {
+    .raw_log = to_string(.data) ?? ""
+  }
+} else {
+  .raw_log = ""
+}
+
+# Ensure required fields exist
+if !exists(.tenant_id) || .tenant_id == null {
+  .tenant_id = "default"
+}
+if !exists(.timestamp) || .timestamp == null {
+  .timestamp = format_timestamp!(now(), format: "%Y-%m-%dT%H:%M:%S%.3fZ")
+}
+if !exists(.event_type) || .event_type == null {
+  .event_type = "GENERIC_EVENT"
+}
+
+# Set vendor/product from source_type
+if exists(.source_type) && .source_type != null {
+  .vendor_name = string!(.source_type)
+  .product_name = string!(.source_type)
+} else {
+  .vendor_name = "unknown"
+  .product_name = "unknown"
+}
+
+# Set default values for unset string fields
+if !exists(.security_severity) || .security_severity == null {
+  .security_severity = "UNKNOWN"
+}
+if !exists(.principal_hostname) || .principal_hostname == null {
+  .principal_hostname = ""
+}
+if !exists(.principal_ip) || .principal_ip == null {
+  .principal_ip = ""
+}
+if !exists(.principal_user_id) || .principal_user_id == null {
+  .principal_user_id = ""
+}
+if !exists(.target_hostname) || .target_hostname == null {
+  .target_hostname = ""
+}
+if !exists(.target_ip) || .target_ip == null {
+  .target_ip = ""
+}
+if !exists(.security_action) || .security_action == null {
+  .security_action = "UNKNOWN"
+}
+if !exists(.security_rule_name) || .security_rule_name == null {
+  .security_rule_name = ""
+}
+if !exists(.description) || .description == null {
+  .description = ""
+}
+
+# Remove fields that cause ClickHouse issues
+del(.headers)
+del(.message_key)
+del(.offset)
+del(.partition)
+del(.topic)
+del(.source_type)
+del(.data)
+del(.metadata)
+del(.payload)
+del(.content_type)
+del(.remote_addr)
+del(.received_at)
+del(.event_id)
+'''
+
 # Sink: Console (Debug)
 [sinks.console_debug]
 type = "console"
-inputs = ["kafka_raw"]
+inputs = ["normalize_events"]
 target = "stdout"
 encoding.codec = "json"
 
 # Sink: ClickHouse
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["kafka_raw"]
-endpoint = "${CLICKHOUSE_ENDPOINT:-http://clickhouse:8123}"
+inputs = ["normalize_events"]
+endpoint = "http://host.docker.internal:8123"
 database = "siem"
 table = "events"
 skip_unknown_fields = true
@@ -37,8 +162,8 @@ date_time_best_effort = true
 
 [sinks.clickhouse.auth]
 strategy = "basic"
-user = "${CLICKHOUSE_USER:-siem}"
-password = "${CLICKHOUSE_PASSWORD:-siem_dev_password}"
+user = "siem"
+password = "siem_dev_password"
 
 [sinks.clickhouse.batch]
 max_events = 10000

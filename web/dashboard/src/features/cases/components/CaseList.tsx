@@ -37,93 +37,16 @@ import {
 } from 'lucide-react';
 import { formatRelativeTime, cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/toaster';
-
-interface Case {
-  id: string;
-  title: string;
-  description: string;
-  status: 'open' | 'in-progress' | 'pending' | 'resolved' | 'closed';
-  severity: 'critical' | 'high' | 'medium' | 'low';
-  assignee: { name: string; initials: string } | null;
-  alerts: number;
-  created: Date;
-  updated: Date;
-  tags: string[];
-}
-
-const mockCases: Case[] = [
-  {
-    id: 'CASE-2024-001',
-    title: 'Ransomware Incident - Finance Department',
-    description:
-      'LockBit 3.0 ransomware detected on multiple endpoints in the finance department. Initial infection vector appears to be phishing email.',
-    status: 'in-progress',
-    severity: 'critical',
-    assignee: { name: 'John Doe', initials: 'JD' },
-    alerts: 5,
-    created: new Date(Date.now() - 1000 * 60 * 60 * 2),
-    updated: new Date(Date.now() - 1000 * 60 * 15),
-    tags: ['ransomware', 'finance', 'priority'],
-  },
-  {
-    id: 'CASE-2024-002',
-    title: 'Phishing Campaign Investigation',
-    description:
-      'Widespread phishing campaign targeting executives. Multiple credential harvesting attempts detected.',
-    status: 'open',
-    severity: 'high',
-    assignee: { name: 'Jane Smith', initials: 'JS' },
-    alerts: 12,
-    created: new Date(Date.now() - 1000 * 60 * 60 * 5),
-    updated: new Date(Date.now() - 1000 * 60 * 45),
-    tags: ['phishing', 'executive', 'credential-theft'],
-  },
-  {
-    id: 'CASE-2024-003',
-    title: 'Unauthorized Access - Admin Portal',
-    description:
-      'Suspicious admin portal access from unknown IP. Potential compromised credentials.',
-    status: 'in-progress',
-    severity: 'high',
-    assignee: { name: 'Mike Johnson', initials: 'MJ' },
-    alerts: 3,
-    created: new Date(Date.now() - 1000 * 60 * 60 * 8),
-    updated: new Date(Date.now() - 1000 * 60 * 120),
-    tags: ['unauthorized-access', 'admin'],
-  },
-  {
-    id: 'CASE-2024-004',
-    title: 'Data Exfiltration - Cloud Storage',
-    description:
-      'Large data transfer to external cloud storage detected. Possible insider threat.',
-    status: 'pending',
-    severity: 'critical',
-    assignee: null,
-    alerts: 8,
-    created: new Date(Date.now() - 1000 * 60 * 60 * 12),
-    updated: new Date(Date.now() - 1000 * 60 * 60 * 3),
-    tags: ['data-exfiltration', 'insider-threat', 'cloud'],
-  },
-  {
-    id: 'CASE-2024-005',
-    title: 'Malware on Marketing Endpoint',
-    description: 'Generic trojan detected and contained on marketing workstation.',
-    status: 'resolved',
-    severity: 'medium',
-    assignee: { name: 'Sarah Wilson', initials: 'SW' },
-    alerts: 2,
-    created: new Date(Date.now() - 1000 * 60 * 60 * 24),
-    updated: new Date(Date.now() - 1000 * 60 * 60 * 6),
-    tags: ['malware', 'contained'],
-  },
-];
+import { useCases } from '../hooks/useCases';
+import type { Case, CaseSeverity } from '@/types/case';
 
 const statusStyles: Record<string, string> = {
   open: 'bg-neon-cyan/20 text-neon-cyan border-neon-cyan/50',
-  'in-progress': 'bg-neon-orange/20 text-neon-orange border-neon-orange/50',
+  in_progress: 'bg-neon-orange/20 text-neon-orange border-neon-orange/50',
   pending: 'bg-yellow-500/20 text-yellow-500 border-yellow-500/50',
   resolved: 'bg-neon-green/20 text-neon-green border-neon-green/50',
   closed: 'bg-muted text-muted-foreground border-border',
+  reopened: 'bg-neon-cyan/20 text-neon-cyan border-neon-cyan/50',
 };
 
 // Alert interface for linking
@@ -138,7 +61,7 @@ interface AlertItem {
 interface CreateCaseForm {
   title: string;
   description: string;
-  severity: Case['severity'];
+  severity: CaseSeverity;
   assignee: string;
   tags: string;
   linkedAlerts: string[];
@@ -169,8 +92,14 @@ export function CaseList() {
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Cases state (initialized with mock data)
-  const [cases, setCases] = useState<Case[]>(mockCases);
+  // Use the cases hook
+  const {
+    cases,
+    loading,
+    error,
+    createCase: createCaseApi,
+    refresh,
+  } = useCases();
 
   // Available alerts for linking
   const [availableAlerts, setAvailableAlerts] = useState<AlertItem[]>([
@@ -215,76 +144,43 @@ export function CaseList() {
     setIsCreating(true);
 
     try {
-      // Generate new case ID
-      const newId = `CASE-2024-${String(cases.length + 1).padStart(3, '0')}`;
-
-      // Find assignee if selected
-      const assignee = createForm.assignee
-        ? availableAssignees.find(a => a.name === createForm.assignee) || null
-        : null;
-
       // Parse tags
       const tags = createForm.tags
         .split(',')
         .map(t => t.trim().toLowerCase())
         .filter(t => t.length > 0);
 
-      const newCase: Case = {
-        id: newId,
+      // Create case via API
+      const newCase = await createCaseApi({
         title: createForm.title,
         description: createForm.description || 'No description provided.',
-        status: 'open',
         severity: createForm.severity,
-        assignee,
-        alerts: createForm.linkedAlerts.length,
-        created: new Date(),
-        updated: new Date(),
-        tags,
-      };
+        assigneeId: createForm.assignee || undefined,
+        alertIds: createForm.linkedAlerts.length > 0 ? createForm.linkedAlerts : undefined,
+        tags: tags.length > 0 ? tags : undefined,
+      });
 
-      // Try to create via API first
-      try {
-        const response = await fetch('/api/v1/cases', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: createForm.title,
-            description: createForm.description,
-            priority: createForm.severity,
-            assignee: createForm.assignee,
-            tags,
-            alert_ids: createForm.linkedAlerts,
-          }),
+      if (newCase) {
+        // Reset form and close dialog
+        setCreateForm(initialFormState);
+        setIsCreateDialogOpen(false);
+
+        toast({
+          title: 'Case Created',
+          description: `${newCase.id} has been created successfully.`,
+          variant: 'success',
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.case) {
-            newCase.id = data.case.id;
-          }
-        }
-      } catch {
-        // API not available, use local state only
-        console.log('API not available, creating case locally');
+        // Refresh the list
+        await refresh();
+      } else {
+        throw new Error('Failed to create case');
       }
-
-      // Add to local state
-      setCases(prev => [newCase, ...prev]);
-
-      // Reset form and close dialog
-      setCreateForm(initialFormState);
-      setIsCreateDialogOpen(false);
-
-      toast({
-        title: 'Case Created',
-        description: `${newCase.id} has been created successfully.`,
-        variant: 'success',
-      });
     } catch (error) {
       console.error('Failed to create case:', error);
       toast({
         title: 'Error',
-        description: 'Failed to create case. Please try again.',
+        description: error instanceof Error ? error.message : 'Failed to create case. Please try again.',
         variant: 'destructive',
       });
     } finally {
@@ -391,9 +287,11 @@ export function CaseList() {
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="open">Open</SelectItem>
-                  <SelectItem value="in-progress">In Progress</SelectItem>
+                  <SelectItem value="in_progress">In Progress</SelectItem>
                   <SelectItem value="pending">Pending</SelectItem>
                   <SelectItem value="resolved">Resolved</SelectItem>
+                  <SelectItem value="closed">Closed</SelectItem>
+                  <SelectItem value="reopened">Reopened</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={severityFilter} onValueChange={setSeverityFilter}>
@@ -433,8 +331,17 @@ export function CaseList() {
           </div>
         </CardHeader>
         <CardContent>
+          {error && (
+            <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+              <p className="text-sm text-destructive">Error: {error}</p>
+            </div>
+          )}
           <ScrollArea className="h-[calc(100vh-420px)]">
-            {viewMode === 'grid' ? (
+            {loading && cases.length === 0 ? (
+              <div className="flex items-center justify-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : viewMode === 'grid' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredCases.map((caseItem) => (
                   <Link key={caseItem.id} to={`/cases/${caseItem.id}`}>
@@ -494,8 +401,8 @@ export function CaseList() {
                           )}
                         </div>
                         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                          <span>{caseItem.alerts} alerts</span>
-                          <span>{formatRelativeTime(caseItem.updated)}</span>
+                          <span>{caseItem.alertCount || 0} alerts</span>
+                          <span>{formatRelativeTime(caseItem.updatedAt)}</span>
                         </div>
                       </div>
                     </Card>
@@ -548,10 +455,10 @@ export function CaseList() {
                         )}
                       </div>
                       <div className="w-20 text-sm font-mono text-center">
-                        {caseItem.alerts}
+                        {caseItem.alertCount || 0}
                       </div>
                       <div className="w-24 text-sm text-muted-foreground">
-                        {formatRelativeTime(caseItem.updated)}
+                        {formatRelativeTime(caseItem.updatedAt)}
                       </div>
                     </div>
                   </Link>

@@ -499,6 +499,9 @@ type ExecutionStore interface {
 	// GetByWorkflowID retrieves an execution by Temporal workflow ID.
 	GetByWorkflowID(ctx context.Context, workflowID string) (*Execution, error)
 
+	// GetByAlertID retrieves executions for a specific alert.
+	GetByAlertID(ctx context.Context, alertID string) ([]*Execution, error)
+
 	// AddStepResult adds a step result to an execution.
 	AddStepResult(ctx context.Context, executionID string, result *StepResult) error
 
@@ -676,6 +679,21 @@ func (s *MemoryExecutionStore) GetByWorkflowID(ctx context.Context, workflowID s
 	}
 
 	return s.executions[execID], nil
+}
+
+// GetByAlertID retrieves executions for a specific alert.
+func (s *MemoryExecutionStore) GetByAlertID(ctx context.Context, alertID string) ([]*Execution, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var executions []*Execution
+	for _, exec := range s.executions {
+		if exec.AlertID == alertID {
+			executions = append(executions, exec)
+		}
+	}
+
+	return executions, nil
 }
 
 // AddStepResult adds a step result to an execution.

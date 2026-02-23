@@ -169,6 +169,128 @@ func CombinedAuth(jwtAuth *auth.JWTAuthenticator, apiKeyAuth *auth.APIKeyAuthent
 	}
 }
 
+// AuthConfig holds authentication middleware configuration.
+type AuthConfig struct {
+	// Enabled controls whether authentication is required.
+	// Set via AUTH_ENABLED environment variable.
+	Enabled bool
+
+	// ExcludedPaths are paths that bypass authentication entirely.
+	// Health and readiness endpoints are typically excluded.
+	ExcludedPaths []string
+
+	// ExcludedPrefixes are path prefixes that bypass authentication.
+	ExcludedPrefixes []string
+}
+
+// DefaultAuthConfig returns default authentication configuration.
+func DefaultAuthConfig() AuthConfig {
+	return AuthConfig{
+		Enabled: true,
+		ExcludedPaths: []string{
+			"/health",
+			"/ready",
+		},
+		ExcludedPrefixes: []string{},
+	}
+}
+
+// shouldSkipAuth checks if authentication should be skipped for the given path.
+func shouldSkipAuth(path string, config AuthConfig) bool {
+	// Check exact path matches
+	for _, excluded := range config.ExcludedPaths {
+		if path == excluded {
+			return true
+		}
+	}
+
+	// Check prefix matches
+	for _, prefix := range config.ExcludedPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ConditionalAuth returns a middleware that conditionally applies authentication.
+// If AuthConfig.Enabled is false, authentication is bypassed entirely (dev mode).
+// Paths in ExcludedPaths or ExcludedPrefixes are always bypassed.
+func ConditionalAuth(jwtAuth *auth.JWTAuthenticator, apiKeyAuth *auth.APIKeyAuthenticator, config AuthConfig, logger *slog.Logger) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip auth if disabled (dev mode)
+			if !config.Enabled {
+				logger.Debug("authentication disabled (dev mode)", "path", r.URL.Path)
+				// Create mock dev user context
+				ctx := auth.WithDevUser(r.Context())
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// Skip auth for excluded paths
+			if shouldSkipAuth(r.URL.Path, config) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Try JWT first
+			if token, err := auth.ExtractToken(r); err == nil && token != "" {
+				claims, err := jwtAuth.Authenticate(token)
+				if err == nil {
+					ctx := auth.WithClaims(r.Context(), claims)
+					logger.Debug("JWT authentication successful",
+						"user_id", claims.UserID,
+						"username", claims.GetEffectiveUsername(),
+						"roles", claims.GetAllRoles(),
+						"groups", claims.Groups,
+					)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+				logger.Debug("JWT authentication failed", "error", err)
+			}
+
+			// Try API key
+			if apiKeyAuth != nil {
+				if apiKey := apiKeyAuth.ExtractAPIKey(r); apiKey != "" {
+					key, err := apiKeyAuth.Authenticate(r.Context(), apiKey)
+					if err == nil {
+						ctx := auth.WithAPIKey(r.Context(), key)
+						logger.Debug("API key authentication successful", "key_id", key.ID)
+						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+					logger.Debug("API key authentication failed", "error", err)
+				}
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"Unauthorized","message":"Valid authentication required"}`))
+		})
+	}
+}
+
+// RequireGroup returns a middleware that checks for a required group.
+func RequireGroup(group string, logger *slog.Logger) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := auth.GetClaims(r.Context())
+			if claims == nil || !claims.HasGroup(group) {
+				logger.Debug("group access denied",
+					"required_group", group,
+					"path", r.URL.Path)
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // RateLimit returns a rate limiting middleware.
 func RateLimit(limiter *ratelimit.RateLimiter, logger *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {

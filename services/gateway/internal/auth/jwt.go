@@ -26,6 +26,11 @@ type JWTConfig struct {
 	JWKSURL         string        `json:"jwks_url,omitempty"`
 	ClockSkew       time.Duration `json:"clock_skew"`
 	RefreshInterval time.Duration `json:"refresh_interval"`
+
+	// Keycloak-specific configuration
+	KeycloakURL      string `json:"keycloak_url"`
+	KeycloakRealm    string `json:"keycloak_realm"`
+	KeycloakClientID string `json:"keycloak_client_id"`
 }
 
 // DefaultJWTConfig returns default JWT configuration.
@@ -35,6 +40,27 @@ func DefaultJWTConfig() JWTConfig {
 		ClockSkew:       5 * time.Minute,
 		RefreshInterval: 1 * time.Hour,
 	}
+}
+
+// NewKeycloakConfig creates a JWT config from Keycloak environment variables.
+// Expected env vars: KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID
+func NewKeycloakConfig(keycloakURL, realm, clientID string) JWTConfig {
+	cfg := DefaultJWTConfig()
+	cfg.KeycloakURL = keycloakURL
+	cfg.KeycloakRealm = realm
+	cfg.KeycloakClientID = clientID
+
+	// Construct issuer URL for Keycloak
+	if keycloakURL != "" && realm != "" {
+		cfg.Issuer = fmt.Sprintf("%s/realms/%s", keycloakURL, realm)
+		cfg.JWKSURL = fmt.Sprintf("%s/realms/%s/protocol/openid-connect/certs", keycloakURL, realm)
+	}
+
+	if clientID != "" {
+		cfg.Audience = clientID
+	}
+
+	return cfg
 }
 
 // Claims represents JWT claims.
@@ -56,6 +82,22 @@ type Claims struct {
 	Roles       []string `json:"roles"`
 	Permissions []string `json:"permissions"`
 	Scopes      []string `json:"scope"`
+
+	// Keycloak-specific claims
+	PreferredUsername string       `json:"preferred_username"`
+	RealmAccess       *RealmAccess `json:"realm_access,omitempty"`
+	ResourceAccess    map[string]*ResourceAccess `json:"resource_access,omitempty"`
+	Groups            []string     `json:"groups"`
+}
+
+// RealmAccess represents Keycloak realm-level access roles.
+type RealmAccess struct {
+	Roles []string `json:"roles"`
+}
+
+// ResourceAccess represents Keycloak resource-level access roles.
+type ResourceAccess struct {
+	Roles []string `json:"roles"`
 }
 
 // IsValid validates the claims.
@@ -86,13 +128,60 @@ func (c *Claims) IsValid(config JWTConfig) error {
 }
 
 // HasRole checks if the claims have a specific role.
+// It checks both the standard roles array and Keycloak's realm_access.roles.
 func (c *Claims) HasRole(role string) bool {
+	// Check standard roles
 	for _, r := range c.Roles {
 		if r == role {
 			return true
 		}
 	}
+	// Check Keycloak realm_access roles
+	if c.RealmAccess != nil {
+		for _, r := range c.RealmAccess.Roles {
+			if r == role {
+				return true
+			}
+		}
+	}
 	return false
+}
+
+// HasGroup checks if the claims have a specific group.
+// Groups from Keycloak are typically prefixed with "/" (e.g., "/soc-team").
+func (c *Claims) HasGroup(group string) bool {
+	for _, g := range c.Groups {
+		if g == group || g == "/"+group {
+			return true
+		}
+	}
+	return false
+}
+
+// GetAllRoles returns all roles from both standard roles and Keycloak realm_access.
+func (c *Claims) GetAllRoles() []string {
+	roleSet := make(map[string]struct{})
+	for _, r := range c.Roles {
+		roleSet[r] = struct{}{}
+	}
+	if c.RealmAccess != nil {
+		for _, r := range c.RealmAccess.Roles {
+			roleSet[r] = struct{}{}
+		}
+	}
+	roles := make([]string, 0, len(roleSet))
+	for r := range roleSet {
+		roles = append(roles, r)
+	}
+	return roles
+}
+
+// GetEffectiveUsername returns the username, preferring Keycloak's preferred_username.
+func (c *Claims) GetEffectiveUsername() string {
+	if c.PreferredUsername != "" {
+		return c.PreferredUsername
+	}
+	return c.Username
 }
 
 // HasPermission checks if the claims have a specific permission.
@@ -225,6 +314,9 @@ func (a *JWTAuthenticator) Authenticate(token string) (*Claims, error) {
 		return nil, fmt.Errorf("failed to parse claims: %w", err)
 	}
 
+	// Normalize Keycloak claims to standard claims
+	a.normalizeKeycloakClaims(&claims)
+
 	// Verify signature
 	if err := a.verifySignature(token, header.Alg, header.Kid); err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
@@ -343,6 +435,34 @@ func (a *JWTAuthenticator) Stop() {
 	a.cancel()
 }
 
+// normalizeKeycloakClaims normalizes Keycloak-specific claims to standard claims.
+func (a *JWTAuthenticator) normalizeKeycloakClaims(claims *Claims) {
+	// Set UserID from Subject if not set
+	if claims.UserID == "" && claims.Subject != "" {
+		claims.UserID = claims.Subject
+	}
+
+	// Set Username from preferred_username if not set
+	if claims.Username == "" && claims.PreferredUsername != "" {
+		claims.Username = claims.PreferredUsername
+	}
+
+	// Merge realm_access roles into standard roles
+	if claims.RealmAccess != nil && len(claims.RealmAccess.Roles) > 0 {
+		roleSet := make(map[string]struct{})
+		for _, r := range claims.Roles {
+			roleSet[r] = struct{}{}
+		}
+		for _, r := range claims.RealmAccess.Roles {
+			roleSet[r] = struct{}{}
+		}
+		claims.Roles = make([]string, 0, len(roleSet))
+		for r := range roleSet {
+			claims.Roles = append(claims.Roles, r)
+		}
+	}
+}
+
 // ExtractToken extracts the JWT token from an HTTP request.
 func ExtractToken(r *http.Request) (string, error) {
 	// Check Authorization header
@@ -407,4 +527,23 @@ func GetTenantID(ctx context.Context) string {
 		return tenantID
 	}
 	return ""
+}
+
+// WithDevUser adds a mock development user to the context.
+// This is used when AUTH_ENABLED=false for local development.
+func WithDevUser(ctx context.Context) context.Context {
+	devClaims := &Claims{
+		Subject:           "dev-user-id",
+		UserID:            "dev-user-id",
+		Username:          "dev-user",
+		PreferredUsername: "dev-user",
+		Email:             "dev@localhost",
+		TenantID:          "dev-tenant",
+		Roles:             []string{"admin", "analyst", "developer"},
+		Groups:            []string{"/soc-team", "/tier-1", "/admin"},
+		RealmAccess: &RealmAccess{
+			Roles: []string{"admin", "analyst", "developer"},
+		},
+	}
+	return WithClaims(ctx, devClaims)
 }

@@ -10,20 +10,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/siem-soar-platform/pkg/schema"
 	"github.com/siem-soar-platform/services/parser/internal/config"
 	"github.com/siem-soar-platform/services/parser/internal/engine"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// RawLogEvent represents an incoming raw log event from Kafka.
-type RawLogEvent struct {
-	EventID    string            `json:"event_id"`
-	TenantID   string            `json:"tenant_id"`
-	SourceType string            `json:"source_type"`
-	Timestamp  time.Time         `json:"timestamp"`
-	Data       string            `json:"data"`
-	Metadata   map[string]string `json:"metadata"`
-}
 
 // Consumer handles Kafka consumption and parsing.
 type Consumer struct {
@@ -227,21 +219,30 @@ func (c *Consumer) processBatch(records []*kgo.Record) {
 	recordMap := make(map[string]*kgo.Record) // Map event ID to record for commit tracking
 
 	for _, record := range records {
-		var rawLog RawLogEvent
+		var rawLog schema.RawLogMessage
 		if err := json.Unmarshal(record.Value, &rawLog); err != nil {
-			// Try to handle as plain text
-			rawLog = RawLogEvent{
+			// Fallback: try to extract metadata from Kafka headers
+			rawLog = schema.RawLogMessage{
 				EventID:    uuid.New().String(),
 				TenantID:   "default",
 				SourceType: "unknown",
 				Timestamp:  time.Now(),
-				Data:       string(record.Value),
+				Data:       record.Value,
 				Metadata:   make(map[string]string),
 			}
 
-			// Extract metadata from Kafka headers
+			// Extract metadata from Kafka headers - preserve tenant_id and source_type
 			for _, h := range record.Headers {
-				rawLog.Metadata[h.Key] = string(h.Value)
+				switch h.Key {
+				case "tenant_id":
+					rawLog.TenantID = string(h.Value)
+				case "source_type":
+					rawLog.SourceType = string(h.Value)
+				case "event_id":
+					rawLog.EventID = string(h.Value)
+				default:
+					rawLog.Metadata[h.Key] = string(h.Value)
+				}
 			}
 		}
 

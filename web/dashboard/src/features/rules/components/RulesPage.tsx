@@ -1,39 +1,27 @@
 import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from '@/components/ui/resizable';
-import {
-  FileCode2,
-  Grid3x3,
   Download,
-  Shield,
+  Plus,
 } from 'lucide-react';
 import { RuleList } from './RuleList';
-import { RuleEditor } from './RuleEditor';
-import { RuleDetail } from './RuleDetail';
 import { AttackMatrix } from './AttackMatrix';
-import { RuleTestPanel } from './RuleTestPanel';
 import { RuleImport } from './RuleImport';
 import { RuleCreateDialog } from './RuleCreateDialog';
 import { useRules, useAttackMatrix } from '../hooks/useRules';
 import type { SigmaRule } from '../types';
 
 export function RulesPage() {
+  const navigate = useNavigate();
   const {
     filteredRules,
     selectedRule,
     setSelectedRule,
     filters,
     setFilters,
-    updateRule,
     toggleRuleEnabled,
-    deleteRule,
     createRule,
-    testRule,
   } = useRules();
 
   const {
@@ -42,43 +30,27 @@ export function RulesPage() {
     setSelectedTechnique,
   } = useAttackMatrix();
 
-  const [activeTab, setActiveTab] = useState<'list' | 'matrix'>('list');
-  const [showDetailSheet, setShowDetailSheet] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-
-  // Handle rule selection
-  const handleSelectRule = useCallback((rule: SigmaRule) => {
-    setSelectedRule(rule);
-    setShowDetailSheet(true);
-  }, [setSelectedRule]);
 
   // Handle technique click from matrix
   const handleTechniqueClick = useCallback((techniqueId: string | null) => {
     setSelectedTechnique(techniqueId);
-    if (techniqueId) {
-      // Filter rules by technique
-      // The useRules hook would need to be extended for this
-    }
   }, [setSelectedTechnique]);
-
-  // Handle rule save
-  const handleSaveRule = useCallback((ruleId: string, updates: Partial<SigmaRule>) => {
-    updateRule(ruleId, updates);
-  }, [updateRule]);
 
   // Handle import
   const handleImport = useCallback((rules: { id: string; title: string }[]) => {
     console.log('Importing rules:', rules);
-    // Would create new rules here
   }, []);
 
   // Handle create
-  const handleCreate = useCallback((ruleData: Partial<SigmaRule>) => {
-    const newRule = createRule(ruleData);
-    setSelectedRule(newRule);
+  const handleCreate = useCallback(async (ruleData: Partial<SigmaRule>) => {
+    const newRule = await createRule(ruleData);
+    if (newRule) {
+      navigate(`/rules/${newRule.id}`);
+    }
     setShowCreateDialog(false);
-  }, [createRule, setSelectedRule]);
+  }, [createRule, navigate]);
 
   return (
     <div className="h-[calc(100vh-140px)] flex flex-col animate-fade-in">
@@ -101,63 +73,38 @@ export function RulesPage() {
             <Download className="w-4 h-4 mr-2" />
             Import Rules
           </Button>
+          <Button
+            size="sm"
+            onClick={() => setShowCreateDialog(true)}
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            New Rule
+          </Button>
         </div>
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 min-h-0 flex flex-col gap-4">
-        {/* ATT&CK Matrix (collapsible) */}
-        <AttackMatrix
-          matrixData={matrixData}
-          onTechniqueClick={handleTechniqueClick}
-          selectedTechnique={selectedTechnique}
-        />
+      <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-hidden">
+        {/* ATT&CK Matrix (collapsible) - fixed height */}
+        <div className="shrink-0 max-h-[280px] overflow-hidden">
+          <AttackMatrix
+            matrixData={matrixData}
+            onTechniqueClick={handleTechniqueClick}
+            selectedTechnique={selectedTechnique}
+          />
+        </div>
 
-        {/* Rules and Editor split view */}
-        <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
-          {/* Rules List Panel */}
-          <ResizablePanel defaultSize={50} minSize={30}>
-            <RuleList
-              rules={filteredRules}
-              selectedRule={selectedRule}
-              onSelectRule={handleSelectRule}
-              onToggleEnabled={toggleRuleEnabled}
-              filters={filters}
-              onFiltersChange={setFilters}
-              onCreateRule={() => setShowCreateDialog(true)}
-            />
-          </ResizablePanel>
-
-          <ResizableHandle withHandle />
-
-          {/* Editor Panel */}
-          <ResizablePanel defaultSize={50} minSize={30}>
-            <div className="h-full flex flex-col gap-4">
-              <RuleEditor
-                rule={selectedRule}
-                onSave={handleSaveRule}
-                className="flex-1 min-h-0"
-              />
-              <RuleTestPanel
-                rule={selectedRule}
-                onTest={testRule}
-              />
-            </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+        {/* Rules List - Full Width */}
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <RuleList
+            rules={filteredRules}
+            onToggleEnabled={toggleRuleEnabled}
+            filters={filters}
+            onFiltersChange={setFilters}
+            navigateToDetail={true}
+          />
+        </div>
       </div>
-
-      {/* Rule Detail Sheet */}
-      <RuleDetail
-        rule={selectedRule}
-        open={showDetailSheet}
-        onOpenChange={setShowDetailSheet}
-        onEdit={() => setShowDetailSheet(false)}
-        onDelete={(ruleId) => {
-          deleteRule(ruleId);
-          setShowDetailSheet(false);
-        }}
-      />
 
       {/* Import Dialog */}
       <RuleImport

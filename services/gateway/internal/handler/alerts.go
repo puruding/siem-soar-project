@@ -49,6 +49,108 @@ var ValidAlertStatuses = map[string]bool{
 	"closed":        true,
 }
 
+// init initializes sample alerts for demo
+func init() {
+	now := time.Now()
+
+	sampleAlerts := []Alert{
+		{
+			ID:          "ALERT-1001",
+			AlertID:     "ALERT-1001",
+			TenantID:    "default",
+			RuleID:      "RULE-001",
+			RuleName:    "Brute Force Detection",
+			Title:       "SSH Brute Force Attack Detected",
+			Description: "Multiple failed SSH login attempts detected from 192.168.1.100",
+			Severity:    "HIGH",
+			Status:      "new",
+			Source:      "Detection",
+			SourceType:  "firewall",
+			Target:      "192.168.1.100",
+			Timestamp:   now.Add(-5 * time.Minute),
+			UpdatedAt:   now.Add(-5 * time.Minute),
+			MITRETactics:    []string{"TA0006"},
+			MITRETechniques: []string{"T1110"},
+		},
+		{
+			ID:          "ALERT-1002",
+			AlertID:     "ALERT-1002",
+			TenantID:    "default",
+			RuleID:      "RULE-002",
+			RuleName:    "Suspicious Process Execution",
+			Title:       "PowerShell Encoded Command Execution",
+			Description: "Suspicious PowerShell command with Base64 encoding detected on ws-prod-01",
+			Severity:    "CRITICAL",
+			Status:      "new",
+			Source:      "Detection",
+			SourceType:  "edr",
+			Target:      "ws-prod-01",
+			Timestamp:   now.Add(-10 * time.Minute),
+			UpdatedAt:   now.Add(-10 * time.Minute),
+			MITRETactics:    []string{"TA0002"},
+			MITRETechniques: []string{"T1059.001"},
+		},
+		{
+			ID:          "ALERT-1003",
+			AlertID:     "ALERT-1003",
+			TenantID:    "default",
+			RuleID:      "RULE-003",
+			RuleName:    "Data Exfiltration Detection",
+			Title:       "Large Data Transfer to External IP",
+			Description: "Unusual large data transfer (500MB+) to external IP 185.45.67.89",
+			Severity:    "HIGH",
+			Status:      "investigating",
+			Source:      "Detection",
+			SourceType:  "network",
+			Target:      "185.45.67.89",
+			Timestamp:   now.Add(-15 * time.Minute),
+			UpdatedAt:   now.Add(-12 * time.Minute),
+			MITRETactics:    []string{"TA0010"},
+			MITRETechniques: []string{"T1041"},
+		},
+		{
+			ID:          "ALERT-1004",
+			AlertID:     "ALERT-1004",
+			TenantID:    "default",
+			RuleID:      "RULE-004",
+			RuleName:    "Privilege Escalation Attempt",
+			Title:       "Local Admin Privilege Escalation",
+			Description: "User john.doe attempted to escalate privileges on db-server-01",
+			Severity:    "MEDIUM",
+			Status:      "acknowledged",
+			Source:      "Detection",
+			SourceType:  "endpoint",
+			Target:      "john.doe",
+			Timestamp:   now.Add(-30 * time.Minute),
+			UpdatedAt:   now.Add(-25 * time.Minute),
+			MITRETactics:    []string{"TA0004"},
+			MITRETechniques: []string{"T1548"},
+		},
+		{
+			ID:          "ALERT-1005",
+			AlertID:     "ALERT-1005",
+			TenantID:    "default",
+			RuleID:      "RULE-005",
+			RuleName:    "C2 Communication Detected",
+			Title:       "Command and Control Beacon Activity",
+			Description: "Periodic beacon communication pattern detected to known C2 server",
+			Severity:    "CRITICAL",
+			Status:      "new",
+			Source:      "Detection",
+			SourceType:  "ndr",
+			Target:      "malware-c2.evil.com",
+			Timestamp:   now.Add(-2 * time.Minute),
+			UpdatedAt:   now.Add(-2 * time.Minute),
+			MITRETactics:    []string{"TA0011"},
+			MITRETechniques: []string{"T1071", "T1573"},
+		},
+	}
+
+	alertStoreMu.Lock()
+	alertStore = sampleAlerts
+	alertStoreMu.Unlock()
+}
+
 // AlertComment represents a comment on an alert
 type AlertComment struct {
 	ID        string    `json:"id"`
@@ -152,6 +254,9 @@ func CreateAlertHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	alertStoreMu.Unlock()
 
+	// Broadcast alert creation via WebSocket
+	BroadcastAlertCreated(alert)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(alert)
@@ -251,6 +356,9 @@ func UpdateAlertStatusHandler(w http.ResponseWriter, r *http.Request) {
 			alertStore[i].Status = req.Status
 			alertStore[i].UpdatedAt = time.Now()
 
+			// Broadcast alert update via WebSocket
+			BroadcastAlertUpdated(alertStore[i])
+
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": true,
@@ -296,6 +404,9 @@ func AcknowledgeAlertHandler(w http.ResponseWriter, r *http.Request) {
 		if alertStore[i].ID == alertID || alertStore[i].AlertID == alertID {
 			alertStore[i].Status = "acknowledged"
 			alertStore[i].UpdatedAt = time.Now()
+
+			// Broadcast alert update via WebSocket
+			BroadcastAlertUpdated(alertStore[i])
 
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -348,6 +459,9 @@ func CloseAlertHandler(w http.ResponseWriter, r *http.Request) {
 		if alertStore[i].ID == alertID || alertStore[i].AlertID == alertID {
 			alertStore[i].Status = "closed"
 			alertStore[i].UpdatedAt = time.Now()
+
+			// Broadcast alert update via WebSocket
+			BroadcastAlertUpdated(alertStore[i])
 
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -433,6 +547,9 @@ func CreateCaseFromAlertHandler(w http.ResponseWriter, r *http.Request) {
 	caseStoreMu.Lock()
 	caseStore = append([]Case{newCase}, caseStore...)
 	caseStoreMu.Unlock()
+
+	// Broadcast case creation via WebSocket
+	BroadcastCaseCreated(newCase)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -529,6 +646,9 @@ func RunPlaybookOnAlertHandler(w http.ResponseWriter, r *http.Request) {
 	executionStoreMu.Lock()
 	executionStore = append([]PlaybookExecution{execution}, executionStore...)
 	executionStoreMu.Unlock()
+
+	// Broadcast playbook execution via WebSocket
+	BroadcastPlaybookExecution(execution)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

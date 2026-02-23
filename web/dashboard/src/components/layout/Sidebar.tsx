@@ -17,6 +17,8 @@ import {
   FileCode,
   Server,
   ShieldAlert,
+  GitMerge,
+  ScrollText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -84,10 +86,22 @@ const navItems = [
     description: 'Asset inventory',
   },
   {
+    title: '이벤트 로그',
+    icon: ScrollText,
+    href: '/events',
+    description: 'Normalized event logs',
+  },
+  {
     title: 'Rules',
     icon: ShieldAlert,
     href: '/rules',
     description: 'Detection rules',
+  },
+  {
+    title: '이벤트 파이프라인',
+    icon: GitMerge,
+    href: '/pipeline',
+    description: 'Event classification pipeline',
   },
 ];
 

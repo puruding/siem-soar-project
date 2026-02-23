@@ -18,6 +18,11 @@ export interface Asset {
   lastSeen?: Date;
   createdAt: Date;
   updatedAt: Date;
+  // Product/data_source relationship
+  dataSourceId?: string;
+  productName?: string;
+  vendorName?: string;
+  parserType?: string;
 }
 
 export interface AssetGroup {

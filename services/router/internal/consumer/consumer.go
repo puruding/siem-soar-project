@@ -4,6 +4,7 @@ package consumer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -212,8 +213,8 @@ func (c *Consumer) processBatch(records []*kgo.Record) {
 	var dlqRecords []*kgo.Record
 
 	for _, record := range records {
-		var event routing.Event
-		if err := json.Unmarshal(record.Value, &event); err != nil {
+		event, err := c.parseEvent(record.Value)
+		if err != nil {
 			c.logger.Warn("failed to unmarshal event", "error", err)
 			c.routeErrors.Add(1)
 
@@ -232,7 +233,7 @@ func (c *Consumer) processBatch(records []*kgo.Record) {
 		}
 
 		// Route the event
-		result := c.router.Route(c.ctx, &event)
+		result := c.router.Route(c.ctx, event)
 		if result.Error != "" {
 			c.logger.Warn("routing failed",
 				"event_id", event.ID,
@@ -275,4 +276,57 @@ func (c *Consumer) processBatch(records []*kgo.Record) {
 	if err := c.client.CommitRecords(c.ctx, records...); err != nil {
 		c.logger.Error("failed to commit offsets", "error", err)
 	}
+}
+
+// ParsedEvent represents a parsed log event from Parser service.
+type ParsedEvent struct {
+	EventID      string                 `json:"event_id"`
+	TenantID     string                 `json:"tenant_id"`
+	Timestamp    time.Time              `json:"timestamp"`
+	SourceType   string                 `json:"source_type"`
+	Format       string                 `json:"format"`
+	Fields       map[string]interface{} `json:"fields"`
+	RawLog       string                 `json:"raw_log"`
+	ParseSuccess bool                   `json:"parse_success"`
+}
+
+// parseEvent tries to parse the message as routing.Event or ParsedEvent
+func (c *Consumer) parseEvent(data []byte) (*routing.Event, error) {
+	// First try routing.Event format
+	var event routing.Event
+	if err := json.Unmarshal(data, &event); err == nil && event.ID != "" {
+		return &event, nil
+	}
+
+	// Try ParsedEvent format (from Parser service)
+	var parsed ParsedEvent
+	if err := json.Unmarshal(data, &parsed); err == nil && parsed.EventID != "" {
+		// Convert ParsedEvent to routing.Event
+		event := &routing.Event{
+			ID:         parsed.EventID,
+			TenantID:   parsed.TenantID,
+			Timestamp:  parsed.Timestamp,
+			SourceType: parsed.SourceType,
+			Fields:     parsed.Fields,
+			RawData:    []byte(parsed.RawLog),
+		}
+
+		// Extract event_type from fields or use default
+		if et, ok := parsed.Fields["event_type"].(string); ok {
+			event.EventType = et
+		} else {
+			event.EventType = "GENERIC_EVENT"
+		}
+
+		// Extract severity from fields or use default
+		if sev, ok := parsed.Fields["severity"].(string); ok {
+			event.Severity = sev
+		} else {
+			event.Severity = "UNKNOWN"
+		}
+
+		return event, nil
+	}
+
+	return nil, fmt.Errorf("unable to parse event: unknown format")
 }

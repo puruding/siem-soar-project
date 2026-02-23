@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus 자체 메트릭
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Go Services (각 서비스의 메인 포트에서 /metrics 노출)
+  - job_name: 'siem-go-services'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+          - 'gateway:8080'      # API Gateway
+          - 'detection:8081'    # Detection Engine
+          - 'soar:8082'         # SOAR Engine
+          - 'ti:8083'           # Threat Intelligence
+          - 'query:8084'        # Query Service
+          - 'case:8085'         # Case Management
+          - 'collector:8086'    # Log Collector
+          - 'pipeline:8087'     # Data Pipeline
+          - 'parser:8088'       # Parser Engine
+        labels:
+          group: 'go-services'
+
+  # Python AI Services (각 서비스의 메인 포트에서 /metrics 노출)
+  - job_name: 'siem-ai-services'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+          - 'ml-gateway:8080'   # ML Gateway
+          - 'copilot:8001'      # Copilot Service
+        labels:
+          group: 'ai-services'
+
+  # OTel Collector 메트릭
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8888']
+
+  # Infrastructure
+  - job_name: 'jaeger'
+    static_configs:
+      - targets: ['jaeger:14269']

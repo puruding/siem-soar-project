@@ -31,7 +31,14 @@ RUN pip install --no-cache-dir --target=/app/deps \
     langchain-core>=0.1.0 \
     transformers>=4.37.0 \
     numpy>=1.26.0 \
-    scikit-learn>=1.4.0
+    scikit-learn>=1.4.0 \
+    opentelemetry-api \
+    opentelemetry-sdk \
+    opentelemetry-instrumentation-fastapi \
+    opentelemetry-exporter-otlp \
+    opentelemetry-exporter-prometheus \
+    opentelemetry-propagator-b3 \
+    prometheus-client
 
 
 # Production stage

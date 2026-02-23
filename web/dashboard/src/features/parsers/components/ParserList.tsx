@@ -27,7 +27,8 @@ export function ParserList({ parsers, selectedParser, onSelect, onCreate }: Pars
 
   const filteredParsers = parsers.filter((parser) =>
     parser.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    parser.productId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    parser.productName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    parser.vendorName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     parser.format.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -107,6 +108,11 @@ export function ParserList({ parsers, selectedParser, onSelect, onCreate }: Pars
                           {parser.name}
                         </span>
                       </div>
+                      {parser.productName && (
+                        <div className="text-2xs text-muted-foreground truncate mb-1">
+                          {parser.vendorName ? `${parser.vendorName} / ` : ''}{parser.productName}
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 flex-wrap">
                         <FormatBadge format={parser.format} />
                         <Badge

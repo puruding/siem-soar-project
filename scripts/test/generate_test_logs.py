@@ -307,7 +307,7 @@ def send_logs(
     dry_run: bool = False
 ) -> dict:
     """
-    Kafka topic 'logs.raw' 로 로그 전송.
+    Kafka topic 'logs.parsed' 로 로그 전송.
     각 로그는 개별 Kafka 메시지로 전송됨.
     """
     if dry_run:

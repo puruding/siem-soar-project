@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import type { WSMessage } from '../types/execution.types';
-import { mockWebSocketService } from '../services/mockWebSocketService';
+import { webSocketService } from '../services/webSocketService';
 import { useExecutionStore } from '../stores/executionStore';
 
 export interface UseExecutionWebSocketReturn {
@@ -43,8 +43,11 @@ export function useExecutionWebSocket({
     }
 
     try {
+      // Ensure WebSocket is connected
+      webSocketService.connect();
+
       // Subscribe to WebSocket messages
-      const unsubscribe = mockWebSocketService.onMessage((message: WSMessage) => {
+      const unsubscribe = webSocketService.onMessage((message: WSMessage) => {
         // Only handle messages for this execution
         if (message.executionId === executionId) {
           handleWSMessage(message);

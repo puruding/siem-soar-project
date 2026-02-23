@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import {
   Sheet,
   SheetContent,
@@ -10,10 +11,11 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Edit, Trash2, Copy, ExternalLink } from 'lucide-react';
+import { Edit, Trash2, Copy, ExternalLink, FileCode2, ChevronRight } from 'lucide-react';
 import { cn, formatTimestamp, formatRelativeTime } from '@/lib/utils';
 import type { Asset } from '../types';
 import { AssetTypeIcon, getAssetTypeLabel } from './AssetTypeIcon';
+import { useProductParsers } from '@/features/parsers/hooks/useParsers';
 
 interface AssetDetailProps {
   asset: Asset | null;
@@ -65,6 +67,15 @@ function CopyButton({ value }: { value: string }) {
   );
 }
 
+const formatColors: Record<string, string> = {
+  grok: 'bg-neon-cyan/10 text-neon-cyan border-neon-cyan/30',
+  json: 'bg-neon-green/10 text-neon-green border-neon-green/30',
+  regex: 'bg-neon-orange/10 text-neon-orange border-neon-orange/30',
+  cef: 'bg-neon-pink/10 text-neon-pink border-neon-pink/30',
+  leef: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
+  kv: 'bg-neon-blue/10 text-neon-blue border-neon-blue/30',
+};
+
 export function AssetDetail({
   asset,
   open,
@@ -72,6 +83,15 @@ export function AssetDetail({
   onEdit,
   onDelete,
 }: AssetDetailProps) {
+  const navigate = useNavigate();
+  // Fetch parsers for this asset's product
+  const { parsers, isLoading: parsersLoading } = useProductParsers(asset?.dataSourceId || '');
+
+  const handleParserClick = (parserId: string) => {
+    onClose(); // Close the sheet first
+    navigate(`/parsers?id=${parserId}`);
+  };
+
   if (!asset) return null;
 
   return (
@@ -127,6 +147,62 @@ export function AssetDetail({
                   <InfoRow label="Department" value={asset.department} />
                 </div>
                 <InfoRow label="Location" value={asset.location} />
+              </div>
+
+              <Separator />
+
+              {/* Product Information */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium">Product</h4>
+                {asset.productName ? (
+                  <div className="p-3 bg-muted/50 rounded-lg space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Vendor:</span>
+                      <span className="text-sm font-medium">{asset.vendorName}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Product:</span>
+                      <span className="text-sm font-mono">{asset.productName}</span>
+                    </div>
+
+                    {/* Parsers from Product */}
+                    <div className="pt-2 border-t border-border/50">
+                      <div className="flex items-center gap-2 mb-2">
+                        <FileCode2 className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">Parsers ({parsers.length})</span>
+                      </div>
+                      {parsersLoading ? (
+                        <span className="text-xs text-muted-foreground">Loading...</span>
+                      ) : parsers.length > 0 ? (
+                        <div className="space-y-2">
+                          {parsers.map((parser) => (
+                            <button
+                              key={parser.id}
+                              onClick={() => handleParserClick(parser.id)}
+                              className="w-full flex items-center gap-2 p-2 bg-surface-dark/50 rounded hover:bg-surface-dark transition-colors cursor-pointer group"
+                            >
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  'text-xs',
+                                  formatColors[parser.format] || formatColors.grok
+                                )}
+                              >
+                                {parser.format.toUpperCase()}
+                              </Badge>
+                              <span className="text-sm font-mono truncate flex-1 text-left">{parser.name}</span>
+                              <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">No parsers configured</span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <span className="text-sm text-muted-foreground">No product assigned</span>
+                )}
               </div>
 
               <Separator />

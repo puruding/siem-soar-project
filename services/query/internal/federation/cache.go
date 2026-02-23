@@ -175,11 +175,17 @@ func (c *Cache) removeExpired() {
 	c.stats.mu.Unlock()
 }
 
-// GetStats returns cache statistics.
+// GetStats returns a copy of cache statistics.
 func (c *Cache) GetStats() CacheStats {
 	c.stats.mu.Lock()
 	defer c.stats.mu.Unlock()
-	return c.stats
+	// Return a copy without the mutex
+	return CacheStats{
+		Hits:      c.stats.Hits,
+		Misses:    c.stats.Misses,
+		Evictions: c.stats.Evictions,
+		Size:      c.stats.Size,
+	}
 }
 
 // SetMaxSize sets the maximum cache size.

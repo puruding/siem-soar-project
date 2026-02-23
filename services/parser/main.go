@@ -11,10 +11,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/siem-soar-platform/pkg/observability"
 	"github.com/siem-soar-platform/services/parser/internal/config"
 	"github.com/siem-soar-platform/services/parser/internal/consumer"
 	"github.com/siem-soar-platform/services/parser/internal/engine"
 	"github.com/siem-soar-platform/services/parser/internal/hotreload"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type App struct {
@@ -32,6 +34,18 @@ func main() {
 		Level: logLevel,
 	}))
 	slog.SetDefault(logger)
+
+	// Initialize OpenTelemetry
+	serviceName := "parser"
+	ctx := context.Background()
+	otelCfg := observability.DefaultConfig(serviceName)
+	otelProvider, err := observability.Init(ctx, otelCfg)
+	if err != nil {
+		slog.Warn("failed to initialize OpenTelemetry", "error", err)
+	}
+	if otelProvider != nil {
+		defer otelProvider.Shutdown(ctx)
+	}
 
 	// Load configuration
 	cfg := config.Load()
@@ -77,6 +91,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", app.healthHandler)
 	mux.HandleFunc("GET /ready", app.readyHandler)
+	mux.Handle("GET /metrics", observability.MetricsHandler())
 	mux.HandleFunc("POST /api/v1/parse", app.parseHandler)
 	mux.HandleFunc("POST /api/v1/parse/batch", app.batchParseHandler)
 	mux.HandleFunc("GET /api/v1/patterns", app.listPatternsHandler)
@@ -90,7 +105,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      mux,
+		Handler:      otelhttp.NewHandler(mux, serviceName),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,

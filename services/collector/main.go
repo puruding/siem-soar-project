@@ -14,8 +14,12 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
+	"github.com/google/uuid"
+	"github.com/siem-soar-platform/pkg/observability"
+	"github.com/siem-soar-platform/pkg/schema"
 	"github.com/siem-soar-platform/services/collector/internal/poller"
 	"github.com/siem-soar-platform/services/collector/internal/receiver"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const serviceName = "collector"
@@ -65,7 +69,7 @@ func loadAppConfig() appConfig {
 
 	topic := os.Getenv("KAFKA_TOPIC")
 	if topic == "" {
-		topic = "logs.raw"
+		topic = "raw-logs"
 	}
 
 	// Syslog ports
@@ -178,29 +182,20 @@ func sendToKafka(
 	stats *kafkaStats,
 	logger *slog.Logger,
 ) error {
-	// Build envelope metadata
-	type envelope struct {
-		TenantID    string          `json:"tenant_id"`
-		SourceType  string          `json:"source_type"`
-		ContentType string          `json:"content_type"`
-		RemoteAddr  string          `json:"remote_addr"`
-		ReceivedAt  string          `json:"received_at"`
-		Payload     json.RawMessage `json:"payload"`
-	}
-
 	sendOne := func(payload json.RawMessage) error {
-		env := envelope{
-			TenantID:    msg.TenantID,
-			SourceType:  msg.SourceType,
-			ContentType: msg.ContentType,
-			RemoteAddr:  msg.RemoteAddr,
-			ReceivedAt:  msg.ReceivedAt.UTC().Format(time.RFC3339Nano),
-			Payload:     payload,
-		}
+		rawLog := schema.NewRawLogMessage(
+			uuid.New().String(),
+			msg.TenantID,
+			msg.SourceType,
+			msg.ReceivedAt,
+			payload,
+		)
+		rawLog.AddMetadata("content_type", msg.ContentType)
+		rawLog.AddMetadata("remote_addr", msg.RemoteAddr)
 
-		data, err := json.Marshal(env)
+		data, err := json.Marshal(rawLog)
 		if err != nil {
-			return fmt.Errorf("marshal envelope: %w", err)
+			return fmt.Errorf("marshal raw log message: %w", err)
 		}
 
 		kafkaMsg := &sarama.ProducerMessage{
@@ -208,9 +203,9 @@ func sendToKafka(
 			Key:   sarama.StringEncoder(msg.TenantID),
 			Value: sarama.ByteEncoder(data),
 			Headers: []sarama.RecordHeader{
+				{Key: []byte("event_id"), Value: []byte(rawLog.EventID)},
 				{Key: []byte("tenant_id"), Value: []byte(msg.TenantID)},
 				{Key: []byte("source_type"), Value: []byte(msg.SourceType)},
-				{Key: []byte("content_type"), Value: []byte(msg.ContentType)},
 			},
 		}
 
@@ -287,10 +282,8 @@ func sendSyslogToKafka(
 	stats *kafkaStats,
 	logger *slog.Logger,
 ) error {
-	type syslogEnvelope struct {
-		SourceType  string                       `json:"source_type"`
-		ReceivedAt  string                       `json:"received_at"`
-		Timestamp   string                       `json:"timestamp"`
+	type syslogData struct {
+		Timestamp   time.Time                    `json:"timestamp"`
 		Hostname    string                       `json:"hostname"`
 		AppName     string                       `json:"app_name"`
 		ProcID      string                       `json:"proc_id"`
@@ -308,10 +301,8 @@ func sendSyslogToKafka(
 		StructData  map[string]map[string]string `json:"struct_data,omitempty"`
 	}
 
-	env := syslogEnvelope{
-		SourceType: "syslog",
-		ReceivedAt: msg.ReceivedAt.UTC().Format(time.RFC3339Nano),
-		Timestamp:  msg.Timestamp.UTC().Format(time.RFC3339Nano),
+	syslogPayload := syslogData{
+		Timestamp:  msg.Timestamp,
 		Hostname:   msg.Hostname,
 		AppName:    msg.AppName,
 		ProcID:     msg.ProcID,
@@ -329,25 +320,40 @@ func sendSyslogToKafka(
 		StructData: msg.StructData,
 	}
 
-	data, err := json.Marshal(env)
+	payloadJSON, err := json.Marshal(syslogPayload)
 	if err != nil {
-		return fmt.Errorf("marshal syslog envelope: %w", err)
+		return fmt.Errorf("marshal syslog payload: %w", err)
 	}
 
-	// Use hostname as the partition key (falls back to source IP when empty)
-	partitionKey := msg.Hostname
-	if partitionKey == "" {
-		partitionKey = msg.SourceIP
+	// Use hostname as tenant ID (falls back to source IP when empty)
+	tenantID := msg.Hostname
+	if tenantID == "" {
+		tenantID = msg.SourceIP
+	}
+
+	rawLog := schema.NewRawLogMessage(
+		uuid.New().String(),
+		tenantID,
+		"syslog",
+		msg.ReceivedAt,
+		payloadJSON,
+	)
+	rawLog.AddMetadata("protocol", msg.Protocol)
+	rawLog.AddMetadata("rfc", msg.RFC)
+
+	data, err := json.Marshal(rawLog)
+	if err != nil {
+		return fmt.Errorf("marshal raw log message: %w", err)
 	}
 
 	kafkaMsg := &sarama.ProducerMessage{
 		Topic: topic,
-		Key:   sarama.StringEncoder(partitionKey),
+		Key:   sarama.StringEncoder(tenantID),
 		Value: sarama.ByteEncoder(data),
 		Headers: []sarama.RecordHeader{
+			{Key: []byte("event_id"), Value: []byte(rawLog.EventID)},
+			{Key: []byte("tenant_id"), Value: []byte(tenantID)},
 			{Key: []byte("source_type"), Value: []byte("syslog")},
-			{Key: []byte("protocol"), Value: []byte(msg.Protocol)},
-			{Key: []byte("rfc"), Value: []byte(msg.RFC)},
 		},
 	}
 
@@ -413,56 +419,66 @@ func forwardKafkaMessage(
 	stats *kafkaStats,
 	logger *slog.Logger,
 ) error {
-	type kafkaEnvelope struct {
-		SourceType  string            `json:"source_type"`
+	type kafkaData struct {
 		SourceTopic string            `json:"source_topic"`
 		Partition   int32             `json:"partition"`
 		Offset      int64             `json:"offset"`
 		Key         string            `json:"key"`
 		Value       string            `json:"value"`
 		Headers     map[string]string `json:"headers,omitempty"`
-		Timestamp   string            `json:"timestamp"`
-		ReceivedAt  string            `json:"received_at"`
+		Timestamp   time.Time         `json:"timestamp"`
 	}
 
-	env := kafkaEnvelope{
-		SourceType:  "kafka",
+	kafkaPayload := kafkaData{
 		SourceTopic: msg.Topic,
 		Partition:   msg.Partition,
 		Offset:      msg.Offset,
 		Key:         string(msg.Key),
 		Value:       string(msg.Value),
 		Headers:     msg.Headers,
-		Timestamp:   msg.Timestamp.UTC().Format(time.RFC3339Nano),
-		ReceivedAt:  msg.ReceivedAt.UTC().Format(time.RFC3339Nano),
+		Timestamp:   msg.Timestamp,
 	}
 
-	data, err := json.Marshal(env)
+	payloadJSON, err := json.Marshal(kafkaPayload)
 	if err != nil {
-		return fmt.Errorf("marshal kafka envelope: %w", err)
+		return fmt.Errorf("marshal kafka payload: %w", err)
 	}
 
 	// Preserve the original key if present; otherwise fall back to source topic.
-	partitionKey := string(msg.Key)
-	if partitionKey == "" {
-		partitionKey = msg.Topic
+	tenantID := string(msg.Key)
+	if tenantID == "" {
+		tenantID = msg.Topic
+	}
+
+	rawLog := schema.NewRawLogMessage(
+		uuid.New().String(),
+		tenantID,
+		"kafka",
+		msg.ReceivedAt,
+		payloadJSON,
+	)
+	rawLog.AddMetadata("source_topic", msg.Topic)
+
+	// Carry over original headers to metadata
+	for k, v := range msg.Headers {
+		rawLog.AddMetadata(k, v)
+	}
+
+	data, err := json.Marshal(rawLog)
+	if err != nil {
+		return fmt.Errorf("marshal raw log message: %w", err)
 	}
 
 	headers := []sarama.RecordHeader{
+		{Key: []byte("event_id"), Value: []byte(rawLog.EventID)},
+		{Key: []byte("tenant_id"), Value: []byte(tenantID)},
 		{Key: []byte("source_type"), Value: []byte("kafka")},
 		{Key: []byte("source_topic"), Value: []byte(msg.Topic)},
-	}
-	// Carry over original headers
-	for k, v := range msg.Headers {
-		headers = append(headers, sarama.RecordHeader{
-			Key:   []byte(k),
-			Value: []byte(v),
-		})
 	}
 
 	kafkaMsg := &sarama.ProducerMessage{
 		Topic:   topic,
-		Key:     sarama.StringEncoder(partitionKey),
+		Key:     sarama.StringEncoder(tenantID),
 		Value:   sarama.ByteEncoder(data),
 		Headers: headers,
 	}
@@ -495,15 +511,6 @@ func processAPIEvents(
 ) {
 	logger.Info("API poller event processor started", "topic", topic)
 
-	type apiEnvelope struct {
-		SourceName string          `json:"source_name"`
-		SourceType string          `json:"source_type"`
-		TenantID   string          `json:"tenant_id"`
-		Timestamp  string          `json:"timestamp"`
-		ReceivedAt string          `json:"received_at"`
-		Payload    json.RawMessage `json:"payload"`
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -516,18 +523,23 @@ func processAPIEvents(
 				return
 			}
 
-			env := apiEnvelope{
-				SourceName: event.SourceName,
-				SourceType: event.SourceType,
-				TenantID:   event.TenantID,
-				Timestamp:  event.Timestamp.UTC().Format(time.RFC3339Nano),
-				ReceivedAt: event.ReceivedAt.UTC().Format(time.RFC3339Nano),
-				Payload:    event.Data,
+			tenantID := event.TenantID
+			if tenantID == "" {
+				tenantID = event.SourceName
 			}
 
-			data, err := json.Marshal(env)
+			rawLog := schema.NewRawLogMessage(
+				uuid.New().String(),
+				tenantID,
+				event.SourceType,
+				event.Timestamp,
+				event.Data,
+			)
+			rawLog.AddMetadata("source_name", event.SourceName)
+
+			data, err := json.Marshal(rawLog)
 			if err != nil {
-				logger.Error("failed to marshal API event envelope",
+				logger.Error("failed to marshal raw log message",
 					"error", err,
 					"source_name", event.SourceName,
 				)
@@ -535,19 +547,15 @@ func processAPIEvents(
 				continue
 			}
 
-			partitionKey := event.TenantID
-			if partitionKey == "" {
-				partitionKey = event.SourceName
-			}
-
 			kafkaMsg := &sarama.ProducerMessage{
 				Topic: topic,
-				Key:   sarama.StringEncoder(partitionKey),
+				Key:   sarama.StringEncoder(tenantID),
 				Value: sarama.ByteEncoder(data),
 				Headers: []sarama.RecordHeader{
+					{Key: []byte("event_id"), Value: []byte(rawLog.EventID)},
+					{Key: []byte("tenant_id"), Value: []byte(tenantID)},
 					{Key: []byte("source_type"), Value: []byte(event.SourceType)},
 					{Key: []byte("source_name"), Value: []byte(event.SourceName)},
-					{Key: []byte("tenant_id"), Value: []byte(event.TenantID)},
 				},
 			}
 
@@ -556,7 +564,7 @@ func processAPIEvents(
 				logger.Error("failed to send API event to kafka",
 					"error", err,
 					"source_name", event.SourceName,
-					"tenant_id", event.TenantID,
+					"tenant_id", tenantID,
 				)
 				stats.produceErrors.Add(1)
 				continue
@@ -568,7 +576,7 @@ func processAPIEvents(
 			logger.Debug("API event forwarded to kafka",
 				"source_name", event.SourceName,
 				"source_type", event.SourceType,
-				"tenant_id", event.TenantID,
+				"tenant_id", tenantID,
 			)
 		}
 	}
@@ -584,17 +592,6 @@ func processS3Events(
 	logger *slog.Logger,
 ) {
 	logger.Info("S3 poller event processor started", "topic", topic)
-
-	type s3Envelope struct {
-		SourceName string          `json:"source_name"`
-		SourceType string          `json:"source_type"`
-		TenantID   string          `json:"tenant_id"`
-		Bucket     string          `json:"bucket"`
-		Key        string          `json:"key"`
-		Timestamp  string          `json:"timestamp"`
-		ReceivedAt string          `json:"received_at"`
-		Payload    json.RawMessage `json:"payload"`
-	}
 
 	for {
 		select {
@@ -619,20 +616,25 @@ func processS3Events(
 				payload = quoted
 			}
 
-			env := s3Envelope{
-				SourceName: event.SourceName,
-				SourceType: event.SourceType,
-				TenantID:   event.TenantID,
-				Bucket:     event.Bucket,
-				Key:        event.Key,
-				Timestamp:  event.Timestamp.UTC().Format(time.RFC3339Nano),
-				ReceivedAt: event.ReceivedAt.UTC().Format(time.RFC3339Nano),
-				Payload:    payload,
+			tenantID := event.TenantID
+			if tenantID == "" {
+				tenantID = event.Bucket
 			}
 
-			data, err := json.Marshal(env)
+			rawLog := schema.NewRawLogMessage(
+				uuid.New().String(),
+				tenantID,
+				event.SourceType,
+				event.Timestamp,
+				payload,
+			)
+			rawLog.AddMetadata("source_name", event.SourceName)
+			rawLog.AddMetadata("s3_bucket", event.Bucket)
+			rawLog.AddMetadata("s3_key", event.Key)
+
+			data, err := json.Marshal(rawLog)
 			if err != nil {
-				logger.Error("failed to marshal S3 event envelope",
+				logger.Error("failed to marshal raw log message",
 					"error", err,
 					"source_name", event.SourceName,
 					"bucket", event.Bucket,
@@ -642,19 +644,15 @@ func processS3Events(
 				continue
 			}
 
-			partitionKey := event.TenantID
-			if partitionKey == "" {
-				partitionKey = event.Bucket
-			}
-
 			kafkaMsg := &sarama.ProducerMessage{
 				Topic: topic,
-				Key:   sarama.StringEncoder(partitionKey),
+				Key:   sarama.StringEncoder(tenantID),
 				Value: sarama.ByteEncoder(data),
 				Headers: []sarama.RecordHeader{
+					{Key: []byte("event_id"), Value: []byte(rawLog.EventID)},
+					{Key: []byte("tenant_id"), Value: []byte(tenantID)},
 					{Key: []byte("source_type"), Value: []byte(event.SourceType)},
 					{Key: []byte("source_name"), Value: []byte(event.SourceName)},
-					{Key: []byte("tenant_id"), Value: []byte(event.TenantID)},
 					{Key: []byte("s3_bucket"), Value: []byte(event.Bucket)},
 					{Key: []byte("s3_key"), Value: []byte(event.Key)},
 				},
@@ -721,6 +719,17 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
+
+	// Initialize OpenTelemetry
+	ctx := context.Background()
+	otelCfg := observability.DefaultConfig(serviceName)
+	otelProvider, err := observability.Init(ctx, otelCfg)
+	if err != nil {
+		slog.Warn("failed to initialize OpenTelemetry", "error", err)
+	}
+	if otelProvider != nil {
+		defer otelProvider.Shutdown(ctx)
+	}
 
 	cfg := loadAppConfig()
 
@@ -871,6 +880,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, `{"status":"ready","service":"%s"}`, serviceName)
 	})
+
+	mux.Handle("GET /metrics", observability.MetricsHandler())
 
 	mux.HandleFunc("GET /api/v1/sources", listSourcesHandler)
 	mux.HandleFunc("POST /api/v1/sources", createSourceHandler)
@@ -1026,7 +1037,7 @@ func main() {
 
 	mgmtServer := &http.Server{
 		Addr:         ":" + cfg.managementPort,
-		Handler:      mux,
+		Handler:      otelhttp.NewHandler(mux, serviceName),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,

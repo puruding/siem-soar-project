@@ -147,11 +147,17 @@ const (
 
 func (o *Optimizer) registerDefaultRules() {
 	// Rule: Convert UNION to UNION ALL where possible
+	// Note: Using simple pattern since Go regexp doesn't support negative lookahead
 	o.rules = append(o.rules, OptimizationRule{
 		Name:        "union_all",
 		Description: "Converted UNION to UNION ALL (eliminates deduplication)",
-		Pattern:     regexp.MustCompile(`(?i)\bUNION\s+(?!ALL)`),
+		Pattern:     regexp.MustCompile(`(?i)\bUNION\s+`),
 		Apply: func(query string) string {
+			// Check if already UNION ALL, skip if so
+			upperQuery := strings.ToUpper(query)
+			if strings.Contains(upperQuery, "UNION ALL") {
+				return query
+			}
 			// Only convert if safe (no duplicates expected)
 			// This is a simplified version; production would be more sophisticated
 			return query

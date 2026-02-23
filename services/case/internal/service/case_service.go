@@ -14,12 +14,12 @@ import (
 
 // CaseService provides case management operations.
 type CaseService struct {
-	repo            *repository.CaseRepository
+	repo            repository.Repository
 	timelineService *timeline.TimelineService
 }
 
 // NewCaseService creates a new case service.
-func NewCaseService(repo *repository.CaseRepository, timelineService *timeline.TimelineService) *CaseService {
+func NewCaseService(repo repository.Repository, timelineService *timeline.TimelineService) *CaseService {
 	return &CaseService{
 		repo:            repo,
 		timelineService: timelineService,
