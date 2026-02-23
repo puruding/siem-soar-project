@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/siem-soar-platform/pkg/observability"
+	_ "github.com/siem-soar-platform/services/detection/internal/mlgateway" // Import to register Prometheus metrics
 	"github.com/siem-soar-platform/services/detection/internal/config"
 	"github.com/siem-soar-platform/services/detection/internal/consumer"
 	"github.com/siem-soar-platform/services/detection/internal/engine"

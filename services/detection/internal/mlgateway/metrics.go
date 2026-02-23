@@ -247,3 +247,11 @@ func RecordCacheHit() {
 func RecordCacheMiss() {
 	mlCacheRequestsTotal.Inc()
 }
+
+// init initializes metrics with default values to ensure they appear in Prometheus.
+func init() {
+	// Initialize circuit breaker state to closed (0) for ml-gateway
+	circuitBreakerState.WithLabelValues("ml-gateway").Set(0)
+	// Initialize opens counter to 0
+	circuitBreakerOpensTotal.WithLabelValues("ml-gateway")
+}
